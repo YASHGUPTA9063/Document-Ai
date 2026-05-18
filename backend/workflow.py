@@ -1,0 +1,84 @@
+import logging
+import mistralai.workflows as workflows
+from datetime import timedelta
+from backend.activities.intake import intake_activity
+from backend.activities.classifier import classifier_activity
+from backend.activities.extractor import extractor_activity
+from backend.activities.validator import validator_activity
+from backend.activities.reviewer import reviewer_activity
+from backend.activities.output import output_activity
+import backend.db.operations as db
+from backend.schemas.documents import DuplicateDecisionRequest, ReviewerDecisionRequest
+
+logger = logging.getLogger(__name__)
+
+@workflows.workflow.define(name="document_processing_workflow")
+class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
+
+    @workflows.workflow.run()
+    async def run(self, document_id: str, filename: str, file_path: str):
+        logger.info(f"Starting workflow for document {document_id}")
+        
+        # Step 1 — Intake
+        await db.update_status(document_id, "processing")
+        intake_result = await intake_activity(document_id, filename)
+
+        if intake_result.get("is_duplicate"):
+            # Pause — wait for user duplicate override decision
+            logger.info(f"[Document {document_id}] Pausing for duplicate check override")
+            duplicate_decision = await self.wait_for_input(DuplicateDecisionRequest, timeout=timedelta(hours=24))
+            
+            if not duplicate_decision.override:
+                await db.update_status(document_id, "rejected")
+                return {"status": "rejected", "reason": "duplicate_not_overridden"}
+
+        # Step 2 — Classify
+        classifier_result = await classifier_activity(document_id, file_path)
+        doc_type = classifier_result["doc_type"]
+        await db.update_doc_type(document_id, doc_type)
+
+        # Step 3 — Extract
+        extractor_result = await extractor_activity(document_id, file_path, doc_type)
+
+        # Step 4 — Validate
+        validator_result = await validator_activity(
+            document_id=document_id, 
+            extracted_data=extractor_result["fields"], 
+            doc_type=doc_type, 
+            ocr_confidence=extractor_result["confidence"]
+        )
+
+        # Step 5 — Review
+        await db.update_status(document_id, "awaiting_review")
+        reviewer_result = await reviewer_activity(
+            document_id=document_id, 
+            validated_data=validator_result["validated_data"], 
+            confidence_score=validator_result["confidence_score"]
+        )
+
+        if reviewer_result.get("auto_approved"):
+            final_reviewer_result = {"approved": True, "corrections": None}
+        else:
+            logger.info(f"[Document {document_id}] Pausing for human review. Score < 80%")
+            # Pause workflow using Mistral Workflow SDK Interactive Workflow primitives
+            human_decision = await self.wait_for_input(ReviewerDecisionRequest, timeout=timedelta(hours=24))
+            final_reviewer_result = {
+                "approved": human_decision.approved,
+                "corrections": human_decision.corrections
+            }
+
+        if not final_reviewer_result.get("approved"):
+            await db.update_status(document_id, "rejected")
+            return {"status": "rejected", "reason": "reviewer_rejected"}
+
+        # Step 6 — Output
+        output_result = await output_activity(
+            document_id=document_id, 
+            doc_type=doc_type, 
+            validated_data=validator_result["validated_data"], 
+            reviewer_result=final_reviewer_result, 
+            confidence_score=validator_result["confidence_score"]
+        )
+        
+        logger.info(f"Completed workflow for document {document_id}")
+        return output_result

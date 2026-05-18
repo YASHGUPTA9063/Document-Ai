@@ -1,0 +1,32 @@
+import os
+import base64
+import aiofiles
+from fastapi import UploadFile
+
+async def save_file(file: UploadFile, storage_dir: str) -> str:
+    """Saves an uploaded file to the storage directory and returns absolute path."""
+    os.makedirs(storage_dir, exist_ok=True)
+    file_path = os.path.join(storage_dir, file.filename)
+    
+    async with aiofiles.open(file_path, 'wb') as out_file:
+        content = await file.read()
+        await out_file.write(content)
+        
+    return os.path.abspath(file_path)
+
+def get_file_as_base64(file_path: str) -> str:
+    """Reads file and returns base64 string."""
+    with open(file_path, "rb") as f:
+        encoded_string = base64.b64encode(f.read()).decode('utf-8')
+    return encoded_string
+
+def delete_file(file_path: str):
+    """Removes file from disk if it exists."""
+    if os.path.exists(file_path):
+        os.remove(file_path)
+
+def list_stored_filenames(storage_dir: str) -> list[str]:
+    """Returns all filenames currently in the storage directory."""
+    if not os.path.exists(storage_dir):
+        return []
+    return os.listdir(storage_dir)
