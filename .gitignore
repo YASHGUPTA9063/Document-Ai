@@ -1,0 +1,19 @@
+# Windows thumbnail cache files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Folder config file
+Desktop.ini
+
+# Mac OS X folder settings
+.DS_Store
+
+# IDE and local editor settings
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
