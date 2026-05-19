@@ -1,26 +1,39 @@
 import logging
 import mistralai.workflows as workflows
 from datetime import timedelta
-from backend.activities.intake import intake_activity
-from backend.activities.classifier import classifier_activity
-from backend.activities.extractor import extractor_activity
-from backend.activities.validator import validator_activity
-from backend.activities.reviewer import reviewer_activity
-from backend.activities.output import output_activity
-import backend.db.operations as db
-from backend.schemas.documents import DuplicateDecisionRequest, ReviewerDecisionRequest
+with workflows.workflow.unsafe.imports_passed_through():
+    from activities.intake import intake_activity
+    from activities.classifier import classifier_activity
+    from activities.extractor import extractor_activity
+    from activities.validator import validator_activity
+    from activities.reviewer import reviewer_activity
+    from activities.output import output_activity
+    import db.operations as db
+    from schemas.documents import DuplicateDecisionRequest, ReviewerDecisionRequest
 
 logger = logging.getLogger(__name__)
+
+@workflows.activity()
+async def update_status_activity(document_id: str, status: str) -> str:
+    import db.operations as db
+    await db.update_status(document_id, status)
+    return status
+
+@workflows.activity()
+async def update_doc_type_activity(document_id: str, doc_type: str) -> str:
+    import db.operations as db
+    await db.update_doc_type(document_id, doc_type)
+    return doc_type
 
 @workflows.workflow.define(name="document_processing_workflow")
 class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
 
-    @workflows.workflow.run()
-    async def run(self, document_id: str, filename: str, file_path: str):
+    @workflows.workflow.entrypoint
+    async def run(self, document_id: str, filename: str, file_path: str) -> dict:
         logger.info(f"Starting workflow for document {document_id}")
         
         # Step 1 — Intake
-        await db.update_status(document_id, "processing")
+        await update_status_activity(document_id, "processing")
         intake_result = await intake_activity(document_id, filename)
 
         if intake_result.get("is_duplicate"):
@@ -29,13 +42,13 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
             duplicate_decision = await self.wait_for_input(DuplicateDecisionRequest, timeout=timedelta(hours=24))
             
             if not duplicate_decision.override:
-                await db.update_status(document_id, "rejected")
+                await update_status_activity(document_id, "rejected")
                 return {"status": "rejected", "reason": "duplicate_not_overridden"}
 
         # Step 2 — Classify
         classifier_result = await classifier_activity(document_id, file_path)
         doc_type = classifier_result["doc_type"]
-        await db.update_doc_type(document_id, doc_type)
+        await update_doc_type_activity(document_id, doc_type)
 
         # Step 3 — Extract
         extractor_result = await extractor_activity(document_id, file_path, doc_type)
@@ -49,7 +62,7 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
         )
 
         # Step 5 — Review
-        await db.update_status(document_id, "awaiting_review")
+        await update_status_activity(document_id, "awaiting_review")
         reviewer_result = await reviewer_activity(
             document_id=document_id, 
             validated_data=validator_result["validated_data"], 
@@ -68,7 +81,7 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
             }
 
         if not final_reviewer_result.get("approved"):
-            await db.update_status(document_id, "rejected")
+            await update_status_activity(document_id, "rejected")
             return {"status": "rejected", "reason": "reviewer_rejected"}
 
         # Step 6 — Output

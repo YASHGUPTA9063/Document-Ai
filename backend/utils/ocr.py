@@ -1,7 +1,7 @@
 import os
-from mistralai import Mistral
-from backend.config import settings
-from backend.utils.file_handler import get_file_as_base64
+from mistralai.client import Mistral
+from config import settings
+from utils.file_handler import get_file_as_base64
 import docx
 
 client = Mistral(api_key=settings.MISTRAL_API_KEY)

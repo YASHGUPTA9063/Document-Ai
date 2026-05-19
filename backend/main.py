@@ -1,4 +1,5 @@
 import os
+os.environ["DEPLOYMENT_NAME"] = "document-processing-workflow"
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query
@@ -6,21 +7,21 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
-from backend.config import settings
-from backend.db.database import init_db, AsyncSessionLocal
-from backend.db.models import Document, ExtractedData
-from backend.utils.file_handler import save_file, delete_file
-from backend.schemas.documents import (
+from config import settings
+from db.database import init_db, AsyncSessionLocal
+from db.models import Document, ExtractedData
+from utils.file_handler import save_file, delete_file
+from schemas.documents import (
     DocumentUploadResponse, 
     WorkflowStatusResponse, 
     DuplicateDecisionRequest, 
     ReviewerDecisionRequest
 )
-from backend.workflow import DocumentProcessingWorkflow
+from workflow import DocumentProcessingWorkflow
 
 import asyncio
 import mistralai.workflows as workflows
-from mistralai import Mistral
+from mistralai.client import Mistral
 
 logging.basicConfig(level=logging.INFO if not settings.DEBUG else logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -47,6 +48,9 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down Mistral Workflow worker...")
     if worker_task:
         worker_task.cancel()
+        import contextlib
+        with contextlib.suppress(asyncio.CancelledError, asyncio.TimeoutError):
+            await asyncio.wait_for(worker_task, timeout=2.0)
 
 app = FastAPI(title="Mistral Document Processing POC", lifespan=lifespan)
 
@@ -86,9 +90,9 @@ async def upload_document(file: UploadFile = File(...)):
         
         # Trigger Workflow asynchronously using mistralai SDK
         # We start the workflow by its registered name
-        run_response = await mistral_client.workflows.run_async(
-            workflow_id="document_processing_workflow",
-            inputs={
+        run_response = await mistral_client.workflows.execute_workflow_async(
+            workflow_identifier="document_processing_workflow",
+            input={
                 "document_id": doc.id,
                 "filename": doc.filename,
                 "file_path": doc.file_path
@@ -133,19 +137,19 @@ async def get_status(document_id: str):
 async def resume_duplicate(workflow_run_id: str, decision: DuplicateDecisionRequest):
     # Depending on SDK specifics, resolving a wait_for_input involves sending an event
     # For now, using standard Mistral Client's event mechanism
-    await mistral_client.workflows.send_event_async(
-        run_id=workflow_run_id,
-        event_name="duplicate_decision",
-        data=decision.model_dump()
+    await mistral_client.workflows.executions.signal_workflow_execution_async(
+        execution_id=workflow_run_id,
+        name="duplicate_decision",
+        input=decision.model_dump()
     )
     return {"message": "Workflow resumed"}
 
 @app.post("/workflow/{workflow_run_id}/resume/review")
 async def resume_review(workflow_run_id: str, decision: ReviewerDecisionRequest):
-    await mistral_client.workflows.send_event_async(
-        run_id=workflow_run_id,
-        event_name="reviewer_decision",
-        data=decision.model_dump()
+    await mistral_client.workflows.executions.signal_workflow_execution_async(
+        execution_id=workflow_run_id,
+        name="reviewer_decision",
+        input=decision.model_dump()
     )
     return {"message": "Workflow resumed"}
 

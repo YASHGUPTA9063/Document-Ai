@@ -1,8 +1,8 @@
 import logging
 import mistralai.workflows as workflows
-import backend.db.operations as db
-from backend.config import settings
-from backend.utils.file_handler import list_stored_filenames
+import db.operations as db
+from config import settings
+from utils.file_handler import list_stored_filenames
 
 logger = logging.getLogger(__name__)
 
@@ -11,8 +11,8 @@ async def intake_activity(document_id: str, filename: str) -> dict:
     try:
         logger.info(f"[Document {document_id}] Starting intake activity for {filename}")
         
-        existing_id = await db.check_duplicate_filename(filename)
-        if existing_id and existing_id != document_id:
+        existing_id = await db.check_duplicate_filename(filename, exclude_id=document_id)
+        if existing_id:
             return {"is_duplicate": True, "existing_document_id": existing_id}
             
         stored_files = list_stored_filenames(settings.STORAGE_DIR)

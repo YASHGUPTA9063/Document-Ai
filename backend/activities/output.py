@@ -1,7 +1,7 @@
 import logging
 import mistralai.workflows as workflows
-from backend.db.database import AsyncSessionLocal
-from backend.db.models import Document, ExtractedData
+from db.database import AsyncSessionLocal
+from db.models import Document, ExtractedData
 from sqlalchemy.future import select
 
 logger = logging.getLogger(__name__)
@@ -52,6 +52,6 @@ async def output_activity(document_id: str, doc_type: str, validated_data: dict,
         }
     except Exception as e:
         logger.error(f"[Document {document_id}] Output failed: {str(e)}")
-        from backend.db.operations import update_error
+        from db.operations import update_error
         await update_error(document_id, {"error": str(e), "stage": "output"})
         raise

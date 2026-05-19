@@ -1,5 +1,5 @@
-from backend.db.database import AsyncSessionLocal
-from backend.db.models import Document, ExtractedData
+from db.database import AsyncSessionLocal
+from db.models import Document, ExtractedData
 from sqlalchemy.future import select
 
 async def update_status(document_id: str, status: str):
@@ -27,11 +27,14 @@ async def update_error(document_id: str, error_details: dict):
             doc.error_details = error_details
             await session.commit()
 
-async def check_duplicate_filename(filename: str) -> str:
+async def check_duplicate_filename(filename: str, exclude_id: str = None) -> str:
     """Returns document_id if duplicate filename exists, else None."""
     async with AsyncSessionLocal() as session:
-        result = await session.execute(select(Document).where(Document.filename == filename))
-        doc = result.scalar_one_or_none()
+        query = select(Document).where(Document.filename == filename)
+        if exclude_id:
+            query = query.where(Document.id != exclude_id)
+        result = await session.execute(query)
+        doc = result.scalars().first()
         if doc:
             return doc.id
     return None

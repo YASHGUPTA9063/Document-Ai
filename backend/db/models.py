@@ -2,7 +2,7 @@ from sqlalchemy import Column, String, Float, JSON, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 import uuid
 from datetime import datetime
-from backend.db.database import Base
+from db.database import Base
 
 def generate_uuid():
     return str(uuid.uuid4())
@@ -11,7 +11,7 @@ class Document(Base):
     __tablename__ = "documents"
 
     id = Column(String, primary_key=True, default=generate_uuid)
-    filename = Column(String, unique=True, index=True, nullable=False)
+    filename = Column(String, index=True, nullable=False)
     file_path = Column(String, nullable=False)
     doc_type = Column(String, nullable=True)
     status = Column(String, nullable=False, default="pending")

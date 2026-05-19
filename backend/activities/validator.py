@@ -1,9 +1,9 @@
 import json
 import logging
 import mistralai.workflows as workflows
-from mistralai import Mistral
-from backend.config import settings
-import backend.db.operations as db
+from mistralai.client import Mistral
+from config import settings
+import db.operations as db
 
 logger = logging.getLogger(__name__)
 client = Mistral(api_key=settings.MISTRAL_API_KEY)

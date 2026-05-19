@@ -17,3 +17,9 @@ Desktop.ini
 *.njsproj
 *.sln
 *.sw?
+
+# Python
+.venv/
+
+# Environments
+.env
