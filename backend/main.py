@@ -99,8 +99,8 @@ async def upload_document(file: UploadFile = File(...)):
             }
         )
         
-        # run_response.id contains the Mistral workflow execution ID
-        run_id = run_response.id if hasattr(run_response, "id") else "unknown_run_id"
+        # run_response.execution_id contains the Mistral workflow execution ID
+        run_id = run_response.execution_id if hasattr(run_response, "execution_id") else "unknown_run_id"
         
         doc.workflow_run_id = run_id
         await session.commit()
@@ -135,23 +135,66 @@ async def get_status(document_id: str):
 
 @app.post("/workflow/{workflow_run_id}/resume/duplicate")
 async def resume_duplicate(workflow_run_id: str, decision: DuplicateDecisionRequest):
-    # Depending on SDK specifics, resolving a wait_for_input involves sending an event
-    # For now, using standard Mistral Client's event mechanism
-    await mistral_client.workflows.executions.signal_workflow_execution_async(
-        execution_id=workflow_run_id,
-        name="duplicate_decision",
-        input=decision.model_dump()
-    )
-    return {"message": "Workflow resumed"}
+    """
+    Resume a workflow paused at wait_for_input (duplicate check).
+    The Mistral InteractiveWorkflow SDK uses Temporal *Updates* (NOT signals).
+    Protocol:
+      1. Query '__get_pending_inputs' to get the task_id for the pending input.
+      2. Call update '__submit_input' with that task_id and the user's decision payload.
+    """
+    try:
+        # Step 1: get the pending task_id
+        query_result = await mistral_client.workflows.executions.query_workflow_execution_async(
+            execution_id=workflow_run_id,
+            name="__get_pending_inputs",
+        )
+        pending_inputs = (query_result.result or {}).get("pending_inputs", [])
+        if not pending_inputs:
+            raise HTTPException(status_code=409, detail="No pending inputs found. Workflow may not be paused yet.")
+        task_id = pending_inputs[0]["task_id"]
+
+        # Step 2: submit the decision
+        await mistral_client.workflows.executions.update_workflow_execution_async(
+            execution_id=workflow_run_id,
+            name="__submit_input",
+            input={"task_id": task_id, "input": decision.model_dump()},
+        )
+        return {"message": "Workflow resumed"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error resuming duplicate: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/workflow/{workflow_run_id}/resume/review")
 async def resume_review(workflow_run_id: str, decision: ReviewerDecisionRequest):
-    await mistral_client.workflows.executions.signal_workflow_execution_async(
-        execution_id=workflow_run_id,
-        name="reviewer_decision",
-        input=decision.model_dump()
-    )
-    return {"message": "Workflow resumed"}
+    """
+    Resume a workflow paused at wait_for_input (human review).
+    Same two-step protocol: query pending inputs, then submit via update.
+    """
+    try:
+        # Step 1: get the pending task_id
+        query_result = await mistral_client.workflows.executions.query_workflow_execution_async(
+            execution_id=workflow_run_id,
+            name="__get_pending_inputs",
+        )
+        pending_inputs = (query_result.result or {}).get("pending_inputs", [])
+        if not pending_inputs:
+            raise HTTPException(status_code=409, detail="No pending inputs found. Workflow may not be paused yet.")
+        task_id = pending_inputs[0]["task_id"]
+
+        # Step 2: submit the decision
+        await mistral_client.workflows.executions.update_workflow_execution_async(
+            execution_id=workflow_run_id,
+            name="__submit_input",
+            input={"task_id": task_id, "input": decision.model_dump()},
+        )
+        return {"message": "Workflow resumed"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error resuming review: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/documents")
 async def list_documents(page: int = Query(1, ge=1), limit: int = Query(20, ge=1, le=100)):

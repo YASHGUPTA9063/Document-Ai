@@ -10,6 +10,17 @@ async def update_status(document_id: str, status: str):
             doc.status = status
             await session.commit()
 
+async def update_status_and_message(document_id: str, status: str, message: str):
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Document).where(Document.id == document_id))
+        doc = result.scalar_one_or_none()
+        if doc:
+            doc.status = status
+            new_details = dict(doc.error_details) if doc.error_details else {}
+            new_details["error"] = message
+            doc.error_details = new_details
+            await session.commit()
+
 async def update_doc_type(document_id: str, doc_type: str):
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(Document).where(Document.id == document_id))

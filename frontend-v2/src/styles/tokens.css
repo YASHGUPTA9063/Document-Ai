@@ -1,0 +1,94 @@
+/* ─── Google Fonts ───────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+/* ─── Reset & Base ─────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  /* Backgrounds */
+  --bg:        #0a0c18;
+  --surface:   #10131f;
+  --card:      #151826;
+  --card-alt:  #1a1e30;
+  --border:    #1e2438;
+  --border-hi: #2a3050;
+
+  /* Brand accents */
+  --accent:    #6366f1;
+  --accent2:   #8b5cf6;
+  --accent3:   #06b6d4;
+  --accent-dim: rgba(99,102,241,0.12);
+
+  /* Status */
+  --success:   #10b981;
+  --warn:      #f59e0b;
+  --danger:    #ef4444;
+  --info:      #3b82f6;
+
+  /* Text */
+  --text:      #e2e8f0;
+  --text-dim:  #94a3b8;
+  --muted:     #4b5673;
+
+  /* Effects */
+  --highlight: rgba(99,102,241,0.15);
+  --glow:      0 0 24px rgba(99,102,241,0.35);
+  --shadow:    0 4px 24px rgba(0,0,0,0.45);
+  --shadow-sm: 0 2px 8px rgba(0,0,0,0.3);
+
+  /* Layout */
+  --sidebar-w: 240px;
+  --topbar-h:  56px;
+  --radius:    10px;
+  --radius-sm: 6px;
+  --radius-lg: 16px;
+
+  /* Motion */
+  --ease:      cubic-bezier(0.4,0,0.2,1);
+  --dur:       180ms;
+}
+
+html { font-size: 14px; scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--accent); text-decoration: none; }
+button { cursor: pointer; font-family: inherit; }
+img { max-width: 100%; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+/* Gradient text utility */
+.grad {
+  background: linear-gradient(135deg, var(--accent), var(--accent3));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Chip */
+.chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 99px; padding: 3px 10px;
+  font-size: 11px; color: var(--text-dim);
+}
+
+/* Animated border (upload zone) */
+.animated-border {
+  position: relative; border-radius: 14px; padding: 1.5px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2), var(--accent3));
+  animation: border-rotate 4s linear infinite;
+}
+.animated-border > * { border-radius: 12px; }

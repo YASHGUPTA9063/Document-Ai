@@ -20,6 +20,12 @@ async def update_status_activity(document_id: str, status: str) -> str:
     return status
 
 @workflows.activity()
+async def update_status_and_message_activity(document_id: str, status: str, message: str) -> str:
+    import db.operations as db
+    await db.update_status_and_message(document_id, status, message)
+    return status
+
+@workflows.activity()
 async def update_doc_type_activity(document_id: str, doc_type: str) -> str:
     import db.operations as db
     await db.update_doc_type(document_id, doc_type)
@@ -39,21 +45,27 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
         if intake_result.get("is_duplicate"):
             # Pause — wait for user duplicate override decision
             logger.info(f"[Document {document_id}] Pausing for duplicate check override")
+            await update_status_and_message_activity(document_id, "awaiting_review", "Duplicate detected. Waiting for override decision.")
             duplicate_decision = await self.wait_for_input(DuplicateDecisionRequest, timeout=timedelta(hours=24))
             
             if not duplicate_decision.override:
-                await update_status_activity(document_id, "rejected")
+                await update_status_and_message_activity(document_id, "rejected", "Duplicate not overridden.")
                 return {"status": "rejected", "reason": "duplicate_not_overridden"}
+            else:
+                await update_status_and_message_activity(document_id, "processing", "")
 
         # Step 2 — Classify
+        await update_status_activity(document_id, "classifying")
         classifier_result = await classifier_activity(document_id, file_path)
         doc_type = classifier_result["doc_type"]
         await update_doc_type_activity(document_id, doc_type)
 
         # Step 3 — Extract
+        await update_status_activity(document_id, "extracting")
         extractor_result = await extractor_activity(document_id, file_path, doc_type)
 
         # Step 4 — Validate
+        await update_status_activity(document_id, "validating")
         validator_result = await validator_activity(
             document_id=document_id, 
             extracted_data=extractor_result["fields"], 
