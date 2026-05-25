@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { UploadCloud, X, FileText, Image, File } from 'lucide-react';
+import { UploadCloud, X, FileText, Image, File, CheckCircle2, ScanSearch, Brain, ShieldCheck, UserCheck, Share2 } from 'lucide-react';
 import { uploadDocument } from '../api/client';
 import { useApp } from '../store/AppStore';
 import { useDocumentPoller } from '../hooks/useDocumentPoller';
@@ -119,7 +119,7 @@ export function Upload() {
 
       <div style={{ maxWidth: 780, margin: '0 auto' }}>
         {/* Upload Zone */}
-        <div className="animated-border" style={{ marginBottom: 24 }}>
+        <div className={isDragover ? 'animated-border-active' : ''} style={{ marginBottom: 24 }}>
           <div
             className={`upload-zone ${isDragover ? 'dragover' : ''}`}
             onDragOver={(e) => { e.preventDefault(); setIsDragover(true); }}
@@ -127,8 +127,8 @@ export function Upload() {
             onDrop={handleDrop}
             onClick={() => fileInputRef.current?.click()}
           >
-            <div style={{ fontSize: 42, marginBottom: 12 }}>
-              <UploadCloud size={48} color="var(--accent)" strokeWidth={1.5} />
+            <div className="upload-icon">
+              <UploadCloud size={30} color="var(--accent)" strokeWidth={1.5} />
             </div>
             <div className="upload-title">Drop documents here or click to browse</div>
             <div className="upload-sub">Powered by Mistral AI — automatically classifies, extracts &amp; validates</div>
@@ -209,19 +209,25 @@ export function Upload() {
         {/* Info */}
         {queue.length === 0 && (
           <div className="card">
-            <div className="card-title" style={{ marginBottom: 12 }}>⚡ Processing Pipeline</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div className="card-header">
+              <div>
+                <div className="card-title">AI Processing Pipeline</div>
+                <div className="card-sub">6-step automated workflow powered by Mistral</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
               {[
-                ['📥 Intake', 'Duplicate detection & initial validation'],
-                ['🏷️ Classify', 'AI determines document type (invoice, contract, medical…)'],
-                ['🔍 Extract', 'Mistral OCR + structured field extraction'],
-                ['✅ Validate', 'Math cross-checks, date logic, schema validation'],
-                ['👤 Review', 'Human approval if confidence &lt; 80%'],
-                ['📤 Output', 'Structured JSON stored & ready to export'],
-              ].map(([step, desc]) => (
-                <div key={step} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', fontSize: 13 }}>
-                  <span style={{ color: 'var(--accent)', fontWeight: 700, flexShrink: 0, width: 100 }}>{step}</span>
-                  <span style={{ color: 'var(--text-dim)' }} dangerouslySetInnerHTML={{ __html: desc }} />
+                { icon: <CheckCircle2 size={15} />, label: 'Intake',    desc: 'Duplicate detection & initial validation' },
+                { icon: <Brain size={15} />,         label: 'Classify',  desc: 'AI determines document type automatically' },
+                { icon: <ScanSearch size={15} />,    label: 'Extract',   desc: 'Mistral OCR + structured field extraction' },
+                { icon: <ShieldCheck size={15} />,   label: 'Validate',  desc: 'Math cross-checks, date logic, schema validation' },
+                { icon: <UserCheck size={15} />,     label: 'Review',    desc: 'Human approval when confidence < 80%' },
+                { icon: <Share2 size={15} />,         label: 'Output',    desc: 'Structured JSON stored & ready to export' },
+              ].map(({ icon, label, desc }) => (
+                <div key={label} className="info-row">
+                  <div className="info-row-icon">{icon}</div>
+                  <div className="info-row-label">{label}</div>
+                  <div className="info-row-desc">{desc}</div>
                 </div>
               ))}
             </div>

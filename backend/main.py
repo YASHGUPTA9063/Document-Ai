@@ -1,8 +1,10 @@
 import os
 os.environ["DEPLOYMENT_NAME"] = "document-processing-workflow"
 import logging
+import mimetypes
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -196,6 +198,143 @@ async def resume_review(workflow_run_id: str, decision: ReviewerDecisionRequest)
         logger.error(f"Error resuming review: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ─── Pipeline metadata enrichment ────────────────────────────────────────────
+# Maps each agent role to static info that Mistral's API doesn't store:
+# step index, icon, accent color, and the workflow tools it runs alongside.
+AGENT_PIPELINE_META = {
+    "classifier": {
+        "step": 2,
+        "role": "Document type identification",
+        "emoji": "🏷️",
+        "color": "rgba(124,58,237,0.15)",
+        "border": "#7c3aed",
+        "pipeline_tools": ["Mistral OCR", "Type Classifier", "Confidence Scorer"],
+    },
+    "extractor": {
+        "step": 3,
+        "role": "Structured field extraction",
+        "emoji": "🔍",
+        "color": "rgba(16,185,129,0.15)",
+        "border": "#10b981",
+        "pipeline_tools": ["Mistral OCR", "Field Parser", "Table Extractor"],
+    },
+    "validator": {
+        "step": 4,
+        "role": "Data quality assurance",
+        "emoji": "✅",
+        "color": "rgba(245,158,11,0.15)",
+        "border": "#f59e0b",
+        "pipeline_tools": ["Math Validator", "Date Checker", "Schema Validator"],
+    },
+    "reviewer": {
+        "step": 5,
+        "role": "Human-in-the-loop review",
+        "emoji": "👤",
+        "color": "rgba(240,64,96,0.15)",
+        "border": "#f04060",
+        "pipeline_tools": ["Auto-Approver", "Human Signal Listener", "Review Logger"],
+    },
+}
+
+# Static agents that don't have Mistral agent IDs (they're pure workflow activities)
+STATIC_AGENTS = [
+    {
+        "key": "intake",
+        "name": "Intake Agent",
+        "step": 1,
+        "role": "Entry point for all document processing",
+        "description": "Validates file format, detects duplicates via SHA-256 hash, and initializes the workflow run.",
+        "emoji": "📥",
+        "color": "rgba(6,192,219,0.15)",
+        "border": "#06c0db",
+        "model": "workflow-activity",
+        "agent_id": None,
+        "tools": ["File Validator", "Duplicate Checker", "DB Writer"],
+        "source": "workflow",
+    },
+    {
+        "key": "output",
+        "name": "Output Agent",
+        "step": 6,
+        "role": "Result persistence and export",
+        "description": "Stores validated extracted data and reviewer corrections to the database. Marks the document as completed.",
+        "emoji": "📤",
+        "color": "rgba(79,110,247,0.15)",
+        "border": "#4f6ef7",
+        "model": "workflow-activity",
+        "agent_id": None,
+        "tools": ["DB Writer", "JSON Formatter", "Webhook Notifier"],
+        "source": "workflow",
+    },
+]
+
+@app.get("/agents")
+async def list_agents():
+    """
+    Returns the full agent pipeline — 4 live Mistral agents + 2 static workflow activities.
+    Each Mistral agent is fetched from the Mistral API to get its real name, description, and model.
+    """
+    agent_configs = [
+        ("classifier", settings.CLASSIFIER_AGENT_ID),
+        ("extractor",  settings.EXTRACTOR_AGENT_ID),
+        ("validator",  settings.VALIDATOR_AGENT_ID),
+        ("reviewer",   settings.REVIEWER_AGENT_ID),
+    ]
+
+    mistral_agents = []
+    for key, agent_id in agent_configs:
+        meta = AGENT_PIPELINE_META[key]
+        try:
+            agent_data = mistral_client.beta.agents.get(agent_id=agent_id)
+            # agent_data.tools is a list of tool objects; extract names safely
+            tool_names = []
+            if agent_data.tools:
+                for t in agent_data.tools:
+                    if hasattr(t, 'function') and hasattr(t.function, 'name'):
+                        tool_names.append(t.function.name)
+                    elif hasattr(t, 'type'):
+                        tool_names.append(str(t.type))
+                    else:
+                        tool_names.append(str(t))
+            mistral_agents.append({
+                "key": key,
+                "name": agent_data.name or key.capitalize() + " Agent",
+                "step": meta["step"],
+                "role": meta["role"],
+                "description": agent_data.description or f"Mistral-hosted agent for {key} tasks.",
+                "emoji": meta["emoji"],
+                "color": meta["color"],
+                "border": meta["border"],
+                "model": agent_data.model,
+                "agent_id": agent_id,
+                "tools": tool_names or meta["pipeline_tools"],
+                "source": "mistral",
+            })
+        except Exception as e:
+            logger.warning(f"Failed to fetch Mistral agent '{key}' ({agent_id}): {e}")
+            # Graceful fallback — still show the agent with static data
+            mistral_agents.append({
+                "key": key,
+                "name": key.capitalize() + " Agent",
+                "step": meta["step"],
+                "role": meta["role"],
+                "description": f"Mistral-hosted agent for {key} tasks. (Metadata fetch failed)",
+                "emoji": meta["emoji"],
+                "color": meta["color"],
+                "border": meta["border"],
+                "model": "mistral-agent",
+                "agent_id": agent_id,
+                "tools": meta["pipeline_tools"],
+                "source": "mistral_fallback",
+            })
+
+    # Merge: static agents + mistral agents, sorted by pipeline step
+    all_agents = STATIC_AGENTS + mistral_agents
+    all_agents.sort(key=lambda a: a["step"])
+    return all_agents
+
+
 @app.get("/documents")
 async def list_documents(page: int = Query(1, ge=1), limit: int = Query(20, ge=1, le=100)):
     async with AsyncSessionLocal() as session:
@@ -223,6 +362,25 @@ async def get_extracted_data(document_id: str):
             "confidence_score": data.confidence_score,
             "reviewer_corrections": data.reviewer_corrections
         }
+
+@app.get("/documents/{document_id}/file")
+async def get_document_file(document_id: str):
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Document).where(Document.id == document_id)
+        )
+        doc = result.scalar_one_or_none()
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        if not doc.file_path or not os.path.exists(doc.file_path):
+            raise HTTPException(status_code=404, detail="Document file not found on disk")
+        
+        mime_type, _ = mimetypes.guess_type(doc.file_path)
+        if not mime_type:
+            mime_type = "application/octet-stream"
+            
+        return FileResponse(doc.file_path, media_type=mime_type, filename=doc.filename)
 
 @app.delete("/documents/{document_id}")
 async def delete_document(document_id: str):

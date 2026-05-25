@@ -4,6 +4,7 @@ import { useDocumentList } from '../hooks/useDocumentList';
 import { StatCard } from '../components/ui/StatCard';
 import { DonutChart } from '../components/ui/DonutChart';
 import { ConfidenceBar } from '../components/ui/ConfidenceBar';
+import { FileText, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 
 function BarChart({ data }) {
   if (!data || data.length === 0) return <div className="empty-state" style={{ padding: 24 }}><div className="empty-sub">No data yet</div></div>;
@@ -71,10 +72,10 @@ export function Analytics() {
   return (
     <div className="page">
       <div className="stats-row">
-        <StatCard icon="📄" label="Total Documents" value={total.toLocaleString()} delta="All time" deltaType="up" />
-        <StatCard icon="✅" label="Success Rate" value={successRate} unit="%" delta={`${completed} completed`} deltaType="up" />
-        <StatCard icon="❌" label="Rejection Rate" value={rejectionRate} unit="%" delta={`${rejected} rejected`} deltaType={rejectionRate > 10 ? 'down' : 'up'} />
-        <StatCard icon="⏳" label="In Pipeline" value={pending + inReview} delta={inReview > 0 ? `${inReview} awaiting review` : 'Nothing pending'} deltaType={inReview > 0 ? 'warn' : 'up'} />
+        <StatCard icon={<FileText size={18} />}    iconVariant="accent"                     label="Total Documents" value={total.toLocaleString()} delta="All time" deltaType="neutral" />
+        <StatCard icon={<CheckCircle2 size={18} />} iconVariant="success"                    label="Success Rate"    value={successRate} unit="%" delta={`${completed} completed`} deltaType="up" />
+        <StatCard icon={<XCircle size={18} />}      iconVariant={rejectionRate > 10 ? 'danger' : 'success'} label="Rejection Rate" value={rejectionRate} unit="%" delta={`${rejected} rejected`} deltaType={rejectionRate > 10 ? 'down' : 'up'} />
+        <StatCard icon={<Loader2 size={18} />}      iconVariant={inReview > 0 ? 'warn' : 'accent'}            label="In Pipeline"    value={pending + inReview} delta={inReview > 0 ? `${inReview} awaiting review` : 'Nothing pending'} deltaType={inReview > 0 ? 'warn' : 'up'} />
       </div>
 
       <div className="grid-2">

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle, XCircle, Edit3, RefreshCw } from 'lucide-react';
+import { CheckCircle, XCircle, Edit3, RefreshCw, AlertTriangle } from 'lucide-react';
 import { resumeReview, resumeDuplicate, getExtractedData } from '../api/client';
 import { useApp } from '../store/AppStore';
 import { useDocumentList } from '../hooks/useDocumentList';
@@ -10,8 +10,10 @@ import { Modal } from '../components/ui/Modal';
 function ReviewCard({ doc, onAction }) {
   const [extracted, setExtracted] = useState(null);
   const [showEdit, setShowEdit] = useState(false);
+  const [showRejectConfirm, setShowRejectConfirm] = useState(false);
   const [corrections, setCorrections] = useState('{}');
   const [loading, setLoading] = useState(false);
+  const { toast } = useApp();
 
   useEffect(() => {
     getExtractedData(doc.id)
@@ -28,10 +30,11 @@ function ReviewCard({ doc, onAction }) {
       await resumeReview(doc.workflow_run_id, approved, corr);
       onAction(doc.id, approved ? 'approved' : 'rejected');
     } catch (err) {
-      alert('Error: ' + err.message);
+      toast('Error: ' + err.message, 'error');
     } finally {
       setLoading(false);
       setShowEdit(false);
+      setShowRejectConfirm(false);
     }
   };
 
@@ -41,7 +44,7 @@ function ReviewCard({ doc, onAction }) {
       await resumeDuplicate(doc.workflow_run_id, override);
       onAction(doc.id, override ? 'override' : 'rejected');
     } catch (err) {
-      alert('Error: ' + err.message);
+      toast('Error: ' + err.message, 'error');
     } finally {
       setLoading(false);
     }
@@ -101,7 +104,7 @@ function ReviewCard({ doc, onAction }) {
               <button className="btn btn-primary" onClick={() => handleDuplicate(true)} disabled={loading}>
                 <CheckCircle size={14} /> Override Duplicate
               </button>
-              <button className="btn btn-danger" onClick={() => handleDuplicate(false)} disabled={loading}>
+              <button className="btn btn-danger" onClick={() => setShowRejectConfirm(true)} disabled={loading}>
                 <XCircle size={14} /> Reject
               </button>
             </>
@@ -110,7 +113,7 @@ function ReviewCard({ doc, onAction }) {
               <button className="btn btn-success" onClick={() => handle(true)} disabled={loading}>
                 <CheckCircle size={14} /> Approve
               </button>
-              <button className="btn btn-danger" onClick={() => handle(false)} disabled={loading}>
+              <button className="btn btn-danger" onClick={() => setShowRejectConfirm(true)} disabled={loading}>
                 <XCircle size={14} /> Reject
               </button>
               <button className="btn btn-ghost" onClick={() => setShowEdit(true)} disabled={loading}>
@@ -120,6 +123,37 @@ function ReviewCard({ doc, onAction }) {
           )}
         </div>
       </div>
+
+      {/* Reject confirmation modal */}
+      {showRejectConfirm && (
+        <Modal
+          title="Reject Document?"
+          subtitle={`This will stop processing for "${doc.filename}". This cannot be undone.`}
+          onClose={() => setShowRejectConfirm(false)}
+          footer={
+            <>
+              <button className="btn btn-ghost" onClick={() => setShowRejectConfirm(false)}>Cancel</button>
+              <button
+                className="btn btn-danger"
+                onClick={() => isDuplicateWait ? handleDuplicate(false) : handle(false)}
+                disabled={loading}
+              >
+                <XCircle size={14} /> Confirm Reject
+              </button>
+            </>
+          }
+        >
+          <div style={{
+            display: 'flex', gap: 12, alignItems: 'flex-start',
+            padding: '12px 14px',
+            background: 'var(--danger-dim)', border: '1px solid var(--danger-border)',
+            borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-md)',
+          }}>
+            <AlertTriangle size={16} style={{ color: 'var(--danger)', flexShrink: 0, marginTop: 1 }} />
+            <span style={{ color: 'var(--danger)' }}>Rejecting stops the workflow and marks this document as failed.</span>
+          </div>
+        </Modal>
+      )}
 
       {/* Edit modal */}
       {showEdit && (
@@ -137,7 +171,7 @@ function ReviewCard({ doc, onAction }) {
                     const corr = JSON.parse(corrections);
                     handle(true, corr);
                   } catch {
-                    alert('Invalid JSON');
+                    toast('Invalid JSON — please check your corrections', 'error');
                   }
                 }}
               >
@@ -146,7 +180,7 @@ function ReviewCard({ doc, onAction }) {
             </>
           }
         >
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+          <div style={{ fontSize: 'var(--text-base)', color: 'var(--muted)', marginBottom: 8 }}>
             Enter corrections as JSON (field_name: corrected_value):
           </div>
           <textarea
@@ -154,7 +188,7 @@ function ReviewCard({ doc, onAction }) {
             rows={8}
             value={corrections}
             onChange={(e) => setCorrections(e.target.value)}
-            style={{ fontFamily: 'monospace', fontSize: 12, resize: 'vertical' }}
+            style={{ fontFamily: 'monospace', fontSize: 'var(--text-base)', resize: 'vertical' }}
             placeholder={'{\n  "vendor_name": "Corrected Corp",\n  "total_amount": 1234.56\n}'}
           />
         </Modal>

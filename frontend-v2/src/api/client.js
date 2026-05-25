@@ -91,6 +91,15 @@ export async function resumeReview(workflowRunId, approved, corrections = null) 
 }
 
 /**
+ * Fetch all pipeline agents (live from Mistral API + static workflow agents).
+ * @returns {Promise<Array>}
+ */
+export async function getAgents() {
+  const { data } = await api.get('/agents');
+  return data;
+}
+
+/**
  * Delete (soft) a document.
  * @param {string} documentId
  */
@@ -99,4 +108,14 @@ export async function deleteDocument(documentId) {
   return data;
 }
 
+/**
+ * Get the preview URL for a document.
+ * @param {string} documentId
+ * @returns {string}
+ */
+export function getDocumentFileUrl(documentId) {
+  return `${BASE}/documents/${documentId}/file`;
+}
+
 export default api;
+

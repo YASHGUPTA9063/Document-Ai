@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Copy, Download, ChevronDown, ChevronRight } from 'lucide-react';
-import { getExtractedData } from '../api/client';
+import { getExtractedData, getDocumentFileUrl } from '../api/client';
 import { useApp } from '../store/AppStore';
 import { useDocumentList } from '../hooks/useDocumentList';
 
@@ -143,46 +143,88 @@ export function Extraction() {
             )}
           </div>
 
-          {/* Simulated doc page */}
-          <div style={{
-            background: 'var(--surface)', borderRadius: 8, padding: 20, minHeight: 300,
-            border: '1px solid var(--border)', position: 'relative', overflow: 'hidden',
-          }}>
-            <div style={{ background: 'var(--border)', height: 6, borderRadius: 2, width: '60%', marginBottom: 8 }} />
-            <div style={{ background: 'var(--card)', height: 4, borderRadius: 2, width: '40%', marginBottom: 20 }} />
-            {[90, 85, 92, 78, 88, 76, 82, 70, 95].map((w, i) => (
-              <div key={i} style={{ background: 'var(--card)', height: 3, borderRadius: 2, width: `${w}%`, marginBottom: 6 }} />
-            ))}
-            <div style={{ display: 'flex', gap: 6, margin: '16px 0' }}>
-              {[1, 1, 1].map((_, i) => (
-                <div key={i} style={{ background: 'var(--border)', height: 18, flex: 1, borderRadius: 2 }} />
-              ))}
-            </div>
-            {[88, 76, 82, 68].map((w, i) => (
-              <div key={i} style={{ background: 'var(--card)', height: 3, borderRadius: 2, width: `${w}%`, marginBottom: 6 }} />
-            ))}
-            <div style={{
-              position: 'absolute', top: '10%', left: '8%', padding: '3px 8px',
-              background: 'rgba(99,102,241,0.2)', border: '1px solid var(--accent)',
-              borderRadius: 4, fontSize: 10, color: 'var(--accent)',
-            }}>
-              Vendor
-            </div>
-            <div style={{
-              position: 'absolute', top: '10%', right: '8%', padding: '3px 8px',
-              background: 'rgba(52,211,153,0.15)', border: '1px solid var(--success)',
-              borderRadius: 4, fontSize: 10, color: 'var(--success)',
-            }}>
-              Date
-            </div>
-            <div style={{
-              position: 'absolute', bottom: '20%', right: '8%', padding: '3px 8px',
-              background: 'rgba(245,158,11,0.15)', border: '1px solid var(--warn)',
-              borderRadius: 4, fontSize: 10, color: 'var(--warn)',
-            }}>
-              Amount
-            </div>
-          </div>
+          {/* Real file preview */}
+          {(() => {
+            const filename = activeDoc?.filename || '';
+            const fileUrl = activeId ? getDocumentFileUrl(activeId) : '';
+            const ext = filename.split('.').pop()?.toLowerCase();
+            
+            if (!activeId) return null;
+            
+            if (ext === 'pdf') {
+              return (
+                <iframe
+                  src={`${fileUrl}#toolbar=0&navpanes=0`}
+                  style={{
+                    width: '100%',
+                    height: '450px',
+                    border: '1px solid var(--border)',
+                    borderRadius: '8px',
+                    background: 'var(--surface)',
+                  }}
+                  title={filename}
+                />
+              );
+            } else if (['png', 'jpg', 'jpeg', 'webp'].includes(ext)) {
+              return (
+                <div style={{
+                  width: '100%',
+                  height: '450px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  border: '1px solid var(--border)',
+                  borderRadius: '8px',
+                  background: 'var(--surface)',
+                  overflow: 'hidden',
+                  padding: '10px',
+                }}>
+                  <img
+                    src={fileUrl}
+                    alt={filename}
+                    style={{
+                      maxWidth: '100%',
+                      maxHeight: '100%',
+                      objectFit: 'contain',
+                      borderRadius: '4px',
+                    }}
+                  />
+                </div>
+              );
+            } else {
+              return (
+                <div style={{
+                  width: '100%',
+                  height: '450px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  border: '1px solid var(--border)',
+                  borderRadius: '8px',
+                  background: 'var(--surface)',
+                  padding: '24px',
+                  textAlign: 'center',
+                }}>
+                  <div style={{ fontSize: '48px', marginBottom: '16px' }}>📄</div>
+                  <div style={{ fontWeight: '600', fontSize: '14px', marginBottom: '6px', color: 'var(--text)' }}>
+                    {filename}
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '20px' }}>
+                    Preview not supported for .{ext} files in-browser.
+                  </div>
+                  <a
+                    href={fileUrl}
+                    download={filename}
+                    className="btn btn-ghost btn-sm"
+                    style={{ border: '1px solid var(--border)' }}
+                  >
+                    Download File
+                  </a>
+                </div>
+              );
+            }
+          })()}
 
           {extracted && (
             <div className="card" style={{ marginTop: 14, marginBottom: 0, borderColor: extracted.confidence_score >= 0.8 ? 'var(--success)' : 'var(--warn)', background: extracted.confidence_score >= 0.8 ? 'rgba(16,185,129,0.05)' : 'rgba(245,158,11,0.05)' }}>
