@@ -11,9 +11,15 @@ class Settings(BaseSettings):
 
     # Agent IDs
     CLASSIFIER_AGENT_ID: str = Field(..., description="Classifier Agent ID from Mistral Studio")
-    EXTRACTOR_AGENT_ID: str = Field(..., description="Extractor Agent ID from Mistral Studio")
+    INVOICE_EXTRACTOR_AGENT_ID: str = Field(..., description="Invoice Extractor Agent ID from Mistral Studio")
+    CONTRACT_EXTRACTOR_AGENT_ID: str = Field(..., description="Contract Extractor Agent ID from Mistral Studio")
+    KYC_EXTRACTOR_AGENT_ID: str = Field(..., description="KYC Extractor Agent ID from Mistral Studio")
+    MEDICAL_EXTRACTOR_AGENT_ID: str = Field(..., description="Medical Record Extractor Agent ID from Mistral Studio")
+    BANK_EXTRACTOR_AGENT_ID: str = Field(..., description="Bank Statement Extractor Agent ID from Mistral Studio")
+    OTHERS_EXTRACTOR_AGENT_ID: str = Field(..., description="Others/Generic Extractor Agent ID from Mistral Studio")
     VALIDATOR_AGENT_ID: str = Field(..., description="Validator Agent ID from Mistral Studio")
     REVIEWER_AGENT_ID: str = Field(..., description="Reviewer Agent ID from Mistral Studio")
+
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
