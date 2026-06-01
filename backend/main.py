@@ -211,14 +211,56 @@ AGENT_PIPELINE_META = {
         "border": "#7c3aed",
         "pipeline_tools": ["Mistral OCR", "Type Classifier", "Confidence Scorer"],
     },
-    "extractor": {
+    # ── Extractor variants (step 3, conditional on doc type) ──────────────────
+    "invoice_extractor": {
         "step": 3,
-        "role": "Structured field extraction",
-        "emoji": "🔍",
+        "role": "Invoice field extraction",
+        "emoji": "🧾",
         "color": "rgba(16,185,129,0.15)",
         "border": "#10b981",
-        "pipeline_tools": ["Mistral OCR", "Field Parser", "Table Extractor"],
+        "pipeline_tools": ["Mistral OCR", "Line Item Parser", "Tax Calculator"],
     },
+    "contract_extractor": {
+        "step": 3,
+        "role": "Contract clause extraction",
+        "emoji": "📝",
+        "color": "rgba(20,184,166,0.15)",
+        "border": "#14b8a6",
+        "pipeline_tools": ["Clause Detector", "Party Extractor", "Date Parser"],
+    },
+    "kyc_extractor": {
+        "step": 3,
+        "role": "KYC identity field extraction",
+        "emoji": "🪪",
+        "color": "rgba(59,130,246,0.15)",
+        "border": "#3b82f6",
+        "pipeline_tools": ["ID Validator", "Face Match", "Address Normalizer"],
+    },
+    "medical_extractor": {
+        "step": 3,
+        "role": "Medical record data extraction",
+        "emoji": "🏥",
+        "color": "rgba(239,68,68,0.15)",
+        "border": "#ef4444",
+        "pipeline_tools": ["ICD-10 Mapper", "Drug Name Parser", "Lab Value Extractor"],
+    },
+    "bank_extractor": {
+        "step": 3,
+        "role": "Bank statement extraction",
+        "emoji": "🏦",
+        "color": "rgba(234,179,8,0.15)",
+        "border": "#eab308",
+        "pipeline_tools": ["Transaction Parser", "Balance Checker", "IBAN Validator"],
+    },
+    "others_extractor": {
+        "step": 3,
+        "role": "Generic document extraction",
+        "emoji": "📄",
+        "color": "rgba(107,114,128,0.15)",
+        "border": "#6b7280",
+        "pipeline_tools": ["Generic OCR", "Key-Value Parser", "Layout Analyzer"],
+    },
+    # ─────────────────────────────────────────────────────────────────────────
     "validator": {
         "step": 4,
         "role": "Data quality assurance",
@@ -272,14 +314,20 @@ STATIC_AGENTS = [
 @app.get("/agents")
 async def list_agents():
     """
-    Returns the full agent pipeline — 4 live Mistral agents + 2 static workflow activities.
-    Each Mistral agent is fetched from the Mistral API to get its real name, description, and model.
+    Returns the full agent pipeline — all live Mistral agents + 2 static workflow activities.
+    Includes the classifier, all 6 type-specific extractors, the validator, and the reviewer.
+    Each agent is fetched from the Mistral API to get its real name, description, and model.
     """
     agent_configs = [
-        ("classifier", settings.CLASSIFIER_AGENT_ID),
-        ("extractor",  settings.EXTRACTOR_AGENT_ID),
-        ("validator",  settings.VALIDATOR_AGENT_ID),
-        ("reviewer",   settings.REVIEWER_AGENT_ID),
+        ("classifier",         settings.CLASSIFIER_AGENT_ID),
+        ("invoice_extractor",  settings.INVOICE_EXTRACTOR_AGENT_ID),
+        ("contract_extractor", settings.CONTRACT_EXTRACTOR_AGENT_ID),
+        ("kyc_extractor",      settings.KYC_EXTRACTOR_AGENT_ID),
+        ("medical_extractor",  settings.MEDICAL_EXTRACTOR_AGENT_ID),
+        ("bank_extractor",     settings.BANK_EXTRACTOR_AGENT_ID),
+        ("others_extractor",   settings.OTHERS_EXTRACTOR_AGENT_ID),
+        ("validator",          settings.VALIDATOR_AGENT_ID),
+        ("reviewer",           settings.REVIEWER_AGENT_ID),
     ]
 
     mistral_agents = []
@@ -297,12 +345,13 @@ async def list_agents():
                         tool_names.append(str(t.type))
                     else:
                         tool_names.append(str(t))
+            display_name = " ".join(w.capitalize() for w in key.split("_"))
             mistral_agents.append({
                 "key": key,
-                "name": agent_data.name or key.capitalize() + " Agent",
+                "name": agent_data.name or display_name + " Agent",
                 "step": meta["step"],
                 "role": meta["role"],
-                "description": agent_data.description or f"Mistral-hosted agent for {key} tasks.",
+                "description": agent_data.description or f"Mistral-hosted agent for {display_name.lower()} tasks.",
                 "emoji": meta["emoji"],
                 "color": meta["color"],
                 "border": meta["border"],
@@ -313,13 +362,14 @@ async def list_agents():
             })
         except Exception as e:
             logger.warning(f"Failed to fetch Mistral agent '{key}' ({agent_id}): {e}")
+            display_name = " ".join(w.capitalize() for w in key.split("_"))
             # Graceful fallback — still show the agent with static data
             mistral_agents.append({
                 "key": key,
-                "name": key.capitalize() + " Agent",
+                "name": display_name + " Agent",
                 "step": meta["step"],
                 "role": meta["role"],
-                "description": f"Mistral-hosted agent for {key} tasks. (Metadata fetch failed)",
+                "description": f"Mistral-hosted agent for {display_name.lower()} tasks. (Metadata fetch failed)",
                 "emoji": meta["emoji"],
                 "color": meta["color"],
                 "border": meta["border"],

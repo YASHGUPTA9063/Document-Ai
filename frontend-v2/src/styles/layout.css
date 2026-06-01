@@ -88,7 +88,7 @@
 
 /* ─── Collapse Toggle Button ─────────────────────── */
 .sidebar-collapse-btn {
-  position: absolute; top: 18px; right: -12px;
+  position: absolute; top: 18px; right: 8px;
   width: 24px; height: 24px;
   background: var(--surface-elevated);
   border: 1px solid var(--border);
@@ -103,7 +103,7 @@
 }
 .sidebar:hover .sidebar-collapse-btn { opacity: 1; }
 .sidebar-collapse-btn:hover { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
-.sidebar.collapsed .sidebar-collapse-btn { opacity: 1; right: -12px; }
+.sidebar.collapsed .sidebar-collapse-btn { opacity: 1; right: 6px; }
 
 /* ─── Nav Sections ──────────────────────────────── */
 .nav-section { padding: 8px 8px 2px; position: relative; z-index: 1; }

@@ -150,6 +150,121 @@ function AgentCard({ agent, index }) {
   );
 }
 
+// ─── Pipeline Collaboration Graph ───────────────────────────────────────────
+const StepArrow = () => (
+  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', height: 28, flexShrink: 0 }}>
+    <div style={{ width: 1.5, flex: 1, background: 'var(--border)' }} />
+    <svg width="9" height="5" viewBox="0 0 9 5" style={{ display: 'block' }}>
+      <polygon points="0,0 9,0 4.5,5" fill="var(--border)" />
+    </svg>
+  </div>
+);
+
+function PipelineGraph({ agents }) {
+  const seqKeys  = ['intake', 'classifier', 'validator', 'reviewer', 'output'];
+  const seqNodes = seqKeys.map(k => agents.find(a => a.key === k)).filter(Boolean);
+  const extractors = agents.filter(a => a.key.includes('extractor'));
+
+  // Ordered pipeline: inject the extractor group at position index 2 (step 3)
+  const steps = [
+    { type: 'node', agent: seqNodes[0], step: 1 },
+    { type: 'node', agent: seqNodes[1], step: 2 },
+    { type: 'extractors',               step: 3 },
+    { type: 'node', agent: seqNodes[2], step: 4 },
+    { type: 'node', agent: seqNodes[3], step: 5 },
+    { type: 'node', agent: seqNodes[4], step: 6 },
+  ];
+
+  return (
+    <div style={{ padding: '20px 28px 28px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      {steps.map((s, i) => {
+        const isLast = i === steps.length - 1;
+
+        const StepBadge = ({ n }) => (
+          <span style={{
+            fontSize: 10, fontWeight: 600, color: 'var(--muted)',
+            background: 'var(--surface)', border: '1px solid var(--border)',
+            borderRadius: 99, padding: '1px 8px', whiteSpace: 'nowrap', flexShrink: 0,
+          }}>Step {n}</span>
+        );
+
+        return (
+          <div key={i} style={{ width: '100%', maxWidth: 560, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+
+            {/* ── Regular node card ── */}
+            {s.type === 'node' && s.agent && (
+              <div style={{
+                width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+                padding: '11px 16px', borderRadius: 10,
+                background: s.agent.color,
+                border: `1.5px solid ${s.agent.border}`,
+              }}>
+                <span style={{ fontSize: 22, flexShrink: 0, lineHeight: 1 }}>{s.agent.emoji}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text)', lineHeight: 1.3 }}>
+                    {s.agent.name.replace(' Agent', '')}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>
+                    {s.agent.role}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                  {s.agent.key === 'reviewer' && (
+                    <span style={{
+                      fontSize: 10, fontWeight: 600, color: 'var(--warn)',
+                      background: 'rgba(245,158,11,0.10)',
+                      border: '1px solid rgba(245,158,11,0.35)',
+                      borderRadius: 99, padding: '1px 8px', whiteSpace: 'nowrap',
+                    }}>‖ Human Review</span>
+                  )}
+                  <StepBadge n={s.step} />
+                </div>
+              </div>
+            )}
+
+            {/* ── Extractor group card ── */}
+            {s.type === 'extractors' && (
+              <div style={{
+                width: '100%', borderRadius: 10,
+                border: '1.5px dashed var(--border)',
+                background: 'rgba(79,110,247,0.03)',
+                padding: '11px 16px',
+              }}>
+                {/* Header row */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                  <span style={{ fontSize: 22, lineHeight: 1 }}>🔍</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text)', lineHeight: 1.3 }}>Extractor</div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>
+                      Conditional — one activates per document type
+                    </div>
+                  </div>
+                  <StepBadge n={s.step} />
+                </div>
+                {/* Type chips */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {extractors.map(e => (
+                    <span key={e.key} style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 5,
+                      padding: '4px 11px', borderRadius: 99,
+                      background: e.color, border: `1px solid ${e.border}`,
+                      fontSize: 11, fontWeight: 600, color: e.border,
+                    }}>
+                      {e.emoji} {e.name.split(' ')[0]}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {!isLast && <StepArrow />}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Main Agents Page ─────────────────────────────────────────────────────────
 export function Agents() {
   const [agents, setAgents]   = useState([]);
@@ -253,104 +368,16 @@ export function Agents() {
         }
       </div>
 
-      {/* ── Collaboration Graph ── */}
+      {/* ── Pipeline Graph ── */}
       {!loading && agents.length > 0 && (
-        <div className="card">
+        <div className="card" style={{ overflow: 'hidden' }}>
           <div className="card-header">
             <div>
               <div className="card-title">🔀 Agent Collaboration Graph</div>
-              <div className="card-sub">Sequential pipeline with human-in-the-loop pauses</div>
+              <div className="card-sub">Vertical pipeline · conditional fan-out at extraction phase · human review gate</div>
             </div>
           </div>
-          <svg
-            width="100%"
-            height="180"
-            viewBox={`0 0 ${Math.max(700, agents.length * 116 + 60)} 180`}
-            preserveAspectRatio="xMidYMid meet"
-            style={{ overflow: 'visible' }}
-          >
-            <style>{`
-              .pipeline-flow-line {
-                stroke-dasharray: 6, 6;
-                animation: pipeline-flow 20s linear infinite;
-              }
-              @keyframes pipeline-flow {
-                to {
-                  stroke-dashoffset: -500;
-                }
-              }
-              .pipeline-node {
-                cursor: pointer;
-              }
-              .pipeline-node circle {
-                transition: r 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), stroke-width 0.25s ease, fill-opacity 0.25s ease;
-              }
-              .pipeline-node:hover circle {
-                r: 32;
-                stroke-width: 3px;
-              }
-              .node-emoji {
-                transform-box: fill-box;
-                transform-origin: center;
-                transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
-              }
-              .pipeline-node:hover .node-emoji {
-                transform: scale(1.2);
-              }
-              .node-label {
-                transform-box: fill-box;
-                transform-origin: center;
-                transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), font-weight 0.25s ease;
-              }
-              .pipeline-node:hover .node-label {
-                transform: translateY(2px);
-                font-weight: 700;
-              }
-              .pipeline-arrow {
-                transform-box: fill-box;
-                transform-origin: center;
-                animation: arrow-pulse 2s ease-in-out infinite alternate;
-              }
-              @keyframes arrow-pulse {
-                0% { transform: translateX(-3px); opacity: 0.4; }
-                100% { transform: translateX(3px); opacity: 0.8; }
-              }
-              .pause-label {
-                animation: pause-pulse 2s ease-in-out infinite alternate;
-              }
-              @keyframes pause-pulse {
-                0% { opacity: 0.75; }
-                100% { opacity: 1; }
-              }
-            `}</style>
-
-            {/* Pipeline flow line */}
-            <line x1="60" y1="90" x2="640" y2="90" className="pipeline-flow-line" stroke="var(--border-hi)" strokeWidth="2" />
-
-            {agents.map(({ key, emoji, border, name }, i) => {
-              const x = 60 + i * 116;
-              return (
-                <g key={key} className="pipeline-node" transform={`translate(${x}, 90)`}>
-                  <circle r="28" fill={`${border}15`} stroke={border} strokeWidth="2" />
-                  <text className="node-emoji" textAnchor="middle" dominantBaseline="middle" fontSize="17">{emoji}</text>
-                  <text y="42" className="node-label" textAnchor="middle" fill={border} fontSize="10" fontWeight="600">
-                    {name.replace(' Agent', '')}
-                  </text>
-                  {i < agents.length - 1 && (
-                    <text x="75" className="pipeline-arrow" dominantBaseline="middle" fill="var(--border-hi)" fontSize="16">→</text>
-                  )}
-                </g>
-              );
-            })}
-
-            {/* Human pause annotations */}
-            <text x="290" y="148" className="pause-label" textAnchor="middle" fill="var(--warn)" fontSize="10">
-              <tspan fontWeight="bold" letterSpacing="1px">||</tspan> Duplicate? (optional pause)
-            </text>
-            <text x="520" y="148" className="pause-label" textAnchor="middle" fill="var(--warn)" fontSize="10">
-              <tspan fontWeight="bold" letterSpacing="1px">||</tspan> Low confidence? (human review)
-            </text>
-          </svg>
+          <PipelineGraph agents={agents} />
         </div>
       )}
     </div>
