@@ -38,6 +38,26 @@ export async function uploadDocument(file, onProgress) {
 }
 
 /**
+ * Batch upload — sends all files in a single multipart request to /upload/batch.
+ * Server processes them concurrently and returns per-file results.
+ * @param {File[]} files
+ * @param {(pct: number) => void} onProgress  — overall upload progress 0-100
+ * @returns {Promise<{ total, succeeded, failed, results: Array }>}
+ */
+export async function uploadDocumentsBatch(files, onProgress) {
+  const form = new FormData();
+  files.forEach((f) => form.append('files', f));
+  const { data } = await api.post('/upload/batch', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 300_000, // 5 min — large batches can take a while
+    onUploadProgress: (e) => {
+      if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100));
+    },
+  });
+  return data;
+}
+
+/**
  * Get workflow status for a document.
  * @param {string} documentId
  * @returns {Promise<WorkflowStatusResponse>}

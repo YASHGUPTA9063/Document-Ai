@@ -1,4 +1,5 @@
 import os
+from typing import List
 os.environ["DEPLOYMENT_NAME"] = "document-processing-workflow"
 import logging
 import mimetypes
@@ -114,6 +115,103 @@ async def upload_document(file: UploadFile = File(...)):
             message="Upload successful, workflow started.",
             workflow_run_id=run_id
         )
+
+@app.post("/upload/batch")
+async def upload_documents_batch(files: List[UploadFile] = File(...)):
+    """
+    Batch upload endpoint — accepts multiple files in a single multipart request.
+    Each file gets its own DB record and Mistral workflow run.
+    All files are saved and workflow-triggered concurrently via asyncio.gather.
+    Returns per-file results plus a summary (total, succeeded, failed).
+    """
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided.")
+
+    MAX_BATCH_SIZE = 20
+    if len(files) > MAX_BATCH_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Batch too large. Maximum {MAX_BATCH_SIZE} files per request, got {len(files)}."
+        )
+
+    # Validate all file types upfront — fail fast before any IO
+    for file in files:
+        if file.content_type not in ALLOWED_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type for '{file.filename}': {file.content_type}"
+            )
+
+    async def _process_single(file: UploadFile) -> dict:
+        """Save one file, create a DB record, and kick off a Mistral workflow."""
+        try:
+            file_path = await save_file(file, settings.STORAGE_DIR)
+
+            async with AsyncSessionLocal() as session:
+                doc = Document(
+                    filename=file.filename,
+                    file_path=file_path,
+                    status="pending"
+                )
+                session.add(doc)
+                await session.commit()
+                await session.refresh(doc)
+
+                run_response = await mistral_client.workflows.execute_workflow_async(
+                    workflow_identifier="document_processing_workflow",
+                    input={
+                        "document_id": doc.id,
+                        "filename": doc.filename,
+                        "file_path": doc.file_path
+                    }
+                )
+
+                run_id = (
+                    run_response.execution_id
+                    if hasattr(run_response, "execution_id")
+                    else "unknown_run_id"
+                )
+                doc.workflow_run_id = run_id
+                await session.commit()
+
+                return {
+                    "document_id": doc.id,
+                    "filename":    file.filename,
+                    "status":      doc.status,
+                    "workflow_run_id": run_id,
+                    "success":     True,
+                    "error":       None,
+                }
+
+        except Exception as e:
+            logger.error(f"Batch upload failed for '{file.filename}': {e}")
+            return {
+                "document_id":    None,
+                "filename":       file.filename,
+                "status":         "error",
+                "workflow_run_id": None,
+                "success":        False,
+                "error":          str(e),
+            }
+
+    # Run all file uploads concurrently
+    results = list(await asyncio.gather(*[_process_single(f) for f in files]))
+
+    succeeded = sum(1 for r in results if r["success"])
+    failed    = len(results) - succeeded
+
+    logger.info(
+        f"Batch upload done — {succeeded} succeeded, {failed} failed "
+        f"out of {len(files)} files."
+    )
+
+    return {
+        "total":     len(files),
+        "succeeded": succeeded,
+        "failed":    failed,
+        "results":   results,
+    }
+
 
 @app.get("/status/{document_id}", response_model=WorkflowStatusResponse)
 async def get_status(document_id: str):
@@ -429,8 +527,14 @@ async def get_document_file(document_id: str):
         mime_type, _ = mimetypes.guess_type(doc.file_path)
         if not mime_type:
             mime_type = "application/octet-stream"
-            
-        return FileResponse(doc.file_path, media_type=mime_type, filename=doc.filename)
+
+        # Use inline disposition so the browser renders PDFs/images directly
+        # instead of triggering a file download.
+        headers = {
+            "Content-Disposition": f"inline; filename=\"{doc.filename}\"",
+            "Cache-Control": "no-cache",
+        }
+        return FileResponse(doc.file_path, media_type=mime_type, headers=headers)
 
 @app.delete("/documents/{document_id}")
 async def delete_document(document_id: str):

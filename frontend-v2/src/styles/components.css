@@ -628,3 +628,75 @@ tbody tr:hover .row-arrow { opacity: 1; color: var(--accent); }
   .agents-grid { grid-template-columns: 1fr; }
   .modal { min-width: unset; }
 }
+
+/* ─── Batch Mode Chip ────────────────────────────── */
+.batch-mode-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--accent-dim);
+  border: 1px solid rgba(79,110,247,0.25);
+  color: var(--accent);
+  border-radius: 99px;
+  padding: 4px 11px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  vertical-align: middle;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+/* ─── Batch Progress Panel ───────────────────────── */
+.batch-progress-panel {
+  background: rgba(79,110,247,0.06);
+  border: 1px solid rgba(79,110,247,0.18);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  position: relative;
+  overflow: hidden;
+}
+.batch-progress-panel::before {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0;
+  height: 2px;
+  background: var(--grad-brand);
+  animation: shimmer 2s linear infinite;
+}
+
+/* ─── Batch Stats Row ────────────────────────────── */
+.batch-stats-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.batch-stat-cell {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 6px 0;
+}
+.batch-stat-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* ─── Spin keyframe (for in-batch spinner) ───────── */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ─── Shimmer animation for progress panel header ── */
+@keyframes shimmer {
+  0%   { transform: translateX(-100%); opacity: 1; }
+  50%  { opacity: 0.7; }
+  100% { transform: translateX(100%); opacity: 1; }
+}
+

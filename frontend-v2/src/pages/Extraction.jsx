@@ -153,17 +153,57 @@ export function Extraction() {
             
             if (ext === 'pdf') {
               return (
-                <iframe
-                  src={`${fileUrl}#toolbar=0&navpanes=0`}
-                  style={{
-                    width: '100%',
-                    height: '450px',
-                    border: '1px solid var(--border)',
-                    borderRadius: '8px',
-                    background: 'var(--surface)',
-                  }}
-                  title={filename}
-                />
+                <div style={{
+                  width: '100%',
+                  height: '450px',
+                  border: '1px solid var(--border)',
+                  borderRadius: '8px',
+                  overflow: 'hidden',
+                  background: 'var(--surface)',
+                  position: 'relative',
+                }}>
+                  <object
+                    data={`${fileUrl}#toolbar=1&navpanes=0&view=FitH`}
+                    type="application/pdf"
+                    style={{ width: '100%', height: '100%', border: 'none' }}
+                  >
+                    {/* Fallback iframe if <object> not supported */}
+                    <iframe
+                      src={`${fileUrl}#toolbar=1&navpanes=0`}
+                      style={{ width: '100%', height: '100%', border: 'none' }}
+                      title={filename}
+                    />
+                    {/* Last-resort text fallback */}
+                    <div style={{ padding: 24, textAlign: 'center' }}>
+                      <p style={{ color: 'var(--muted)', marginBottom: 12 }}>
+                        Your browser cannot display PDFs inline.
+                      </p>
+                      <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="btn btn-ghost btn-sm">
+                        Open PDF
+                      </a>
+                    </div>
+                  </object>
+                  {/* Always show an "open in new tab" button */}
+                  <a
+                    href={fileUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      position: 'absolute',
+                      bottom: 8,
+                      right: 8,
+                      fontSize: 11,
+                      padding: '3px 10px',
+                      background: 'var(--surface)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 6,
+                      color: 'var(--muted)',
+                      textDecoration: 'none',
+                    }}
+                  >
+                    ↗ Open in new tab
+                  </a>
+                </div>
               );
             } else if (['png', 'jpg', 'jpeg', 'webp'].includes(ext)) {
               return (
