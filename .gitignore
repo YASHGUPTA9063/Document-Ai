@@ -20,6 +20,12 @@ Desktop.ini
 
 # Python
 .venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.ipynb_checkpoints/
 
 # Environments
 .env
