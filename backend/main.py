@@ -222,6 +222,9 @@ async def get_status(document_id: str):
         doc = result.scalar_one_or_none()
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
+        # Treat soft-deleted documents as gone (fix #4)
+        if doc.status == "deleted":
+            raise HTTPException(status_code=404, detail="Document not found")
             
         return WorkflowStatusResponse(
             document_id=doc.id,
@@ -487,8 +490,13 @@ async def list_agents():
 async def list_documents(page: int = Query(1, ge=1), limit: int = Query(20, ge=1, le=100)):
     async with AsyncSessionLocal() as session:
         offset = (page - 1) * limit
+        # Exclude soft-deleted documents so they don't pollute the list (fix #4)
         result = await session.execute(
-            select(Document).order_by(Document.created_at.desc()).offset(offset).limit(limit)
+            select(Document)
+            .where(Document.status != "deleted")
+            .order_by(Document.created_at.desc())
+            .offset(offset)
+            .limit(limit)
         )
         docs = result.scalars().all()
         return [{"id": d.id, "filename": d.filename, "status": d.status, "doc_type": d.doc_type} for d in docs]

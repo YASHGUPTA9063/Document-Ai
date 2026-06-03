@@ -30,3 +30,12 @@ __pycache__/
 # Environments
 .env
 *.db
+
+# Document storage (uploaded files — never commit real document data)
+storage/
+
+# Test / scratch files (fix #5 — prevent dev leftovers from being committed)
+test.*
+test_*.*
+fake*.*
+scratch.*
