@@ -4,7 +4,7 @@ import { useDocumentList } from '../hooks/useDocumentList';
 import { StatCard } from '../components/ui/StatCard';
 import { DonutChart } from '../components/ui/DonutChart';
 import { ConfidenceBar } from '../components/ui/ConfidenceBar';
-import { FileText, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+import { FileText, CheckCircle2, XCircle, Loader2, BarChart2 } from 'lucide-react';
 
 function BarChart({ data }) {
   if (!data || data.length === 0) return <div className="empty-state" style={{ padding: 24 }}><div className="empty-sub">No data yet</div></div>;
@@ -108,7 +108,7 @@ export function Analytics() {
       {total === 0 && (
         <div className="card">
           <div className="empty-state">
-            <div className="empty-icon">📊</div>
+            <BarChart2 className="empty-icon" size={36} />
             <div className="empty-title">No analytics yet</div>
             <div className="empty-sub">Upload and process documents to see metrics here.</div>
           </div>

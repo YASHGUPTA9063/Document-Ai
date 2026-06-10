@@ -101,3 +101,6 @@ class DuplicateDecisionRequest(BaseModel):
 class ReviewerDecisionRequest(BaseModel):
     approved: bool
     corrections: Optional[Dict[str, Any]] = None
+
+class UpdateExtractedDataRequest(BaseModel):
+    validated_data: Dict[str, Any]

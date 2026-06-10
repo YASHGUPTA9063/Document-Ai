@@ -87,7 +87,12 @@ function QueueItem({ item, onRemove, locked }) {
             In Batch
           </span>
         )}
-        {isDone && <span className="badge badge-green">✓ Submitted</span>}
+        {isDone && (
+          <span className="badge badge-green" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <CheckCircle2 size={11} />
+            Submitted
+          </span>
+        )}
         {isError && <span className="badge badge-red">Failed</span>}
 
         {!locked && item.status !== 'uploading' && (
@@ -264,26 +269,45 @@ export function Upload() {
             onDrop={handleDrop}
             onClick={() => !uploading && fileInputRef.current?.click()}
           >
-            <div className="upload-icon">
-              <UploadCloud size={30} color="var(--accent)" strokeWidth={1.5} />
+            {/* Glowing Icon Circle with Outer Dashed Spinner */}
+            <div className="upload-icon-circle">
+              <UploadCloud size={32} strokeWidth={1.5} style={{ transform: isDragover ? 'scale(1.1) translateY(-2px)' : 'none', transition: 'all 0.3s ease' }} />
             </div>
 
-            <div className="upload-title">Drop documents here or click to browse</div>
+            <h3 className="upload-main-heading">
+              Drag &amp; drop documents here or <span className="upload-accent-text">browse files</span>
+            </h3>
 
-            <div className="upload-sub" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-              <span className="batch-mode-chip">
-                <Layers size={11} />
-                Batch Mode · Up to {MAX_BATCH} files
-                <Zap size={11} style={{ marginLeft: 2 }} />
-                Parallel Server Processing
-              </span>
-              Powered by Mistral AI — classifies, extracts &amp; validates all files simultaneously
+            <p className="upload-sub-description">
+              Upload documents to start the automated AI ingestion pipeline. Your files will be classified, structured data extracted, and formulas validated in parallel.
+            </p>
+
+            {/* Redesigned File Type Chips */}
+            <div className="upload-types-grid" style={{ marginBottom: 24 }}>
+              {[
+                { name: 'PDF', icon: FileText, color: '#ef4444' },
+                { name: 'DOCX', icon: File, color: '#3b82f6' },
+                { name: 'PNG', icon: Image, color: '#10b981' },
+                { name: 'JPG', icon: Image, color: '#f59e0b' },
+                { name: 'WEBP', icon: Image, color: '#06b6d4' },
+              ].map((t) => {
+                const Icon = t.icon;
+                return (
+                  <span key={t.name} className="upload-type-badge">
+                    <Icon size={12} style={{ color: t.color }} />
+                    {t.name}
+                  </span>
+                );
+              })}
             </div>
 
-            <div className="upload-types">
-              {['📄 PDF', '📝 DOCX', '🖼️ PNG', '🖼️ JPG', '🖼️ WEBP'].map((t) => (
-                <span key={t} className="type-chip">{t}</span>
-              ))}
+            {/* Ingestion Pipeline Strip Info badge */}
+            <div className="upload-batch-strip">
+              <Layers size={13} />
+              <span>Batch Ingestion Mode (Up to {MAX_BATCH} files)</span>
+              <span style={{ opacity: 0.3 }}>•</span>
+              <Zap size={12} />
+              <span>Concurrently Processed via Mistral AI</span>
             </div>
 
             <input

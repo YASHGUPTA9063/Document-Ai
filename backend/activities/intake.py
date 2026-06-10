@@ -9,9 +9,20 @@ logger = logging.getLogger(__name__)
 @workflows.activity()
 async def intake_activity(document_id: str, filename: str) -> dict:
     try:
-        logger.info(f"[Document {document_id}] Starting intake activity for {filename}")
-        
-        existing_id = await db.check_duplicate_filename(filename, exclude_id=document_id)
+        # Get current document metadata to retrieve its hash
+        doc = await db.get_document(document_id)
+        if not doc:
+            raise ValueError(f"Document {document_id} not found in database")
+
+        existing_id = None
+        if doc.file_hash:
+            logger.info(f"[Document {document_id}] Checking duplicate by hash: {doc.file_hash}")
+            existing_id = await db.check_duplicate_hash(doc.file_hash, exclude_id=document_id)
+
+        if not existing_id:
+            logger.info(f"[Document {document_id}] Fallback checking duplicate by filename: {filename}")
+            existing_id = await db.check_duplicate_filename(filename, exclude_id=document_id)
+
         if existing_id:
             return {"is_duplicate": True, "existing_document_id": existing_id}
             

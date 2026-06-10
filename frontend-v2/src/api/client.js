@@ -87,6 +87,16 @@ export async function getExtractedData(documentId) {
 }
 
 /**
+ * Update extracted data for a document.
+ * @param {string} documentId
+ * @param {object} validatedData
+ */
+export async function updateExtractedData(documentId, validatedData) {
+  const { data } = await api.put(`/documents/${documentId}/extracted`, { validated_data: validatedData });
+  return data;
+}
+
+/**
  * Signal duplicate decision.
  * @param {string} workflowRunId
  * @param {boolean} override

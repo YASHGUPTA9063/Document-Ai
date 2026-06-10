@@ -3,8 +3,10 @@ import base64
 import aiofiles
 from fastapi import UploadFile
 
-async def save_file(file: UploadFile, storage_dir: str) -> str:
-    """Saves an uploaded file to the storage directory and returns absolute path."""
+import hashlib
+
+async def save_file(file: UploadFile, storage_dir: str) -> tuple[str, str]:
+    """Saves an uploaded file to the storage directory and returns (absolute_path, sha256_hash)."""
     os.makedirs(storage_dir, exist_ok=True)
     file_path = os.path.join(storage_dir, file.filename)
     
@@ -12,7 +14,8 @@ async def save_file(file: UploadFile, storage_dir: str) -> str:
         content = await file.read()
         await out_file.write(content)
         
-    return os.path.abspath(file_path)
+    file_hash = hashlib.sha256(content).hexdigest()
+    return os.path.abspath(file_path), file_hash
 
 def get_file_as_base64(file_path: str) -> str:
     """Reads file and returns base64 string."""

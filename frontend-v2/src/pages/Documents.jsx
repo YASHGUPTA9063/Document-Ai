@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Trash2, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Trash2, RefreshCw, ChevronLeft, ChevronRight, Folder, FileText } from 'lucide-react';
 import { deleteDocument, listDocuments } from '../api/client';
 import { useApp } from '../store/AppStore';
 import { StatusBadge } from '../components/ui/StatusBadge';
@@ -85,7 +85,7 @@ export function Documents() {
 
         {filtered.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-icon">📂</div>
+            <Folder className="empty-icon" size={36} />
             <div className="empty-title">No documents</div>
             <div className="empty-sub">
               {filter !== 'all' ? `No documents with status "${filter}".` : 'Upload a document to get started.'}
@@ -107,7 +107,7 @@ export function Documents() {
                 {filtered.map((doc) => (
                   <tr key={doc.id}>
                     <td>
-                      <span className="doc-icon">📄</span>
+                      <FileText size={14} className="doc-icon" style={{ display: 'inline-block', verticalAlign: 'middle' }} />
                       <span
                         style={{ cursor: 'pointer', color: 'var(--accent)' }}
                         onClick={() => navigate('/extraction')}

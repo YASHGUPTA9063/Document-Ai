@@ -18,7 +18,8 @@ from schemas.documents import (
     DocumentUploadResponse, 
     WorkflowStatusResponse, 
     DuplicateDecisionRequest, 
-    ReviewerDecisionRequest
+    ReviewerDecisionRequest,
+    UpdateExtractedDataRequest
 )
 from workflow import DocumentProcessingWorkflow
 
@@ -78,13 +79,14 @@ async def upload_document(file: UploadFile = File(...)):
     if file.content_type not in ALLOWED_TYPES:
         raise HTTPException(status_code=400, detail="Unsupported file type")
         
-    file_path = await save_file(file, settings.STORAGE_DIR)
+    file_path, file_hash = await save_file(file, settings.STORAGE_DIR)
     
     async with AsyncSessionLocal() as session:
         # Create Document record
         doc = Document(
             filename=file.filename,
             file_path=file_path,
+            file_hash=file_hash,
             status="pending"
         )
         session.add(doc)
@@ -145,12 +147,13 @@ async def upload_documents_batch(files: List[UploadFile] = File(...)):
     async def _process_single(file: UploadFile) -> dict:
         """Save one file, create a DB record, and kick off a Mistral workflow."""
         try:
-            file_path = await save_file(file, settings.STORAGE_DIR)
+            file_path, file_hash = await save_file(file, settings.STORAGE_DIR)
 
             async with AsyncSessionLocal() as session:
                 doc = Document(
                     filename=file.filename,
                     file_path=file_path,
+                    file_hash=file_hash,
                     status="pending"
                 )
                 session.add(doc)
@@ -516,6 +519,41 @@ async def get_extracted_data(document_id: str):
             "raw_extracted": data.raw_extracted,
             "validated_data": data.validated_data,
             "confidence_score": data.confidence_score,
+            "reviewer_corrections": data.reviewer_corrections
+        }
+
+@app.put("/documents/{document_id}/extracted")
+async def update_extracted_data(document_id: str, payload: UpdateExtractedDataRequest):
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(ExtractedData).where(ExtractedData.document_id == document_id)
+        )
+        data = result.scalar_one_or_none()
+        if not data:
+            raise HTTPException(status_code=404, detail="Extracted data not found")
+        
+        old_data = data.validated_data or {}
+        new_data = payload.validated_data
+        
+        # Determine differences and record them as reviewer corrections
+        corrections = dict(data.reviewer_corrections) if data.reviewer_corrections else {}
+        for k, v in new_data.items():
+            if str(old_data.get(k)) != str(v):
+                corrections[k] = v
+                
+        data.validated_data = new_data
+        data.reviewer_corrections = corrections
+        
+        # Set SQLAlchemy flag to track mutation on JSON columns
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(data, "validated_data")
+        flag_modified(data, "reviewer_corrections")
+        
+        await session.commit()
+        return {
+            "success": True,
+            "document_id": document_id,
+            "validated_data": data.validated_data,
             "reviewer_corrections": data.reviewer_corrections
         }
 

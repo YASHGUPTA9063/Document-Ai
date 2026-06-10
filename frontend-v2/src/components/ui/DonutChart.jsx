@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { BarChart2 } from 'lucide-react';
 
 const COLORS = ['#6366f1','#06b6d4','#10b981','#f59e0b','#8b5cf6','#ef4444','#3b82f6'];
 
@@ -44,7 +45,7 @@ export function DonutChart({ data = [] }) {
   if (!total) {
     return (
       <div className="empty-state" style={{ padding: '24px' }}>
-        <div className="empty-icon">📊</div>
+        <BarChart2 className="empty-icon" size={36} />
         <div className="empty-sub">No data yet</div>
       </div>
     );

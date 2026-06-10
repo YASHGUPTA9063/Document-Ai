@@ -1,17 +1,175 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle, XCircle, Edit3, RefreshCw, AlertTriangle } from 'lucide-react';
+import { CheckCircle, XCircle, Edit3, RefreshCw, AlertTriangle, FileText } from 'lucide-react';
 import { resumeReview, resumeDuplicate, getExtractedData } from '../api/client';
 import { useApp } from '../store/AppStore';
 import { useDocumentList } from '../hooks/useDocumentList';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { Modal } from '../components/ui/Modal';
 
+/**
+ * Inline field-level corrections editor.
+ * Renders extracted fields as styled inputs so reviewers can correct
+ * individual values instead of hand-editing raw JSON.
+ */
+function InlineCorrectionsEditor({ validatedData, onChange }) {
+  const [edits, setEdits] = useState(() => {
+    // Initialise with current values so the reviewer sees pre-filled inputs
+    const init = {};
+    if (validatedData && typeof validatedData === 'object') {
+      Object.entries(validatedData).forEach(([k, v]) => {
+        if (v != null && typeof v !== 'object') {
+          init[k] = String(v);
+        }
+      });
+    }
+    return init;
+  });
+
+  // Track which keys have been changed from the original
+  const [changed, setChanged] = useState(new Set());
+
+  const handleChange = (key, newVal) => {
+    const original = validatedData?.[key];
+    const isChanged = String(original) !== newVal;
+
+    setChanged((prev) => {
+      const next = new Set(prev);
+      isChanged ? next.add(key) : next.delete(key);
+      return next;
+    });
+
+    const next = { ...edits, [key]: newVal };
+    setEdits(next);
+
+    // Only pass changed fields as corrections
+    const corrections = {};
+    [...new Set([...changed, ...(isChanged ? [key] : [])])].forEach((k) => {
+      if (k === key) {
+        if (isChanged) corrections[k] = newVal;
+      } else {
+        corrections[k] = next[k];
+      }
+    });
+    // Re-derive corrections from the changed set after this update
+    const finalChanged = new Set(changed);
+    isChanged ? finalChanged.add(key) : finalChanged.delete(key);
+    const finalCorrections = {};
+    finalChanged.forEach((k) => {
+      finalCorrections[k] = k === key ? newVal : next[k];
+    });
+    onChange(finalCorrections);
+  };
+
+  if (!validatedData || typeof validatedData !== 'object') {
+    return (
+      <div style={{ fontSize: 13, color: 'var(--muted)', padding: '12px 0' }}>
+        No extracted fields available to edit.
+      </div>
+    );
+  }
+
+  const primitiveEntries = Object.entries(validatedData).filter(
+    ([, v]) => v != null && typeof v !== 'object'
+  );
+  const objectEntries = Object.entries(validatedData).filter(
+    ([, v]) => v != null && typeof v === 'object'
+  );
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {changed.size > 0 && (
+        <div style={{
+          fontSize: 12, color: 'var(--accent)', fontWeight: 600,
+          padding: '6px 10px', background: 'var(--accent-dim)',
+          borderRadius: 6, border: '1px solid rgba(79,110,247,0.2)',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+        }}>
+          <Edit3 size={13} />
+          {changed.size} field{changed.size !== 1 ? 's' : ''} modified
+        </div>
+      )}
+
+      {primitiveEntries.map(([key, originalVal]) => {
+        const isModified = changed.has(key);
+        return (
+          <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{
+              fontSize: 11, fontWeight: 600, color: isModified ? 'var(--accent)' : 'var(--muted)',
+              letterSpacing: '0.06em', textTransform: 'uppercase',
+              display: 'flex', alignItems: 'center', gap: 5,
+            }}>
+              {key.replace(/_/g, ' ')}
+              {isModified && (
+                <span style={{
+                  fontSize: 10, background: 'var(--accent)', color: 'white',
+                  borderRadius: 99, padding: '1px 6px',
+                }}>modified</span>
+              )}
+            </label>
+            <div style={{ position: 'relative' }}>
+              <input
+                id={`correction-field-${key}`}
+                type="text"
+                className="styled-input"
+                value={edits[key] ?? ''}
+                onChange={(e) => handleChange(key, e.target.value)}
+                placeholder={String(originalVal)}
+                style={{
+                  borderColor: isModified ? 'var(--accent)' : undefined,
+                  boxShadow: isModified ? '0 0 0 3px var(--accent-dim)' : undefined,
+                  paddingRight: isModified ? 70 : undefined,
+                  transition: 'all 0.2s ease',
+                }}
+              />
+              {isModified && (
+                <button
+                  type="button"
+                  onClick={() => handleChange(key, String(originalVal))}
+                  style={{
+                    position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                    fontSize: 10, color: 'var(--muted)', background: 'var(--card-alt)',
+                    border: '1px solid var(--border)', borderRadius: 4,
+                    padding: '2px 7px', cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                  title="Reset to original"
+                >
+                  ↩ reset
+                </button>
+              )}
+            </div>
+            {isModified && (
+              <div style={{ fontSize: 11, color: 'var(--muted)', paddingLeft: 2 }}>
+                Original: <span style={{ fontFamily: 'monospace', color: 'var(--text-dim)' }}>{String(originalVal)}</span>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {objectEntries.length > 0 && (
+        <div style={{
+          fontSize: 11, color: 'var(--muted)', padding: '8px 10px',
+          background: 'var(--surface)', borderRadius: 6,
+          border: '1px solid var(--border)',
+        }}>
+          <strong>Note:</strong> Complex/nested fields (
+          {objectEntries.map(([k]) => <code key={k} style={{ margin: '0 3px' }}>{k}</code>)}
+          ) cannot be edited inline and are passed through unchanged.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ReviewCard({ doc, onAction }) {
   const [extracted, setExtracted] = useState(null);
   const [showEdit, setShowEdit] = useState(false);
   const [showRejectConfirm, setShowRejectConfirm] = useState(false);
-  const [corrections, setCorrections] = useState('{}');
+  const [corrections, setCorrections] = useState({});
   const [loading, setLoading] = useState(false);
   const { toast } = useApp();
 
@@ -52,13 +210,19 @@ function ReviewCard({ doc, onAction }) {
 
   const isDuplicateWait = doc.message?.toLowerCase().includes('duplicate');
 
+  const handleSaveAndApprove = () => {
+    // Pass corrections only if any fields were changed
+    handle(true, Object.keys(corrections).length > 0 ? corrections : null);
+  };
+
   return (
     <>
       <div className="card" style={{ borderColor: 'rgba(245,158,11,0.3)', background: 'rgba(245,158,11,0.03)' }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 14 }}>
           <div>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>
-              <span className="doc-icon">📄</span>{doc.filename}
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <FileText size={14} className="doc-icon" style={{ display: 'inline-block', verticalAlign: 'middle' }} />
+              {doc.filename}
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <StatusBadge status={doc.status} />
@@ -116,7 +280,7 @@ function ReviewCard({ doc, onAction }) {
               <button className="btn btn-danger" onClick={() => setShowRejectConfirm(true)} disabled={loading}>
                 <XCircle size={14} /> Reject
               </button>
-              <button className="btn btn-ghost" onClick={() => setShowEdit(true)} disabled={loading}>
+              <button className="btn btn-ghost" onClick={() => { setCorrections({}); setShowEdit(true); }} disabled={loading}>
                 <Edit3 size={14} /> Edit &amp; Approve
               </button>
             </>
@@ -155,41 +319,31 @@ function ReviewCard({ doc, onAction }) {
         </Modal>
       )}
 
-      {/* Edit modal */}
+      {/* ── Feature 21: Inline edit modal with individual field inputs ── */}
       {showEdit && (
         <Modal
           title="Edit &amp; Approve"
-          subtitle={`Correct extracted fields for ${doc.filename}`}
+          subtitle={`Correct extracted fields for ${doc.filename} — only changed values are submitted.`}
           onClose={() => setShowEdit(false)}
           footer={
             <>
               <button className="btn btn-ghost" onClick={() => setShowEdit(false)}>Cancel</button>
               <button
+                id="corrections-save-btn"
                 className="btn btn-primary"
-                onClick={() => {
-                  try {
-                    const corr = JSON.parse(corrections);
-                    handle(true, corr);
-                  } catch {
-                    toast('Invalid JSON — please check your corrections', 'error');
-                  }
-                }}
+                onClick={handleSaveAndApprove}
+                disabled={loading}
               >
-                Save &amp; Approve
+                {Object.keys(corrections).length > 0
+                  ? `Save ${Object.keys(corrections).length} Correction${Object.keys(corrections).length !== 1 ? 's' : ''} & Approve`
+                  : 'Approve without changes'}
               </button>
             </>
           }
         >
-          <div style={{ fontSize: 'var(--text-base)', color: 'var(--muted)', marginBottom: 8 }}>
-            Enter corrections as JSON (field_name: corrected_value):
-          </div>
-          <textarea
-            className="styled-input"
-            rows={8}
-            value={corrections}
-            onChange={(e) => setCorrections(e.target.value)}
-            style={{ fontFamily: 'monospace', fontSize: 'var(--text-base)', resize: 'vertical' }}
-            placeholder={'{\n  "vendor_name": "Corrected Corp",\n  "total_amount": 1234.56\n}'}
+          <InlineCorrectionsEditor
+            validatedData={extracted?.validated_data}
+            onChange={setCorrections}
           />
         </Modal>
       )}
@@ -234,7 +388,10 @@ export function Validation() {
           <div className="card" style={{ marginBottom: 16 }}>
             <div className="card-header">
               <div>
-                <div className="card-title">⚠️ Pending Human Review</div>
+                <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <AlertTriangle size={16} style={{ color: 'var(--warn)' }} />
+                  Pending Human Review
+                </div>
                 <div className="card-sub">{visible.length} document{visible.length !== 1 ? 's' : ''} awaiting decision</div>
               </div>
               <button className="btn btn-ghost btn-sm" onClick={refresh} disabled={loading}>
@@ -246,7 +403,9 @@ export function Validation() {
           {visible.length === 0 ? (
             <div className="card">
               <div className="empty-state">
-                <div className="empty-icon">✅</div>
+                <div className="empty-icon-wrap" style={{ color: 'var(--success)', background: 'var(--success-dim)', border: '1px solid var(--success-border)' }}>
+                  <CheckCircle size={32} />
+                </div>
                 <div className="empty-title">All clear!</div>
                 <div className="empty-sub">No documents are currently awaiting review.</div>
                 <button className="btn btn-ghost btn-sm" style={{ marginTop: 14 }} onClick={() => navigate('/documents')}>
@@ -282,7 +441,7 @@ export function Validation() {
             <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7 }}>
               <p style={{ marginBottom: 8 }}>Documents are automatically approved if confidence ≥ 80%. Otherwise, they enter this review queue.</p>
               <p style={{ marginBottom: 8 }}><strong>Approve</strong> — signals the workflow to finalize and store extracted data.</p>
-              <p style={{ marginBottom: 8 }}><strong>Edit &amp; Approve</strong> — allows correcting individual fields before approval. Corrections are stored.</p>
+              <p style={{ marginBottom: 8 }}><strong>Edit &amp; Approve</strong> — opens an inline field editor. Each extracted field appears as a styled input — just change what's wrong and the corrections are tracked automatically. No manual JSON required.</p>
               <p><strong>Reject</strong> — marks the document as rejected and stops processing.</p>
             </div>
           </div>

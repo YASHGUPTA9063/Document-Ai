@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, Cpu, CheckCircle, ListTodo, FileText } from 'lucide-react';
 import { useApp } from '../store/AppStore';
 import { useDocumentList } from '../hooks/useDocumentList';
 import { useDocumentPoller } from '../hooks/useDocumentPoller';
@@ -36,7 +36,10 @@ export function Processing() {
         <div className="card">
           <div className="card-header">
             <div>
-              <div className="card-title">🔄 Live Processing Pipeline</div>
+              <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Cpu size={16} style={{ color: 'var(--accent)' }} />
+                Live Processing Pipeline
+              </div>
               <div className="card-sub">
                 Processing: <strong style={{ color: 'var(--accent)' }}>{featured.filename}</strong>
               </div>
@@ -51,7 +54,9 @@ export function Processing() {
       ) : (
         <div className="card">
           <div className="empty-state">
-            <div className="empty-icon">🟢</div>
+            <div className="empty-icon-wrap" style={{ color: 'var(--success)', background: 'var(--success-dim)', border: '1px solid var(--success-border)' }}>
+              <CheckCircle size={32} />
+            </div>
             <div className="empty-title">No active processing</div>
             <div className="empty-sub">All documents have been processed or the queue is empty.</div>
             <button className="btn btn-primary" style={{ marginTop: 14 }} onClick={() => navigate('/upload')}>
@@ -64,7 +69,10 @@ export function Processing() {
       {/* Processing Queue Table */}
       <div className="card">
         <div className="card-header">
-          <div className="card-title">📋 Processing Queue</div>
+          <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <ListTodo size={16} style={{ color: 'var(--accent)' }} />
+            Processing Queue
+          </div>
           <button className="btn btn-ghost btn-sm" onClick={refresh} disabled={loading}>
             <RefreshCw size={12} className={loading ? 'spin' : ''} /> Refresh
           </button>
@@ -89,7 +97,7 @@ export function Processing() {
                 {pendingDocs.map((doc) => (
                   <tr key={doc.id}>
                     <td>
-                      <span className="doc-icon">📄</span>
+                      <FileText size={14} className="doc-icon" style={{ display: 'inline-block', verticalAlign: 'middle' }} />
                       <span style={{ fontSize: 12 }}>{doc.filename}</span>
                     </td>
                     <td>
@@ -130,7 +138,7 @@ export function Processing() {
               {documents.slice(0, 10).map((doc) => (
                 <tr key={doc.id} style={{ cursor: 'pointer' }} onClick={() => navigate('/extraction')}>
                   <td>
-                    <span className="doc-icon">📄</span>
+                    <FileText size={14} className="doc-icon" style={{ display: 'inline-block', verticalAlign: 'middle' }} />
                     <span style={{ fontSize: 12 }}>{doc.filename}</span>
                   </td>
                   <td>

@@ -1,6 +1,23 @@
 import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, ExternalLink, Cpu, Zap, AlertTriangle } from 'lucide-react';
+import {
+  RefreshCw, ExternalLink, Cpu, Zap, AlertTriangle,
+  Upload, Bot, FileSearch, CheckCircle, FileText, UserCheck, GitBranch
+} from 'lucide-react';
 import { getAgents } from '../api/client';
+
+const AGENT_ICON_MAP = {
+  intake: Upload,
+  classifier: Bot,
+  invoice_extractor: FileSearch,
+  contract_extractor: FileSearch,
+  kyc_extractor: FileSearch,
+  medical_extractor: FileSearch,
+  bank_extractor: FileSearch,
+  others_extractor: FileSearch,
+  validator: CheckCircle,
+  reviewer: UserCheck,
+  output: FileText,
+};
 
 // ─── Skeleton card shown while loading ───────────────────────────────────────
 function AgentSkeleton() {
@@ -90,9 +107,12 @@ function AgentCard({ agent, index }) {
       {/* Avatar */}
       <div
         className="agent-avatar"
-        style={{ background: agent.color, border: `1px solid ${agent.border}` }}
+        style={{ background: agent.color, border: `1px solid ${agent.border}`, display: 'flex', alignItems: 'center', justify: 'center' }}
       >
-        {agent.emoji}
+        {(() => {
+          const IconComponent = AGENT_ICON_MAP[agent.key] || Bot;
+          return <IconComponent size={20} style={{ color: agent.border }} />;
+        })()}
       </div>
 
       {/* Source badge */}
@@ -199,7 +219,12 @@ function PipelineGraph({ agents }) {
                 background: s.agent.color,
                 border: `1.5px solid ${s.agent.border}`,
               }}>
-                <span style={{ fontSize: 22, flexShrink: 0, lineHeight: 1 }}>{s.agent.emoji}</span>
+                <span style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+                  {(() => {
+                    const IconComponent = AGENT_ICON_MAP[s.agent.key] || Bot;
+                    return <IconComponent size={20} style={{ color: s.agent.border }} />;
+                  })()}
+                </span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text)', lineHeight: 1.3 }}>
                     {s.agent.name.replace(' Agent', '')}
@@ -232,7 +257,9 @@ function PipelineGraph({ agents }) {
               }}>
                 {/* Header row */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                  <span style={{ fontSize: 22, lineHeight: 1 }}>🔍</span>
+                  <span style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+                    <FileSearch size={20} style={{ color: 'var(--accent)' }} />
+                  </span>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text)', lineHeight: 1.3 }}>Extractor</div>
                     <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>
@@ -245,12 +272,16 @@ function PipelineGraph({ agents }) {
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                   {extractors.map(e => (
                     <span key={e.key} style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 5,
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
                       padding: '4px 11px', borderRadius: 99,
                       background: e.color, border: `1px solid ${e.border}`,
                       fontSize: 11, fontWeight: 600, color: e.border,
                     }}>
-                      {e.emoji} {e.name.split(' ')[0]}
+                      {(() => {
+                        const IconComponent = AGENT_ICON_MAP[e.key] || FileSearch;
+                        return <IconComponent size={12} />;
+                      })()}
+                      {e.name.split(' ')[0]}
                     </span>
                   ))}
                 </div>
@@ -373,7 +404,10 @@ export function Agents() {
         <div className="card" style={{ overflow: 'hidden' }}>
           <div className="card-header">
             <div>
-              <div className="card-title">🔀 Agent Collaboration Graph</div>
+              <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <GitBranch size={16} style={{ color: 'var(--accent)' }} />
+                Agent Collaboration Graph
+              </div>
               <div className="card-sub">Vertical pipeline · conditional fan-out at extraction phase · human review gate</div>
             </div>
           </div>

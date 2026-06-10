@@ -13,6 +13,7 @@ class Document(Base):
     id = Column(String, primary_key=True, default=generate_uuid)
     filename = Column(String, index=True, nullable=False)
     file_path = Column(String, nullable=False)
+    file_hash = Column(String, index=True, nullable=True)
     doc_type = Column(String, nullable=True)
     status = Column(String, nullable=False, default="pending")
     workflow_run_id = Column(String, nullable=True)

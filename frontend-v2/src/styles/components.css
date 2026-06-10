@@ -260,46 +260,97 @@ tbody tr:hover .row-arrow { opacity: 1; color: var(--accent); }
 
 /* ─── Upload Zone ───────────────────────────────── */
 .upload-zone {
-  background: var(--card);
+  position: relative;
+  background: var(--surface-elevated);
   border: 1.5px dashed var(--border-hi);
   border-radius: var(--radius-lg);
-  padding: 52px 24px;
+  padding: 64px 32px;
   text-align: center; cursor: pointer;
+  overflow: hidden;
   transition: all var(--dur-md) var(--ease);
-  position: relative; overflow: hidden;
+  box-shadow: var(--shadow-card);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 .upload-zone::before {
   content: '';
   position: absolute; inset: 0;
-  background: radial-gradient(ellipse 60% 50% at 50% 100%, rgba(79, 110, 247, 0.08) 0%, transparent 70%);
+  background: radial-gradient(circle at 50% 50%, rgba(79, 110, 247, 0.08) 0%, transparent 60%);
   pointer-events: none;
+  opacity: 0.8;
   transition: opacity var(--dur-md) var(--ease);
-  opacity: 0;
 }
 .upload-zone:hover, .upload-zone.dragover {
-  background: var(--accent-dim);
   border-color: var(--accent);
-  box-shadow: var(--glow-sm);
+  background: var(--surface-elevated);
+  box-shadow: var(--glow-sm), var(--shadow-card);
+  transform: translateY(-2px);
 }
-.upload-zone:hover::before, .upload-zone.dragover::before { opacity: 1; }
-.upload-zone .upload-icon {
-  width: 64px; height: 64px;
-  background: var(--accent-dim); border: 1px solid rgba(79,110,247,0.2);
-  border-radius: var(--radius-lg);
+.upload-zone:hover::before, .upload-zone.dragover::before {
+  background: radial-gradient(circle at 50% 50%, rgba(79, 110, 247, 0.15) 0%, transparent 60%);
+  opacity: 1;
+}
+.upload-icon-circle {
+  width: 80px; height: 80px;
+  border-radius: 50%;
+  background: var(--accent-dim); border: 1.5px solid rgba(79, 110, 247, 0.15);
   display: flex; align-items: center; justify-content: center;
-  margin: 0 auto 16px;
+  margin-bottom: 24px;
+  color: var(--accent);
   transition: all var(--dur-md) var(--ease-spring);
+  position: relative;
+  box-shadow: inset 0 2px 4px rgba(79, 110, 247, 0.05);
 }
-.upload-zone:hover .upload-icon, .upload-zone.dragover .upload-icon {
-  transform: translateY(-4px) scale(1.06);
-  box-shadow: var(--glow-sm);
+.upload-icon-circle::after {
+  content: '';
+  position: absolute; inset: -6px;
+  border-radius: 50%;
+  border: 1.5px dashed rgba(79, 110, 247, 0.15);
+  animation: spin 20s linear infinite;
+  transition: all var(--dur-md) var(--ease);
 }
-.upload-title { font-size: var(--text-xl); font-weight: 700; margin-bottom: 6px; letter-spacing: -0.2px; }
-.upload-sub { font-size: var(--text-base); color: var(--muted); margin-bottom: 20px; line-height: 1.6; }
-.upload-types { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
-.type-chip {
-  background: var(--card-alt); border: 1px solid var(--border);
-  border-radius: 99px; padding: 4px 12px; font-size: var(--text-sm); color: var(--text-dim);
+.upload-zone:hover .upload-icon-circle, .upload-zone.dragover .upload-icon-circle {
+  transform: scale(1.06);
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+  box-shadow: var(--glow);
+}
+.upload-zone:hover .upload-icon-circle::after, .upload-zone.dragover .upload-icon-circle::after {
+  inset: -8px;
+  border-color: rgba(79, 110, 247, 0.35);
+  animation: spin 10s linear infinite;
+}
+.upload-main-heading {
+  font-size: var(--text-2xl); font-weight: 700; margin-bottom: 8px; letter-spacing: -0.02em; color: var(--text);
+}
+.upload-accent-text {
+  color: var(--accent); text-decoration: underline; text-underline-offset: 4px; transition: color var(--dur) var(--ease);
+}
+.upload-sub-description {
+  font-size: var(--text-md); color: var(--muted); max-width: 480px; line-height: 1.6; margin-bottom: 24px;
+}
+.upload-batch-strip {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 8px 16px; background: var(--card-alt); border: 1px solid var(--border);
+  border-radius: 99px; margin-top: 24px; font-size: var(--text-sm); color: var(--text-dim);
+  font-weight: 600; box-shadow: var(--shadow-sm); transition: all var(--dur) var(--ease);
+}
+.upload-batch-strip:hover {
+  background: var(--card-hi); border-color: var(--border-hi);
+}
+.upload-types-grid {
+  display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;
+}
+.upload-type-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 14px; border-radius: 99px; background: var(--card-alt); border: 1px solid var(--border);
+  font-size: var(--text-sm); font-weight: 600; color: var(--text-dim); transition: all var(--dur) var(--ease);
+}
+.upload-type-badge:hover {
+  transform: translateY(-1px); border-color: var(--border-hi); background: var(--card-hi); box-shadow: var(--shadow-sm);
 }
 
 /* ─── Pipeline Steps ────────────────────────────── */

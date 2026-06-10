@@ -49,3 +49,23 @@ async def check_duplicate_filename(filename: str, exclude_id: str = None) -> str
         if doc:
             return doc.id
     return None
+
+async def get_document(document_id: str) -> Document:
+    """Fetch a document by its ID."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Document).where(Document.id == document_id))
+        return result.scalar_one_or_none()
+
+async def check_duplicate_hash(file_hash: str, exclude_id: str = None) -> str:
+    """Returns document_id if duplicate file_hash exists, else None."""
+    if not file_hash:
+        return None
+    async with AsyncSessionLocal() as session:
+        query = select(Document).where(Document.file_hash == file_hash).where(Document.status != "deleted")
+        if exclude_id:
+            query = query.where(Document.id != exclude_id)
+        result = await session.execute(query)
+        doc = result.scalars().first()
+        if doc:
+            return doc.id
+    return None

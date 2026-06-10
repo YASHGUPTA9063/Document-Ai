@@ -168,12 +168,12 @@
 
 ---
 
-### 19. No Side-by-Side Document Viewer + Extracted Data Panel
+### ~~19. No Side-by-Side Document Viewer + Extracted Data Panel~~ ✅ IMPLEMENTED
 **File:** [`frontend-v2/src/pages/Extraction.jsx`](file:///c:/Users/Dhruvkumar/Desktop/Document-Ai/frontend-v2/src/pages/Extraction.jsx)
 
 **Reason:** The Extraction page shows extracted fields but not the original document alongside them. Reviewers have to mentally cross-reference between the AI output and the source document, making corrections error-prone.
 
-**Fix:** Use the existing `GET /documents/{id}/file` endpoint to embed the document (PDF/image) in an iframe/viewer on the left, with extracted fields on the right.
+**Fix (applied):** The left panel is now a sticky document viewer (PDF via `<object>` + iframe fallback, images via `<img>`) that stays fixed as the user scrolls the extracted fields on the right. A "⛶ Expand" button opens a full-screen overlay viewer and a "↗ New tab" link is always available. A confidence banner is pinned to the bottom of the viewer. The viewer height matches the viewport so both panels are always in sync visually.
 
 ---
 
@@ -186,12 +186,12 @@
 
 ---
 
-### 21. No Inline Edit for Reviewer Corrections
+### ~~21. No Inline Edit for Reviewer Corrections~~ ✅ IMPLEMENTED
 **File:** [`frontend-v2/src/pages/Validation.jsx`](file:///c:/Users/Dhruvkumar/Desktop/Document-Ai/frontend-v2/src/pages/Validation.jsx)
 
 **Reason:** The Validation page allows reviewers to approve/reject, but the schema supports `corrections: dict`. There is no UI to actually input field-level corrections. Reviewers can only approve or reject wholesale — they can't fix individual extracted fields.
 
-**Fix:** Render the `validated_data` fields as editable inputs. Collect changed values into the `corrections` dict before submitting the `ReviewerDecisionRequest`.
+**Fix (applied):** The "Edit & Approve" modal now renders each field from `validated_data` as a styled labelled input pre-filled with the current value. Only fields whose values differ from the original are collected into the `corrections` dict. Each modified field shows a "modified" pill badge, the original value below the input as a hint, and an individual "↩ reset" button. The submit button dynamically labels itself with the correction count (e.g. "Save 2 Corrections & Approve"). Complex/nested fields are noted but excluded from inline editing.
 
 ---
 
