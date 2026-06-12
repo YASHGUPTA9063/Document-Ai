@@ -486,6 +486,29 @@ async def list_agents():
 
     # Merge: static agents + mistral agents, sorted by pipeline step
     all_agents = STATIC_AGENTS + mistral_agents
+    
+    # Append dynamic custom extractors based on templates.json
+    default_keys = {"invoice", "contract", "kyc", "medical_record", "bank_record", "others"}
+    templates = load_templates()
+    for key in templates.keys():
+        norm_key = key.lower().replace(" ", "_")
+        if norm_key not in default_keys:
+            display_name = " ".join(w.capitalize() for w in norm_key.split("_"))
+            all_agents.append({
+                "key": f"{norm_key}_extractor",
+                "name": f"{display_name} Agent",
+                "step": 3,
+                "role": f"{display_name} field extraction",
+                "description": f"Dynamic extraction agent customized for {display_name} documents.",
+                "emoji": "📄",
+                "color": "rgba(79,110,247,0.15)",
+                "border": "#4f6ef7",
+                "model": "mistral-large-latest",
+                "agent_id": settings.OTHERS_EXTRACTOR_AGENT_ID,
+                "tools": ["Generic OCR", "Dynamic Schema Parser"],
+                "source": "mistral",
+            })
+
     all_agents.sort(key=lambda a: a["step"])
     return all_agents
 
@@ -629,67 +652,7 @@ import json
 
 TEMPLATES_FILE = os.path.join(settings.STORAGE_DIR, "templates.json")
 
-DEFAULT_TEMPLATES = {
-    "invoice": [
-        {"key": "invoice_number", "label": "Invoice Number", "type": "Text", "required": True, "description": "Unique identifier of the invoice"},
-        {"key": "invoice_date", "label": "Invoice Date", "type": "Date", "required": True, "description": "Date the invoice was issued"},
-        {"key": "vendor_name", "label": "Vendor Name", "type": "Text", "required": True, "description": "Name of the issuing vendor"},
-        {"key": "vendor_address", "label": "Vendor Address", "type": "Text", "required": False, "description": "Address of the vendor"},
-        {"key": "bill_to", "label": "Bill To", "type": "Text", "required": False, "description": "Recipient or entity being billed"},
-        {"key": "subtotal", "label": "Subtotal", "type": "Number", "required": False, "description": "Amount before taxes or discounts"},
-        {"key": "tax", "label": "Tax", "type": "Number", "required": False, "description": "Calculated tax amount"},
-        {"key": "total_amount", "label": "Total Amount", "type": "Number", "required": True, "description": "Final total amount due"},
-        {"key": "currency", "label": "Currency", "type": "Text", "required": False, "description": "Transaction currency code (e.g. USD, EUR)"},
-        {"key": "due_date", "label": "Due Date", "type": "Date", "required": False, "description": "Deadline for invoice payment"},
-        {"key": "payment_terms", "label": "Payment Terms", "type": "Text", "required": False, "description": "Terms of payment (e.g. Net 30)"},
-        {"key": "line_items", "label": "Line Items", "type": "Array of Objects", "required": False, "description": "Tabular items representing purchased items or services"}
-    ],
-    "bank_record": [
-        {"key": "account_holder", "label": "Account Holder", "type": "Text", "required": True, "description": "Full name of the account holder"},
-        {"key": "account_number", "label": "Account Number", "type": "Text", "required": True, "description": "Bank account number"},
-        {"key": "bank_name", "label": "Bank Name", "type": "Text", "required": True, "description": "Name of the banking institution"},
-        {"key": "statement_period_start", "label": "Statement Start Date", "type": "Date", "required": False, "description": "Start date of the statement period"},
-        {"key": "statement_period_end", "label": "Statement End Date", "type": "Date", "required": False, "description": "End date of the statement period"},
-        {"key": "opening_balance", "label": "Opening Balance", "type": "Number", "required": False, "description": "Starting balance at the beginning of the period"},
-        {"key": "closing_balance", "label": "Closing Balance", "type": "Number", "required": False, "description": "Ending balance at the end of the period"},
-        {"key": "currency", "label": "Currency", "type": "Text", "required": False, "description": "Account currency code (e.g. USD)"},
-        {"key": "transactions", "label": "Transactions", "type": "Array of Objects", "required": False, "description": "List of account transactions (date, description, amount, balance)"}
-    ],
-    "medical_record": [
-        {"key": "patient_name", "label": "Patient Name", "type": "Text", "required": True, "description": "Full name of the patient"},
-        {"key": "patient_dob", "label": "Patient Date of Birth", "type": "Date", "required": True, "description": "Date of birth of the patient"},
-        {"key": "record_date", "label": "Record Date", "type": "Date", "required": False, "description": "Date of the medical encounter or record creation"},
-        {"key": "provider_name", "label": "Provider Name", "type": "Text", "required": True, "description": "Name of the healthcare clinic, provider or hospital"},
-        {"key": "provider_address", "label": "Provider Address", "type": "Text", "required": False, "description": "Physical address of the provider"},
-        {"key": "diagnoses", "label": "Diagnoses", "type": "Array of Text", "required": False, "description": "Identified medical conditions or diagnoses"},
-        {"key": "medications", "label": "Medications", "type": "Array of Text", "required": False, "description": "Prescribed or active medications"},
-        {"key": "procedures", "label": "Procedures", "type": "Array of Text", "required": False, "description": "Medical procedures performed"},
-        {"key": "lab_results", "label": "Lab Results", "type": "Array of Text", "required": False, "description": "Laboratory test outcomes or values"},
-        {"key": "notes", "label": "Notes", "type": "Text", "required": False, "description": "Encounter summaries, clinical observations or general notes"}
-    ],
-    "contract": [
-        {"key": "contract_title", "label": "Contract Title", "type": "Text", "required": True, "description": "Title or type of the contract"},
-        {"key": "parties", "label": "Parties", "type": "Array of Text", "required": True, "description": "Names of the parties involved in the contract"},
-        {"key": "effective_date", "label": "Effective Date", "type": "Date", "required": True, "description": "The date the contract starts or becomes active"},
-        {"key": "expiration_date", "label": "Expiration Date", "type": "Date", "required": False, "description": "The date the contract expires or terminates"},
-        {"key": "governing_law", "label": "Governing Law", "type": "Text", "required": False, "description": "The jurisdiction or governing law under which the contract is executed"},
-        {"key": "contract_value", "label": "Contract Value", "type": "Number", "required": False, "description": "Total financial value of the contract"}
-    ],
-    "kyc": [
-        {"key": "full_name", "label": "Full Name", "type": "Text", "required": True, "description": "Full name of the individual"},
-        {"key": "document_type", "label": "Document Type", "type": "Text", "required": True, "description": "Type of identity document (e.g. Passport, Drivers License, National ID)"},
-        {"key": "document_number", "label": "Document Number", "type": "Text", "required": True, "description": "Unique number or identifier of the identity document"},
-        {"key": "date_of_birth", "label": "Date of Birth", "type": "Date", "required": True, "description": "Date of birth of the individual"},
-        {"key": "expiry_date", "label": "Expiry Date", "type": "Date", "required": False, "description": "Expiration date of the identity document"},
-        {"key": "nationality", "label": "Nationality", "type": "Text", "required": False, "description": "Nationality or country of citizenship of the individual"}
-    ],
-    "others": [
-        {"key": "document_title", "label": "Document Title", "type": "Text", "required": True, "description": "Title or main heading of the document"},
-        {"key": "creation_date", "label": "Creation Date", "type": "Date", "required": False, "description": "The date the document was created or published"},
-        {"key": "author", "label": "Author", "type": "Text", "required": False, "description": "The author, creator, or issuing organization of the document"},
-        {"key": "summary", "label": "Summary", "type": "Text", "required": False, "description": "A brief summary of the document content"}
-    ]
-}
+DEFAULT_TEMPLATES = {}
 
 def load_templates():
     if os.path.exists(TEMPLATES_FILE):
@@ -713,3 +676,124 @@ async def get_templates():
 async def save_templates(templates_data: dict):
     save_templates_to_file(templates_data)
     return {"success": True}
+
+@app.delete("/templates/{template_name}")
+async def delete_template(template_name: str):
+    templates = load_templates()
+    normalized_name = template_name.strip().lower().replace(" ", "_")
+    if normalized_name in templates:
+        del templates[normalized_name]
+        save_templates_to_file(templates)
+        return {"success": True}
+    else:
+        raise HTTPException(status_code=404, detail=f"Template '{template_name}' not found")
+
+@app.post("/templates/generate")
+async def generate_template_from_sample(
+    template_name: str = Query(...),
+    file: UploadFile = File(...)
+):
+    # Save the file temporarily
+    file_path, file_hash = await save_file(file, settings.STORAGE_DIR)
+    
+    try:
+        from utils.ocr import extract_with_ocr
+        # Perform OCR
+        ocr_result = extract_with_ocr(file_path, "unknown")
+        raw_text = ocr_result.get("raw_text", "")
+        
+        if not raw_text.strip():
+            raise HTTPException(status_code=400, detail="Could not extract text from the sample document.")
+            
+        # Send OCR text to Mistral LLM to generate the fields schema
+        prompt = (
+            f"You are a document extraction expert. Analyze the following document text extracted from a sample "
+            f"'{template_name}' document. Identify the key structured fields that would be useful to extract "
+            f"from this type of document (e.g. names, dates, amounts, item tables, identifiers).\n\n"
+            f"Document Content:\n{raw_text}\n\n"
+            f"Generate a document extraction schema as a JSON list of field configurations. "
+            f"Each field in the list must be an object with the following fields:\n"
+            f"- 'key': Unique field identifier in snake_case (e.g., 'invoice_date', 'total_amount'). Must only contain lowercase letters, numbers, and underscores.\n"
+            f"- 'label': Human-readable label (e.g., 'Invoice Date', 'Total Amount').\n"
+            f"- 'type': Data type. Must be exactly one of: 'Text', 'Number', 'Date', 'Boolean', 'Array of Text', 'Array of Objects'.\n"
+            f"- 'required': Boolean indicating whether this field is essential and always expected in similar documents.\n"
+            f"- 'description': Short description explaining what this field is and how it should be identified.\n\n"
+            f"Output a valid JSON list of objects. Do not include any explanation or markdown formatting, just the raw JSON list."
+        )
+        
+        response = mistral_client.chat.complete(
+            model="mistral-large-latest",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"}
+        )
+        
+        content = response.choices[0].message.content
+        logger.info(f"Generated schema for template '{template_name}': {content}")
+        
+        # Parse generated fields
+        parsed = json.loads(content)
+        if isinstance(parsed, dict) and "fields" in parsed:
+            fields = parsed["fields"]
+        elif isinstance(parsed, dict):
+            # Try to find a list inside the dictionary
+            fields = None
+            for k, v in parsed.items():
+                if isinstance(v, list):
+                    fields = v
+                    break
+            if fields is None:
+                if all(isinstance(v, dict) and 'label' in v for v in parsed.values()):
+                    fields = []
+                    for k, v in parsed.items():
+                        fields.append({
+                            "key": k,
+                            "label": v.get("label", k),
+                            "type": v.get("type", "Text"),
+                            "required": v.get("required", False),
+                            "description": v.get("description", "")
+                        })
+                else:
+                    fields = list(parsed.values())
+        else:
+            fields = parsed
+            
+        if not isinstance(fields, list):
+            raise ValueError("Invalid schema format generated by AI. Expected a list of fields.")
+            
+        valid_types = {"Text", "Number", "Date", "Boolean", "Array of Text", "Array of Objects"}
+        validated_fields = []
+        for f in fields:
+            if not isinstance(f, dict) or "key" not in f or "label" not in f:
+                continue
+            key = str(f["key"]).strip().lower().replace(" ", "_")
+            key = "".join([c for c in key if c.isalnum() or c == "_"])
+            if not key:
+                continue
+            t = str(f.get("type", "Text")).strip()
+            if t not in valid_types:
+                t = "Text"
+            validated_fields.append({
+                "key": key,
+                "label": str(f["label"]).strip(),
+                "type": t,
+                "required": bool(f.get("required", False)),
+                "description": str(f.get("description", "")).strip()
+            })
+            
+        if not validated_fields:
+            raise ValueError("No valid fields could be parsed from the generated schema.")
+            
+        # Save to templates
+        templates = load_templates()
+        normalized_name = template_name.strip().lower().replace(" ", "_")
+        templates[normalized_name] = validated_fields
+        save_templates_to_file(templates)
+        
+        return {"success": True, "template_name": normalized_name, "fields": validated_fields}
+    except Exception as e:
+        logger.error(f"Error generating template from sample: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        # Cleanup sample file
+        if os.path.exists(file_path):
+            delete_file(file_path)

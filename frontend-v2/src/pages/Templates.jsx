@@ -6,69 +6,9 @@ import {
 } from 'lucide-react';
 import { Modal } from '../components/ui/Modal';
 import { useApp } from '../store/AppStore';
-import { getTemplates, saveTemplates } from '../api/client';
+import { getTemplates, saveTemplates, generateTemplateFromSample, deleteTemplate } from '../api/client';
 
-const DEFAULT_TEMPLATES = {
-  invoice: [
-    { key: 'invoice_number', label: 'Invoice Number', type: 'Text', required: true, description: 'Unique identifier of the invoice' },
-    { key: 'invoice_date', label: 'Invoice Date', type: 'Date', required: true, description: 'Date the invoice was issued' },
-    { key: 'vendor_name', label: 'Vendor Name', type: 'Text', required: true, description: 'Name of the issuing vendor' },
-    { key: 'vendor_address', label: 'Vendor Address', type: 'Text', required: false, description: 'Address of the vendor' },
-    { key: 'bill_to', label: 'Bill To', type: 'Text', required: false, description: 'Recipient or entity being billed' },
-    { key: 'subtotal', label: 'Subtotal', type: 'Number', required: false, description: 'Amount before taxes or discounts' },
-    { key: 'tax', label: 'Tax', type: 'Number', required: false, description: 'Calculated tax amount' },
-    { key: 'total_amount', label: 'Total Amount', type: 'Number', required: true, description: 'Final total amount due' },
-    { key: 'currency', label: 'Currency', type: 'Text', required: false, description: 'Transaction currency code (e.g. USD, EUR)' },
-    { key: 'due_date', label: 'Due Date', type: 'Date', required: false, description: 'Deadline for invoice payment' },
-    { key: 'payment_terms', label: 'Payment Terms', type: 'Text', required: false, description: 'Terms of payment (e.g. Net 30)' },
-    { key: 'line_items', label: 'Line Items', type: 'Array of Objects', required: false, description: 'Tabular items representing purchased items or services' }
-  ],
-  bank_record: [
-    { key: 'account_holder', label: 'Account Holder', type: 'Text', required: true, description: 'Full name of the account holder' },
-    { key: 'account_number', label: 'Account Number', type: 'Text', required: true, description: 'Bank account number' },
-    { key: 'bank_name', label: 'Bank Name', type: 'Text', required: true, description: 'Name of the banking institution' },
-    { key: 'statement_period_start', label: 'Statement Start Date', type: 'Date', required: false, description: 'Start date of the statement period' },
-    { key: 'statement_period_end', label: 'Statement End Date', type: 'Date', required: false, description: 'End date of the statement period' },
-    { key: 'opening_balance', label: 'Opening Balance', type: 'Number', required: false, description: 'Starting balance at the beginning of the period' },
-    { key: 'closing_balance', label: 'Closing Balance', type: 'Number', required: false, description: 'Ending balance at the end of the period' },
-    { key: 'currency', label: 'Currency', type: 'Text', required: false, description: 'Account currency code (e.g. USD)' },
-    { key: 'transactions', label: 'Transactions', type: 'Array of Objects', required: false, description: 'List of account transactions (date, description, amount, balance)' }
-  ],
-  medical_record: [
-    { key: 'patient_name', label: 'Patient Name', type: 'Text', required: true, description: 'Full name of the patient' },
-    { key: 'patient_dob', label: 'Patient Date of Birth', type: 'Date', required: true, description: 'Date of birth of the patient' },
-    { key: 'record_date', label: 'Record Date', type: 'Date', required: false, description: 'Date of the medical encounter or record creation' },
-    { key: 'provider_name', label: 'Provider Name', type: 'Text', required: true, description: 'Name of the healthcare clinic, provider or hospital' },
-    { key: 'provider_address', label: 'Provider Address', type: 'Text', required: false, description: 'Physical address of the provider' },
-    { key: 'diagnoses', label: 'Diagnoses', type: 'Array of Text', required: false, description: 'Identified medical conditions or diagnoses' },
-    { key: 'medications', label: 'Medications', type: 'Array of Text', required: false, description: 'Prescribed or active medications' },
-    { key: 'procedures', label: 'Procedures', type: 'Array of Text', required: false, description: 'Medical procedures performed' },
-    { key: 'lab_results', label: 'Lab Results', type: 'Array of Text', required: false, description: 'Laboratory test outcomes or values' },
-    { key: 'notes', label: 'Notes', type: 'Text', required: false, description: 'Encounter summaries, clinical observations or general notes' }
-  ],
-  contract: [
-    { key: 'contract_title', label: 'Contract Title', type: 'Text', required: true, description: 'Title or type of the contract' },
-    { key: 'parties', label: 'Parties', type: 'Array of Text', required: true, description: 'Names of the parties involved in the contract' },
-    { key: 'effective_date', label: 'Effective Date', type: 'Date', required: true, description: 'The date the contract starts or becomes active' },
-    { key: 'expiration_date', label: 'Expiration Date', type: 'Date', required: false, description: 'The date the contract expires or terminates' },
-    { key: 'governing_law', label: 'Governing Law', type: 'Text', required: false, description: 'The jurisdiction or governing law under which the contract is executed' },
-    { key: 'contract_value', label: 'Contract Value', type: 'Number', required: false, description: 'Total financial value of the contract' }
-  ],
-  kyc: [
-    { key: 'full_name', label: 'Full Name', type: 'Text', required: true, description: 'Full name of the individual' },
-    { key: 'document_type', label: 'Document Type', type: 'Text', required: true, description: 'Type of identity document (e.g. Passport, Drivers License, National ID)' },
-    { key: 'document_number', label: 'Document Number', type: 'Text', required: true, description: 'Unique number or identifier of the identity document' },
-    { key: 'date_of_birth', label: 'Date of Birth', type: 'Date', required: true, description: 'Date of birth of the individual' },
-    { key: 'expiry_date', label: 'Expiry Date', type: 'Date', required: false, description: 'Expiration date of the identity document' },
-    { key: 'nationality', label: 'Nationality', type: 'Text', required: false, description: 'Nationality or country of citizenship of the individual' }
-  ],
-  others: [
-    { key: 'document_title', label: 'Document Title', type: 'Text', required: true, description: 'Title or main heading of the document' },
-    { key: 'creation_date', label: 'Creation Date', type: 'Date', required: false, description: 'The date the document was created or published' },
-    { key: 'author', label: 'Author', type: 'Text', required: false, description: 'The author, creator, or issuing organization of the document' },
-    { key: 'summary', label: 'Summary', type: 'Text', required: false, description: 'A brief summary of the document content' }
-  ]
-};
+const DEFAULT_TEMPLATES = {};
 
 const TYPE_ICONS = {
   'Text': Type,
@@ -81,7 +21,7 @@ const TYPE_ICONS = {
 
 export function Templates() {
   const { toast } = useApp();
-  const [activeTab, setActiveTab] = useState('invoice');
+  const [activeTab, setActiveTab] = useState('');
   const [templates, setTemplates] = useState(DEFAULT_TEMPLATES);
   const [loading, setLoading] = useState(true);
 
@@ -96,16 +36,23 @@ export function Templates() {
     description: ''
   });
 
+  const [createTemplateModalOpen, setCreateTemplateModalOpen] = useState(false);
+  const [newTemplateName, setNewTemplateName] = useState('');
+  const [sampleFile, setSampleFile] = useState(null);
+  const [generatingTemplate, setGeneratingTemplate] = useState(false);
+
   useEffect(() => {
     getTemplates()
       .then(data => {
         const loadedTemplates = data || DEFAULT_TEMPLATES;
         setTemplates(loadedTemplates);
-        if (loadedTemplates && !loadedTemplates[activeTab]) {
-          const keys = Object.keys(loadedTemplates);
-          if (keys.length > 0) {
+        const keys = Object.keys(loadedTemplates);
+        if (keys.length > 0) {
+          if (!activeTab || !loadedTemplates[activeTab]) {
             setActiveTab(keys[0]);
           }
+        } else {
+          setActiveTab('');
         }
       })
       .catch(err => {
@@ -173,20 +120,52 @@ export function Templates() {
     }
   };
 
-  const handleResetToDefault = async () => {
-    if (window.confirm(`Are you sure you want to reset the "${activeTab.replace('_', ' ')}" template to default fields?`)) {
-      const updatedTemplates = {
-        ...templates,
-        [activeTab]: JSON.parse(JSON.stringify(DEFAULT_TEMPLATES[activeTab]))
-      };
-      
+  const handleDeleteTemplate = async () => {
+    if (!activeTab) return;
+    if (window.confirm(`Are you sure you want to delete the entire "${activeTab.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}" template? This cannot be undone.`)) {
       try {
-        setTemplates(updatedTemplates);
-        await saveTemplates(updatedTemplates);
-        toast(`Template reset to default schema ✓`, 'success');
+        await deleteTemplate(activeTab);
+        toast(`Template deleted successfully ✓`, 'info');
+        const data = await getTemplates();
+        const loadedTemplates = data || {};
+        setTemplates(loadedTemplates);
+        const keys = Object.keys(loadedTemplates);
+        if (keys.length > 0) {
+          setActiveTab(keys[0]);
+        } else {
+          setActiveTab('');
+        }
       } catch (err) {
-        toast(`Failed to reset template: ${err.message}`, 'error');
+        toast(`Failed to delete template: ${err.message}`, 'error');
       }
+    }
+  };
+
+  const handleGenerateTemplate = async (e) => {
+    e.preventDefault();
+    if (!newTemplateName.trim()) {
+      alert('Template Name is required');
+      return;
+    }
+    if (!sampleFile) {
+      alert('Please select a sample document file');
+      return;
+    }
+    
+    setGeneratingTemplate(true);
+    try {
+      const res = await generateTemplateFromSample(newTemplateName, sampleFile);
+      toast(`Template "${res.template_name}" generated successfully ✓`, 'success');
+      const updated = await getTemplates();
+      setTemplates(updated || {});
+      setActiveTab(res.template_name);
+      setCreateTemplateModalOpen(false);
+      setNewTemplateName('');
+      setSampleFile(null);
+    } catch (err) {
+      toast(`Failed to generate template: ${err.message}`, 'error');
+    } finally {
+      setGeneratingTemplate(false);
     }
   };
 
@@ -259,6 +238,8 @@ export function Templates() {
     );
   }
 
+  const templateKeys = Object.keys(templates);
+
   return (
     <div className="page anim-slide-in">
       {/* ── Page Header ── */}
@@ -268,164 +249,216 @@ export function Templates() {
             Configure target fields for standard Document Processing workflows. Adding or editing fields here dictates which elements the underlying extraction agents look for.
           </p>
           
-          <div style={{ display: 'flex', gap: 12, marginTop: 12, flexWrap: 'wrap' }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--accent)', background: 'var(--accent-dim)', border: '1px solid rgba(79,110,247,0.2)', borderRadius: 99, padding: '3px 10px' }}>
-              <FileCode size={10} /> {currentFields.length} Total Fields
-            </span>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--success)', background: 'var(--success-dim)', border: '1px solid var(--success-border)', borderRadius: 99, padding: '3px 10px' }}>
-              <CheckCircle2 size={10} /> {requiredCount} Required Fields
-            </span>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-dim)', background: 'var(--card-alt)', border: '1px solid var(--border)', borderRadius: 99, padding: '3px 10px' }}>
-              {currentFields.length - requiredCount} Optional Fields
-            </span>
-          </div>
+          {templateKeys.length > 0 && (
+            <div style={{ display: 'flex', gap: 12, marginTop: 12, flexWrap: 'wrap' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--accent)', background: 'var(--accent-dim)', border: '1px solid rgba(79,110,247,0.2)', borderRadius: 99, padding: '3px 10px' }}>
+                <FileCode size={10} /> {currentFields.length} Total Fields
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--success)', background: 'var(--success-dim)', border: '1px solid var(--success-border)', borderRadius: 99, padding: '3px 10px' }}>
+                <CheckCircle2 size={10} /> {requiredCount} Required Fields
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-dim)', background: 'var(--card-alt)', border: '1px solid var(--border)', borderRadius: 99, padding: '3px 10px' }}>
+                {currentFields.length - requiredCount} Optional Fields
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Global actions */}
         <div style={{ display: 'flex', gap: 8 }}>
           <button 
-            className="btn btn-ghost btn-sm" 
-            onClick={handleResetToDefault}
-            title="Restore default schema configuration"
-          >
-            <RotateCcw size={12} /> Reset to Default
-          </button>
-          <button 
             className="btn btn-primary btn-sm" 
-            onClick={handleOpenAddModal}
-            id="templates-add-field-btn"
+            onClick={() => setCreateTemplateModalOpen(true)}
+            id="templates-create-template-btn"
           >
-            <Plus size={12} /> Add Field
+            <Plus size={12} /> Create Template
           </button>
         </div>
       </div>
 
-      {/* ── Document Type Tabs ── */}
-      <div className="tabs">
-        {Object.keys(templates).map((key) => (
-          <div 
-            key={key}
-            className={`tab ${activeTab === key ? 'active' : ''}`}
-            onClick={() => { setActiveTab(key); setSearchQuery(''); }}
-          >
-            {key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')} Template
+      {templateKeys.length === 0 ? (
+        <div className="card" style={{ padding: '64px 24px', textAlign: 'center', marginTop: 20 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, maxWidth: 480, margin: '0 auto' }}>
+            <div style={{
+              background: 'rgba(79, 110, 247, 0.1)',
+              color: 'var(--accent)',
+              padding: 20,
+              borderRadius: '50%',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: 8
+            }}>
+              <FileCode size={40} />
+            </div>
+            <h3 style={{ fontSize: 18, fontWeight: 700, margin: 0, color: 'var(--text)' }}>No Templates Configured</h3>
+            <p style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.6, margin: 0 }}>
+              You don't have any document templates set up yet. Upload a sample document to automatically generate a template schema for your document type.
+            </p>
+            <button 
+              className="btn btn-primary" 
+              style={{ marginTop: 8 }}
+              onClick={() => setCreateTemplateModalOpen(true)}
+            >
+              <Plus size={14} style={{ marginRight: 6 }} /> Create Template from Sample
+            </button>
           </div>
-        ))}
-      </div>
+        </div>
+      ) : (
+        <>
+          {/* ── Document Type Tabs ── */}
+          <div className="tabs">
+            {templateKeys.map((key) => (
+              <div 
+                key={key}
+                className={`tab ${activeTab === key ? 'active' : ''}`}
+                onClick={() => { setActiveTab(key); setSearchQuery(''); }}
+              >
+                {key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')} Template
+              </div>
+            ))}
+          </div>
 
-      {/* ── Search Bar & Filter Strip ── */}
-      <div className="card" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
-        <Search size={14} style={{ color: 'var(--muted)' }} />
-        <input 
-          type="text" 
-          placeholder="Filter fields by name, key, or description..."
-          className="styled-input" 
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          style={{ border: 'none', background: 'transparent', padding: 0, fontSize: 13 }}
-        />
-        {searchQuery && (
-          <button 
-            className="btn btn-ghost btn-sm" 
-            onClick={() => setSearchQuery('')}
-            style={{ padding: '2px 6px', border: 'none', background: 'transparent' }}
-          >
-            <X size={12} />
-          </button>
-        )}
-      </div>
+          {/* ── Search Bar & Filter Strip ── */}
+          <div className="card" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, justifyContent: 'space-between', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexGrow: 1, minWidth: 240 }}>
+              <Search size={14} style={{ color: 'var(--muted)' }} />
+              <input 
+                type="text" 
+                placeholder="Filter fields by name, key, or description..."
+                className="styled-input" 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{ border: 'none', background: 'transparent', padding: 0, fontSize: 13, width: '100%' }}
+              />
+              {searchQuery && (
+                <button 
+                  className="btn btn-ghost btn-sm" 
+                  onClick={() => setSearchQuery('')}
+                  style={{ padding: '2px 6px', border: 'none', background: 'transparent' }}
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+            
+            {/* Template specific actions aligned next to the search */}
+            <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+              {activeTab && (
+                <button 
+                  className="btn btn-danger btn-sm" 
+                  onClick={handleDeleteTemplate}
+                  title="Delete active template"
+                  id="templates-delete-template-btn"
+                >
+                  <Trash2 size={12} /> Delete Template
+                </button>
+              )}
+              {activeTab && (
+                <button 
+                  className="btn btn-primary btn-sm" 
+                  onClick={handleOpenAddModal}
+                  id="templates-add-field-btn"
+                >
+                  <Plus size={12} /> Add Field
+                </button>
+              )}
+            </div>
+          </div>
 
-      {/* ── Fields Table Card ── */}
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <div className="table-wrap">
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ background: 'var(--card-alt)' }}>
-                <th style={{ padding: '12px 16px', width: '25%' }}>Field Name / Key</th>
-                <th style={{ padding: '12px 16px', width: '15%' }}>Type</th>
-                <th style={{ padding: '12px 16px', width: '40%' }}>Description</th>
-                <th style={{ padding: '12px 16px', width: '10%', textAlign: 'center' }}>Required</th>
-                <th style={{ padding: '12px 16px', width: '10%', textAlign: 'right' }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredFields.length === 0 ? (
-                <tr>
-                  <td colSpan={5} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--muted)' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-                      <AlertCircle size={24} style={{ opacity: 0.5 }} />
-                      <span>No fields match the search query</span>
-                    </div>
-                  </td>
-                </tr>
-              ) : (
-                filteredFields.map((field, idx) => {
-                  const TypeIcon = TYPE_ICONS[field.type] || Type;
-                  return (
-                    <tr key={field.key} style={{ cursor: 'default' }}>
-                      <td style={{ padding: '12px 16px', verticalAlign: 'top' }}>
-                        <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text)' }}>
-                          {field.label}
-                        </div>
-                        <code style={{ fontSize: 11, color: 'var(--muted)', background: 'var(--surface-sunken)', padding: '2px 5px', borderRadius: 4, marginTop: 4, display: 'inline-block', fontFamily: 'monospace' }}>
-                          {field.key}
-                        </code>
-                      </td>
-                      <td style={{ padding: '12px 16px', verticalAlign: 'top' }}>
-                        <span style={{ 
-                          display: 'inline-flex', 
-                          alignItems: 'center', 
-                          gap: 6, 
-                          fontSize: 11, 
-                          fontWeight: 500,
-                          color: 'var(--text-dim)',
-                          background: 'var(--card-alt)',
-                          border: '1px solid var(--border)',
-                          padding: '3px 8px',
-                          borderRadius: 6
-                        }}>
-                          <TypeIcon size={11} style={{ color: 'var(--accent)' }} />
-                          {field.type}
-                        </span>
-                      </td>
-                      <td style={{ padding: '12px 16px', verticalAlign: 'top', color: 'var(--text-dim)', fontSize: 12, lineHeight: 1.5, whiteSpace: 'normal', maxBreakWord: 'break-all' }}>
-                        {field.description || <span style={{ fontStyle: 'italic', color: 'var(--muted)' }}>No description provided.</span>}
-                      </td>
-                      <td style={{ padding: '12px 16px', verticalAlign: 'top', textAlign: 'center' }}>
-                        {field.required ? (
-                          <span className="badge badge-green" style={{ fontSize: 9 }}>Yes</span>
-                        ) : (
-                          <span className="badge badge-gray" style={{ fontSize: 9, opacity: 0.6 }}>No</span>
-                        )}
-                      </td>
-                      <td style={{ padding: '12px 16px', verticalAlign: 'top', textAlign: 'right' }}>
-                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                          <button 
-                            className="btn btn-ghost btn-sm" 
-                            style={{ padding: 4 }}
-                            onClick={() => handleOpenEditModal(field)}
-                            title="Edit Field"
-                          >
-                            <Edit2 size={11} />
-                          </button>
-                          <button 
-                            className="btn btn-danger btn-sm" 
-                            style={{ padding: 4 }}
-                            onClick={() => handleDeleteField(field.key)}
-                            title="Delete Field"
-                          >
-                            <Trash2 size={11} />
-                          </button>
+          {/* ── Fields Table Card ── */}
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div className="table-wrap">
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: 'var(--card-alt)' }}>
+                    <th style={{ padding: '12px 16px', width: '25%' }}>Field Name / Key</th>
+                    <th style={{ padding: '12px 16px', width: '15%' }}>Type</th>
+                    <th style={{ padding: '12px 16px', width: '40%' }}>Description</th>
+                    <th style={{ padding: '12px 16px', width: '10%', textAlign: 'center' }}>Required</th>
+                    <th style={{ padding: '12px 16px', width: '10%', textAlign: 'right' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredFields.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--muted)' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                          <AlertCircle size={24} style={{ opacity: 0.5 }} />
+                          <span>No fields match the search query</span>
                         </div>
                       </td>
                     </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                  ) : (
+                    filteredFields.map((field, idx) => {
+                      const TypeIcon = TYPE_ICONS[field.type] || Type;
+                      return (
+                        <tr key={field.key} style={{ cursor: 'default' }}>
+                          <td style={{ padding: '12px 16px', verticalAlign: 'top' }}>
+                            <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text)' }}>
+                              {field.label}
+                            </div>
+                            <code style={{ fontSize: 11, color: 'var(--muted)', background: 'var(--surface-sunken)', padding: '2px 5px', borderRadius: 4, marginTop: 4, display: 'inline-block', fontFamily: 'monospace' }}>
+                              {field.key}
+                            </code>
+                          </td>
+                          <td style={{ padding: '12px 16px', verticalAlign: 'top' }}>
+                            <span style={{ 
+                              display: 'inline-flex', 
+                              alignItems: 'center', 
+                              gap: 6, 
+                              fontSize: 11, 
+                              fontWeight: 500,
+                              color: 'var(--text-dim)',
+                              background: 'var(--card-alt)',
+                              border: '1px solid var(--border)',
+                              padding: '3px 8px',
+                              borderRadius: 6
+                            }}>
+                              <TypeIcon size={11} style={{ color: 'var(--accent)' }} />
+                              {field.type}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px 16px', verticalAlign: 'top', color: 'var(--text-dim)', fontSize: 12, lineHeight: 1.5, whiteSpace: 'normal', maxBreakWord: 'break-all' }}>
+                            {field.description || <span style={{ fontStyle: 'italic', color: 'var(--muted)' }}>No description provided.</span>}
+                          </td>
+                          <td style={{ padding: '12px 16px', verticalAlign: 'top', textAlign: 'center' }}>
+                            {field.required ? (
+                              <span className="badge badge-green" style={{ fontSize: 9 }}>Yes</span>
+                            ) : (
+                              <span className="badge badge-gray" style={{ fontSize: 9, opacity: 0.6 }}>No</span>
+                            )}
+                          </td>
+                          <td style={{ padding: '12px 16px', verticalAlign: 'top', textAlign: 'right' }}>
+                            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                              <button 
+                                className="btn btn-ghost btn-sm" 
+                                style={{ padding: 4 }}
+                                onClick={() => handleOpenEditModal(field)}
+                                title="Edit Field"
+                              >
+                                <Edit2 size={11} />
+                              </button>
+                              <button 
+                                className="btn btn-danger btn-sm" 
+                                style={{ padding: 4 }}
+                                onClick={() => handleDeleteField(field.key)}
+                                title="Delete Field"
+                              >
+                                <Trash2 size={11} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* ── Edit/Add Field Modal ── */}
       {modalOpen && (
@@ -532,6 +565,102 @@ export function Templates() {
               <label htmlFor="required-checkbox" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-dim)', cursor: 'pointer' }}>
                 Required Field (validations fail if missing)
               </label>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* ── Create Template Modal ── */}
+      {createTemplateModalOpen && (
+        <Modal
+          title="Create Template from Sample Document"
+          subtitle="Upload a sample document and the AI will analyze its layout and fields to generate a template."
+          onClose={() => !generatingTemplate && setCreateTemplateModalOpen(false)}
+          footer={
+            <div style={{ display: 'flex', gap: 8, width: '100%', justifyContent: 'flex-end' }}>
+              <button 
+                type="button" 
+                className="btn btn-ghost btn-sm"
+                onClick={() => setCreateTemplateModalOpen(false)}
+                disabled={generatingTemplate}
+              >
+                Cancel
+              </button>
+              <button 
+                type="submit" 
+                form="generate-template-form"
+                className="btn btn-primary btn-sm"
+                disabled={generatingTemplate}
+              >
+                {generatingTemplate ? (
+                  <>
+                    <span className="spinner" style={{ marginRight: 6 }} />
+                    Generating Schema...
+                  </>
+                ) : 'Generate Template'}
+              </button>
+            </div>
+          }
+        >
+          <form id="generate-template-form" onSubmit={handleGenerateTemplate} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-dim)', marginBottom: 6 }}>
+                Template / Document Type Name <span style={{ color: 'var(--danger)' }}>*</span>
+              </label>
+              <input
+                type="text"
+                className="styled-input"
+                value={newTemplateName}
+                placeholder="e.g. Purchase Order, Utility Bill, Invoice"
+                onChange={(e) => setNewTemplateName(e.target.value)}
+                required
+                disabled={generatingTemplate}
+              />
+              <span style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4, display: 'block' }}>
+                This name will be used to identify and classify documents of this type.
+              </span>
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-dim)', marginBottom: 6 }}>
+                Upload Sample Document <span style={{ color: 'var(--danger)' }}>*</span>
+              </label>
+              <div 
+                style={{
+                  border: '1.5px dashed var(--border)',
+                  borderRadius: 'var(--radius)',
+                  padding: '24px 16px',
+                  textAlign: 'center',
+                  background: 'var(--surface-sunken)',
+                  cursor: 'pointer',
+                  position: 'relative'
+                }}
+                onClick={() => !generatingTemplate && document.getElementById('sample-file-input').click()}
+              >
+                <input
+                  id="sample-file-input"
+                  type="file"
+                  accept=".pdf,.docx,.png,.jpg,.jpeg,.webp"
+                  onChange={(e) => {
+                    if (e.target.files.length) {
+                      setSampleFile(e.target.files[0]);
+                    }
+                  }}
+                  style={{ display: 'none' }}
+                  disabled={generatingTemplate}
+                />
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+                  <span style={{ color: 'var(--accent)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Plus size={24} />
+                  </span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
+                    {sampleFile ? sampleFile.name : 'Select sample file...'}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+                    {sampleFile ? `${(sampleFile.size / 1024).toFixed(0)} KB` : 'Accepts PDF, DOCX, PNG, JPG up to 10MB'}
+                  </span>
+                </div>
+              </div>
             </div>
           </form>
         </Modal>

@@ -166,5 +166,32 @@ export async function saveTemplates(templatesData) {
   return data;
 }
 
+/**
+ * Generate a template from a sample document.
+ * @param {string} templateName
+ * @param {File} file
+ * @returns {Promise<{success: boolean, template_name: string, fields: Array}>}
+ */
+export async function generateTemplateFromSample(templateName, file) {
+  const form = new FormData();
+  form.append('file', file);
+  const { data } = await api.post('/templates/generate', form, {
+    params: { template_name: templateName },
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000,
+  });
+  return data;
+}
+
+/**
+ * Delete a template.
+ * @param {string} templateName
+ * @returns {Promise<object>}
+ */
+export async function deleteTemplate(templateName) {
+  const { data } = await api.delete(`/templates/${templateName}`);
+  return data;
+}
+
 export default api;
 

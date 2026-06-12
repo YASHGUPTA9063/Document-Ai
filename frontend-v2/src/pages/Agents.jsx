@@ -281,7 +281,7 @@ function PipelineGraph({ agents }) {
                         const IconComponent = AGENT_ICON_MAP[e.key] || FileSearch;
                         return <IconComponent size={12} />;
                       })()}
-                      {e.name.split(' ')[0]}
+                      {e.name.replace(' Agent', '').replace(' Extractor', '')}
                     </span>
                   ))}
                 </div>

@@ -263,10 +263,15 @@ async def extractor_activity(document_id: str, file_path: str, doc_type: str) ->
         fields_list = get_template_fields(doc_type)
 
         agent_id = DOC_TYPE_AGENT_MAP.get(doc_type.lower())
+        if not agent_id:
+            # Fall back to others extractor for custom template types
+            agent_id = settings.OTHERS_EXTRACTOR_AGENT_ID
+            logger.info(f"[Document {document_id}] Custom doc type '{doc_type}' using OTHERS fallback agent: {agent_id}")
+
         if agent_id:
             return await _run_extraction_with_agent(agent_id, file_path, doc_type, document_id, fields_list=fields_list)
         else:
-            logger.warning(f"[Document {document_id}] Unknown doc type received: '{doc_type}'")
+            logger.warning(f"[Document {document_id}] Unknown doc type received and no OTHERS fallback agent: '{doc_type}'")
             return {
                 "fields": {},
                 "raw_ocr": "",
