@@ -1,14 +1,373 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Copy, Download, ChevronDown, ChevronRight, Maximize2, ExternalLink, FileText, FileSearch, CheckCircle2, AlertTriangle, Edit2, Check, X } from 'lucide-react';
+import { Copy, Download, ChevronDown, ChevronRight, Maximize2, ExternalLink, FileText, FileSearch, CheckCircle2, AlertTriangle, Edit2, Check, X, Trash2, Plus } from 'lucide-react';
 import { getExtractedData, getDocumentFileUrl, updateExtractedData } from '../api/client';
 import { useApp } from '../store/AppStore';
 import { useDocumentList } from '../hooks/useDocumentList';
 
+function parseTableData(value, key) {
+  if (value === null || value === undefined) return null;
+  let parsed = value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch (e) {
+        return null;
+      }
+    } else {
+      return null;
+    }
+  }
+  
+  if (Array.isArray(parsed)) {
+    if (parsed.length === 0) {
+      return parsed;
+    }
+    if (parsed.every(item => item !== null && typeof item === 'object' && !Array.isArray(item))) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function parseArrayOfText(value) {
+  if (value === null || value === undefined) return null;
+  let parsed = value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch (e) {
+        return null;
+      }
+    } else {
+      return null;
+    }
+  }
+  
+  if (Array.isArray(parsed)) {
+    if (parsed.length === 0) {
+      return parsed;
+    }
+    if (parsed.every(item => item !== null && typeof item !== 'object')) {
+      return parsed.map(String);
+    }
+  }
+  return null;
+}
+
+const getTableHeaders = (items) => {
+  const keysSet = new Set();
+  items.forEach(item => {
+    if (item && typeof item === 'object') {
+      Object.keys(item).forEach(key => keysSet.add(key));
+    }
+  });
+  return Array.from(keysSet);
+};
+
+const getDefaultHeaders = (key) => {
+  const k = (key || '').toLowerCase();
+  if (k.includes('item')) {
+    return ['description', 'quantity', 'unit_price', 'total'];
+  }
+  if (k.includes('transaction')) {
+    return ['date', 'description', 'debit', 'credit', 'balance'];
+  }
+  return ['description', 'quantity', 'unit_price', 'total'];
+};
+
 function FieldRow({ label, fieldKey, value, isEditing, onChange, conf }) {
+  const [newInputVal, setNewInputVal] = useState('');
   const pct = conf != null ? Math.round(conf * 100) : null;
   const confClass = pct == null ? '' : pct >= 90 ? 'conf-high' : pct >= 70 ? 'conf-med' : 'conf-low';
   const confColor = pct == null ? '' : pct >= 90 ? 'var(--success)' : pct >= 70 ? 'var(--warn)' : 'var(--danger)';
+
+  const tableData = parseTableData(value, fieldKey);
+  const stringArray = parseArrayOfText(value);
+
+  if (tableData) {
+    let headers = getTableHeaders(tableData);
+    if (headers.length === 0) {
+      headers = getDefaultHeaders(fieldKey);
+    }
+
+    const handleCellChange = (rowIndex, key, cellValue) => {
+      const updatedData = tableData.map((row, rIdx) => {
+        if (rIdx === rowIndex) {
+          const originalValue = row[key];
+          let typedValue = cellValue;
+          if (typeof originalValue === 'number') {
+            const parsedNum = Number(cellValue);
+            if (!isNaN(parsedNum)) {
+              typedValue = parsedNum;
+            }
+          }
+          return { ...row, [key]: typedValue };
+        }
+        return row;
+      });
+
+      if (typeof value === 'string') {
+        onChange(fieldKey, JSON.stringify(updatedData));
+      } else {
+        onChange(fieldKey, updatedData);
+      }
+    };
+
+    const handleAddRow = () => {
+      const newRow = {};
+      headers.forEach(h => {
+        newRow[h] = h === 'description' || h === 'date' ? '' : 0;
+      });
+      const updatedData = [...tableData, newRow];
+      if (typeof value === 'string') {
+        onChange(fieldKey, JSON.stringify(updatedData));
+      } else {
+        onChange(fieldKey, updatedData);
+      }
+    };
+
+    const handleDeleteRow = (rowIndex) => {
+      const updatedData = tableData.filter((_, rIdx) => rIdx !== rowIndex);
+      if (typeof value === 'string') {
+        onChange(fieldKey, JSON.stringify(updatedData));
+      } else {
+        onChange(fieldKey, updatedData);
+      }
+    };
+
+    return (
+      <div className="field-row-table-container" style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div className="field-key" style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-dim)' }}>{label}</div>
+          {!isEditing && pct != null && (
+            <div className="field-conf" style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 'var(--text-sm)' }}>
+              <div className={`conf-dot ${confClass}`} />
+              <span style={{ color: confColor }}>{pct}%</span>
+            </div>
+          )}
+        </div>
+        
+        <div className="table-wrap" style={{ 
+          background: 'var(--surface-sunken)', 
+          border: '1px solid var(--border)', 
+          borderRadius: 'var(--radius-sm)', 
+          overflowX: 'auto',
+          marginTop: 4
+        }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: 'var(--card-alt)' }}>
+                {headers.map(h => (
+                  <th key={h} style={{ 
+                    padding: '8px 12px', 
+                    fontSize: 11, 
+                    fontWeight: 700, 
+                    textAlign: 'left', 
+                    borderBottom: '1px solid var(--border)',
+                    textTransform: 'uppercase',
+                    color: 'var(--muted)'
+                  }}>
+                    {h.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
+                  </th>
+                ))}
+                {isEditing && (
+                  <th style={{ 
+                    padding: '8px 12px', 
+                    fontSize: 11, 
+                    fontWeight: 700, 
+                    textAlign: 'center', 
+                    borderBottom: '1px solid var(--border)',
+                    textTransform: 'uppercase',
+                    color: 'var(--muted)',
+                    width: 50
+                  }}>
+                    Actions
+                  </th>
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {tableData.length === 0 ? (
+                <tr>
+                  <td colSpan={headers.length + (isEditing ? 1 : 0)} style={{ padding: '16px', textAlign: 'center', color: 'var(--muted)', fontStyle: 'italic' }}>
+                    No items in table. Click "Add Row" below to add one.
+                  </td>
+                </tr>
+              ) : (
+                tableData.map((row, rIdx) => (
+                  <tr key={rIdx} style={{ borderBottom: rIdx === tableData.length - 1 ? 'none' : '1px solid var(--border)', cursor: 'default' }}>
+                    {headers.map(h => {
+                      const cellVal = row[h];
+                      return (
+                        <td key={h} style={{ padding: '8px 12px', verticalAlign: 'middle', maxWidth: 'none', overflow: 'visible', whiteSpace: 'normal' }}>
+                          {isEditing ? (
+                            <input
+                              type="text"
+                              className="styled-input"
+                              value={cellVal ?? ''}
+                              onChange={(e) => handleCellChange(rIdx, h, e.target.value)}
+                              style={{ 
+                                width: '100%', 
+                                padding: '4px 8px', 
+                                fontSize: 12, 
+                                background: 'var(--card-alt)',
+                                border: '1px solid var(--border)',
+                                borderRadius: 4
+                              }}
+                            />
+                          ) : (
+                            cellVal == null ? <span style={{ color: 'var(--muted)' }}>—</span> : String(cellVal)
+                          )}
+                        </td>
+                      );
+                    })}
+                    {isEditing && (
+                      <td style={{ padding: '8px 12px', textAlign: 'center', verticalAlign: 'middle' }}>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteRow(rIdx)}
+                          className="btn btn-icon btn-danger btn-sm"
+                          style={{ padding: 4, borderRadius: 4, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                          title="Delete row"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+        {isEditing && (
+          <button
+            type="button"
+            onClick={handleAddRow}
+            className="btn btn-ghost btn-sm"
+            style={{ marginTop: 4, display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content' }}
+          >
+            <Plus size={13} /> Add Row
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  if (stringArray) {
+    const handleAddArrayItem = () => {
+      if (!newInputVal.trim()) return;
+      const updated = [...stringArray, newInputVal.trim()];
+      if (typeof value === 'string') {
+        onChange(fieldKey, JSON.stringify(updated));
+      } else {
+        onChange(fieldKey, updated);
+      }
+      setNewInputVal('');
+    };
+
+    const handleRemoveArrayItem = (index) => {
+      const updated = stringArray.filter((_, i) => i !== index);
+      if (typeof value === 'string') {
+        onChange(fieldKey, JSON.stringify(updated));
+      } else {
+        onChange(fieldKey, updated);
+      }
+    };
+
+    return (
+      <div className="field-row-array-container" style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div className="field-key" style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-dim)' }}>{label}</div>
+          {!isEditing && pct != null && (
+            <div className="field-conf" style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 'var(--text-sm)' }}>
+              <div className={`conf-dot ${confClass}`} />
+              <span style={{ color: confColor }}>{pct}%</span>
+            </div>
+          )}
+        </div>
+        
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+          {stringArray.length === 0 ? (
+            <span style={{ color: 'var(--muted)', fontStyle: 'italic', fontSize: 12 }}>No items</span>
+          ) : (
+            stringArray.map((item, idx) => (
+              <span key={idx} style={{
+                background: 'var(--surface-sunken)',
+                color: 'var(--text)',
+                padding: '4px 10px',
+                borderRadius: '16px',
+                border: '1px solid var(--border)',
+                fontSize: 12,
+                fontWeight: 500,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6
+              }}>
+                {item}
+                {isEditing && (
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveArrayItem(idx)}
+                    style={{
+                      border: 'none',
+                      background: 'transparent',
+                      color: 'var(--muted)',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: 0
+                    }}
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </span>
+            ))
+          )}
+        </div>
+
+        {isEditing && (
+          <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+            <input
+              type="text"
+              placeholder="Add item..."
+              value={newInputVal}
+              onChange={(e) => setNewInputVal(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleAddArrayItem();
+                }
+              }}
+              style={{
+                flexGrow: 1,
+                padding: '4px 8px',
+                fontSize: 12,
+                background: 'var(--card-alt)',
+                border: '1px solid var(--border)',
+                borderRadius: 4
+              }}
+            />
+            <button
+              type="button"
+              onClick={handleAddArrayItem}
+              className="btn btn-ghost btn-sm"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, height: 26, padding: '0 8px' }}
+            >
+              <Plus size={12} /> Add
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="field-row" style={{ display: 'flex', alignItems: 'center', minHeight: 32 }}>
@@ -24,8 +383,30 @@ function FieldRow({ label, fieldKey, value, isEditing, onChange, conf }) {
           />
         ) : (
           value == null ? <span style={{ color: 'var(--muted)' }}>—</span> :
-          typeof value === 'object' ? <code style={{ fontSize: 11 }}>{JSON.stringify(value)}</code> :
-          String(value)
+          (() => {
+            const renderedText = typeof value === 'object' ? 
+              <code style={{ fontSize: 11, background: 'transparent', color: 'inherit' }}>{JSON.stringify(value)}</code> : 
+              String(value);
+            
+            if (!isEditing && pct != null && pct < 95) {
+              return (
+                <span style={{ 
+                  background: 'rgba(245, 158, 11, 0.12)', 
+                  color: 'var(--warn)', 
+                  padding: '3px 8px', 
+                  borderRadius: '4px',
+                  border: '1px solid rgba(245, 158, 11, 0.3)',
+                  fontWeight: 500,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6
+                }}>
+                  {renderedText}
+                </span>
+              );
+            }
+            return renderedText;
+          })()
         )}
       </div>
       {!isEditing && pct != null && (
@@ -55,7 +436,7 @@ function FieldGroup({ title, children }) {
   );
 }
 
-function renderFields(data, isEditing, editedData, onChange) {
+function renderFields(data, isEditing, editedData, onChange, confidences = {}, confidenceMode = 'word') {
   if (!data || typeof data !== 'object') return null;
   const groups = {};
   const renderSource = isEditing ? editedData : data;
@@ -79,6 +460,7 @@ function renderFields(data, isEditing, editedData, onChange) {
           value={v}
           isEditing={isEditing}
           onChange={onChange}
+          conf={confidenceMode === 'word' ? confidences[k] : null}
         />
       ))}
     </FieldGroup>
@@ -152,8 +534,28 @@ function DocumentViewer({ fileUrl, filename, ext }) {
   );
 }
 
+function getAverageWordConfidence(extracted) {
+  const confidences = extracted?.raw_extracted?.field_confidences;
+  if (!confidences || typeof confidences !== 'object') return 0;
+  
+  const flatConfidences = [];
+  const traverse = (obj) => {
+    if (typeof obj === 'number') {
+      flatConfidences.push(obj);
+    } else if (Array.isArray(obj)) {
+      obj.forEach(item => traverse(item));
+    } else if (obj && typeof obj === 'object') {
+      Object.values(obj).forEach(val => traverse(val));
+    }
+  };
+  traverse(confidences);
+  
+  if (flatConfidences.length === 0) return 0;
+  return flatConfidences.reduce((sum, val) => sum + val, 0) / flatConfidences.length;
+}
+
 export function Extraction() {
-  const { completedDocs } = useApp();
+  const { completedDocs, confidenceMode } = useApp();
   const { refresh } = useDocumentList();
   const [activeId, setActiveId] = useState(null);
   const [extracted, setExtracted] = useState(null);
@@ -165,6 +567,12 @@ export function Extraction() {
   const [saving, setSaving] = useState(false);
   const { toast } = useApp();
   const navigate = useNavigate();
+
+  const displayConfidence = extracted
+    ? (confidenceMode === 'page'
+        ? extracted.confidence_score
+        : getAverageWordConfidence(extracted))
+    : 0;
 
   useEffect(() => { refresh(); }, []);
 
@@ -364,19 +772,19 @@ export function Extraction() {
             <div style={{
               padding: '9px 14px', flexShrink: 0,
               borderTop: '1px solid var(--border)',
-              background: extracted.confidence_score >= 0.8
+              background: displayConfidence >= 0.8
                 ? 'rgba(16,185,129,0.06)'
                 : 'rgba(245,158,11,0.06)',
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             }}>
               <span style={{
                 fontSize: 12, fontWeight: 600,
-                color: extracted.confidence_score >= 0.8 ? 'var(--success)' : 'var(--warn)',
+                color: displayConfidence >= 0.8 ? 'var(--success)' : 'var(--warn)',
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 5,
               }}>
-                {extracted.confidence_score >= 0.8 ? (
+                {displayConfidence >= 0.8 ? (
                   <>
                     <CheckCircle2 size={13} />
                     High Confidence
@@ -389,9 +797,13 @@ export function Extraction() {
                 )}
               </span>
               <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-                Confidence: <strong style={{ color: 'var(--text)' }}>{Math.round(extracted.confidence_score * 100)}%</strong>
+                {confidenceMode === 'page' && (
+                  <>
+                    Confidence: <strong style={{ color: 'var(--text)' }}>{Math.round(displayConfidence * 100)}%</strong>
+                  </>
+                )}
                 {extracted.reviewer_corrections && Object.keys(extracted.reviewer_corrections).length > 0 && (
-                  <span style={{ marginLeft: 8, color: 'var(--accent)' }}>
+                  <span style={{ marginLeft: confidenceMode === 'page' ? 8 : 0, color: 'var(--accent)' }}>
                     · {Object.keys(extracted.reviewer_corrections).length} corrected
                   </span>
                 )}
@@ -405,10 +817,10 @@ export function Extraction() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
             <div>
               <div style={{ fontSize: 15, fontWeight: 700 }}>Extracted Data</div>
-              {extracted && (
+              {extracted && confidenceMode === 'page' && (
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
                   Confidence: <span style={{ color: 'var(--success)', fontWeight: 600 }}>
-                    {Math.round(extracted.confidence_score * 100)}%
+                    {Math.round(displayConfidence * 100)}%
                   </span>
                 </div>
               )}
@@ -467,7 +879,7 @@ export function Extraction() {
           {extracted && !loadingEx && (
             <>
               {extracted.validated_data ? (
-                renderFields(extracted.validated_data, isEditing, editedData, handleFieldChange)
+                renderFields(extracted.validated_data, isEditing, editedData, handleFieldChange, extracted.raw_extracted?.field_confidences || {}, confidenceMode)
               ) : (
                 <div className="empty-state" style={{ padding: 24 }}>
                   <div className="empty-sub">No structured data extracted yet.</div>

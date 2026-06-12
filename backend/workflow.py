@@ -70,7 +70,8 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
             document_id=document_id, 
             extracted_data=extractor_result["fields"], 
             doc_type=doc_type, 
-            ocr_confidence=extractor_result["confidence"]
+            ocr_confidence=extractor_result["confidence"],
+            field_confidences=extractor_result.get("field_confidences")
         )
 
         # Step 5 — Review
@@ -102,7 +103,8 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
             doc_type=doc_type, 
             validated_data=validator_result["validated_data"], 
             reviewer_result=final_reviewer_result, 
-            confidence_score=validator_result["confidence_score"]
+            confidence_score=validator_result["confidence_score"],
+            field_confidences=validator_result.get("field_confidences")
         )
         
         logger.info(f"Completed workflow for document {document_id}")

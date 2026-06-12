@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
+from sqlalchemy import delete
 
 from config import settings
 from db.database import init_db, AsyncSessionLocal
@@ -502,7 +503,17 @@ async def list_documents(page: int = Query(1, ge=1), limit: int = Query(20, ge=1
             .limit(limit)
         )
         docs = result.scalars().all()
-        return [{"id": d.id, "filename": d.filename, "status": d.status, "doc_type": d.doc_type} for d in docs]
+        return [
+            {
+                "id": d.id,
+                "filename": d.filename,
+                "status": d.status,
+                "doc_type": d.doc_type,
+                "workflow_run_id": d.workflow_run_id,
+                "message": d.error_details.get("error", "") if d.error_details else ""
+            }
+            for d in docs
+        ]
 
 @app.get("/documents/{document_id}/extracted")
 async def get_extracted_data(document_id: str):
@@ -591,9 +602,92 @@ async def delete_document(document_id: str):
             raise HTTPException(status_code=404, detail="Document not found")
             
         doc.status = "deleted"
+        
+        # 1. Delete associated ExtractedData record to clean up database space
+        await session.execute(
+            delete(ExtractedData).where(ExtractedData.document_id == document_id)
+        )
+        
         await session.commit()
+        
+        # 2. Cancel running workflow run in Mistral cloud scheduler
+        if doc.workflow_run_id and doc.workflow_run_id != "unknown_run_id":
+            try:
+                await mistral_client.workflows.executions.cancel_workflow_execution_async(
+                    execution_id=doc.workflow_run_id
+                )
+                logger.info(f"Canceled workflow run {doc.workflow_run_id} for deleted document {document_id}")
+            except Exception as e:
+                logger.warning(f"Failed to cancel workflow run {doc.workflow_run_id} for deleted document {document_id}: {e}")
         
         if doc.file_path:
             delete_file(doc.file_path)
             
         return {"success": True}
+
+import json
+
+TEMPLATES_FILE = os.path.join(settings.STORAGE_DIR, "templates.json")
+
+DEFAULT_TEMPLATES = {
+    "invoice": [
+        {"key": "invoice_number", "label": "Invoice Number", "type": "Text", "required": True, "description": "Unique identifier of the invoice"},
+        {"key": "invoice_date", "label": "Invoice Date", "type": "Date", "required": True, "description": "Date the invoice was issued"},
+        {"key": "vendor_name", "label": "Vendor Name", "type": "Text", "required": True, "description": "Name of the issuing vendor"},
+        {"key": "vendor_address", "label": "Vendor Address", "type": "Text", "required": False, "description": "Address of the vendor"},
+        {"key": "bill_to", "label": "Bill To", "type": "Text", "required": False, "description": "Recipient or entity being billed"},
+        {"key": "subtotal", "label": "Subtotal", "type": "Number", "required": False, "description": "Amount before taxes or discounts"},
+        {"key": "tax", "label": "Tax", "type": "Number", "required": False, "description": "Calculated tax amount"},
+        {"key": "total_amount", "label": "Total Amount", "type": "Number", "required": True, "description": "Final total amount due"},
+        {"key": "currency", "label": "Currency", "type": "Text", "required": False, "description": "Transaction currency code (e.g. USD, EUR)"},
+        {"key": "due_date", "label": "Due Date", "type": "Date", "required": False, "description": "Deadline for invoice payment"},
+        {"key": "payment_terms", "label": "Payment Terms", "type": "Text", "required": False, "description": "Terms of payment (e.g. Net 30)"},
+        {"key": "line_items", "label": "Line Items", "type": "Array of Objects", "required": False, "description": "Tabular items representing purchased items or services"}
+    ],
+    "bank_record": [
+        {"key": "account_holder", "label": "Account Holder", "type": "Text", "required": True, "description": "Full name of the account holder"},
+        {"key": "account_number", "label": "Account Number", "type": "Text", "required": True, "description": "Bank account number"},
+        {"key": "bank_name", "label": "Bank Name", "type": "Text", "required": True, "description": "Name of the banking institution"},
+        {"key": "statement_period_start", "label": "Statement Start Date", "type": "Date", "required": False, "description": "Start date of the statement period"},
+        {"key": "statement_period_end", "label": "Statement End Date", "type": "Date", "required": False, "description": "End date of the statement period"},
+        {"key": "opening_balance", "label": "Opening Balance", "type": "Number", "required": False, "description": "Starting balance at the beginning of the period"},
+        {"key": "closing_balance", "label": "Closing Balance", "type": "Number", "required": False, "description": "Ending balance at the end of the period"},
+        {"key": "currency", "label": "Currency", "type": "Text", "required": False, "description": "Account currency code (e.g. USD)"},
+        {"key": "transactions", "label": "Transactions", "type": "Array of Objects", "required": False, "description": "List of account transactions (date, description, amount, balance)"}
+    ],
+    "medical_record": [
+        {"key": "patient_name", "label": "Patient Name", "type": "Text", "required": True, "description": "Full name of the patient"},
+        {"key": "patient_dob", "label": "Patient Date of Birth", "type": "Date", "required": True, "description": "Date of birth of the patient"},
+        {"key": "record_date", "label": "Record Date", "type": "Date", "required": False, "description": "Date of the medical encounter or record creation"},
+        {"key": "provider_name", "label": "Provider Name", "type": "Text", "required": True, "description": "Name of the healthcare clinic, provider or hospital"},
+        {"key": "provider_address", "label": "Provider Address", "type": "Text", "required": False, "description": "Physical address of the provider"},
+        {"key": "diagnoses", "label": "Diagnoses", "type": "Array of Text", "required": False, "description": "Identified medical conditions or diagnoses"},
+        {"key": "medications", "label": "Medications", "type": "Array of Text", "required": False, "description": "Prescribed or active medications"},
+        {"key": "procedures", "label": "Procedures", "type": "Array of Text", "required": False, "description": "Medical procedures performed"},
+        {"key": "lab_results", "label": "Lab Results", "type": "Array of Text", "required": False, "description": "Laboratory test outcomes or values"},
+        {"key": "notes", "label": "Notes", "type": "Text", "required": False, "description": "Encounter summaries, clinical observations or general notes"}
+    ]
+}
+
+def load_templates():
+    if os.path.exists(TEMPLATES_FILE):
+        try:
+            with open(TEMPLATES_FILE, "r") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"Failed to load templates: {e}")
+    return DEFAULT_TEMPLATES
+
+def save_templates_to_file(templates_data):
+    os.makedirs(settings.STORAGE_DIR, exist_ok=True)
+    with open(TEMPLATES_FILE, "w") as f:
+        json.dump(templates_data, f, indent=2)
+
+@app.get("/templates")
+async def get_templates():
+    return load_templates()
+
+@app.put("/templates")
+async def save_templates(templates_data: dict):
+    save_templates_to_file(templates_data)
+    return {"success": True}

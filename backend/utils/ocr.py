@@ -45,7 +45,7 @@ def extract_with_ocr(file_path: str, doc_type: str) -> dict:
             "type": "document_url",
             "document_url": document_url
         },
-        confidence_scores_granularity="page"
+        confidence_scores_granularity="word"
     )
 
     # Parse response
@@ -53,6 +53,7 @@ def extract_with_ocr(file_path: str, doc_type: str) -> dict:
     pages_list = []
     total_confidence = 0.0
     valid_pages_count = 0
+    all_word_confidences = []
 
     for page in ocr_response.pages:
         raw_text += page.markdown + "\n\n"
@@ -65,11 +66,19 @@ def extract_with_ocr(file_path: str, doc_type: str) -> dict:
             if hasattr(page.confidence_scores, "average_page_confidence_score"):
                 total_confidence += page.confidence_scores.average_page_confidence_score
                 valid_pages_count += 1
+            if getattr(page.confidence_scores, "word_confidence_scores", None):
+                for w in page.confidence_scores.word_confidence_scores:
+                    all_word_confidences.append({
+                        "text": w.text,
+                        "confidence": w.confidence,
+                        "start_index": w.start_index
+                    })
     
     avg_confidence = (total_confidence / valid_pages_count) if valid_pages_count > 0 else 0.0
     
     return {
         "raw_text": raw_text.strip(),
         "confidence": avg_confidence,
-        "pages": pages_list
+        "pages": pages_list,
+        "word_confidence_scores": all_word_confidences
     }

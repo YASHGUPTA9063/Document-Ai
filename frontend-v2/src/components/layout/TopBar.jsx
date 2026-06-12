@@ -13,6 +13,7 @@ const PAGE_META = {
   '/documents':  { title: 'Documents',   sub: 'All processed files' },
   '/agents':     { title: 'Agents',      sub: 'Multi-agent system overview' },
   '/analytics':  { title: 'Analytics',   sub: 'Processing metrics & trends' },
+  '/settings':   { title: 'Settings',    sub: 'Configure system preferences' },
 };
 
 // ── Dark mode helpers ─────────────────────────────

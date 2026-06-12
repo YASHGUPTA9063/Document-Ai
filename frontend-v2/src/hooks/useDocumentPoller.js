@@ -17,11 +17,14 @@ export function useDocumentPoller(documentId) {
   useEffect(() => {
     if (!documentId) return;
 
+    let active = true;
     addPolling(documentId);
 
     const poll = async () => {
       try {
         const data = await getStatus(documentId);
+        if (!active) return;
+
         // Map document_id to id so AppStore updates the correct item
         const payload = { ...data, id: data.document_id };
         updateDocument(payload);
@@ -41,6 +44,7 @@ export function useDocumentPoller(documentId) {
           removePolling(documentId);
         }
       } catch (err) {
+        if (!active) return;
         console.warn('Polling error for', documentId, err.message);
         timerRef.current = setTimeout(poll, POLL_INTERVAL * 2); // back-off
       }
@@ -49,6 +53,7 @@ export function useDocumentPoller(documentId) {
     poll();
 
     return () => {
+      active = false;
       clearTimeout(timerRef.current);
       removePolling(documentId);
     };

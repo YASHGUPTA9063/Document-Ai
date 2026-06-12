@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Upload, Cpu, FileSearch,
   CheckCircle, FileText, Bot, BarChart2,
-  ChevronLeft, ChevronRight
+  ChevronLeft, ChevronRight, Settings, FileCode
 } from 'lucide-react';
 import { useApp } from '../../store/AppStore';
 
@@ -29,6 +29,13 @@ const navSections = [
     items: [
       { label: 'Agents',    icon: Bot,      to: '/agents'    },
       { label: 'Analytics', icon: BarChart2, to: '/analytics' },
+      { label: 'Templates', icon: FileCode,  to: '/templates' },
+    ],
+  },
+  {
+    label: 'System',
+    items: [
+      { label: 'Settings', icon: Settings, to: '/settings' },
     ],
   },
 ];

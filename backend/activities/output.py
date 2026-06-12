@@ -7,7 +7,14 @@ from sqlalchemy.future import select
 logger = logging.getLogger(__name__)
 
 @workflows.activity()
-async def output_activity(document_id: str, doc_type: str, validated_data: dict, reviewer_result: dict, confidence_score: float) -> dict:
+async def output_activity(
+    document_id: str, 
+    doc_type: str, 
+    validated_data: dict, 
+    reviewer_result: dict, 
+    confidence_score: float,
+    field_confidences: dict = None
+) -> dict:
     try:
         logger.info(f"[Document {document_id}] Starting output activity")
         
@@ -25,7 +32,7 @@ async def output_activity(document_id: str, doc_type: str, validated_data: dict,
             if not extracted_record:
                 extracted_record = ExtractedData(
                     document_id=document_id,
-                    raw_extracted={}, # Raw OCR text could be passed here if needed
+                    raw_extracted={"field_confidences": field_confidences or {}},
                     validated_data=final_data,
                     confidence_score=confidence_score,
                     reviewer_corrections=corrections
@@ -35,6 +42,7 @@ async def output_activity(document_id: str, doc_type: str, validated_data: dict,
                 extracted_record.validated_data = final_data
                 extracted_record.confidence_score = confidence_score
                 extracted_record.reviewer_corrections = corrections
+                extracted_record.raw_extracted = {"field_confidences": field_confidences or {}}
                 
             # Update Document
             doc_result = await session.execute(select(Document).where(Document.id == document_id))

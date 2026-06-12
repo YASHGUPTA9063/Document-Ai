@@ -9,6 +9,8 @@ import { Validation } from './pages/Validation';
 import { Documents }  from './pages/Documents';
 import { Agents }     from './pages/Agents';
 import { Analytics }  from './pages/Analytics';
+import { Settings }   from './pages/Settings';
+import { Templates }  from './pages/Templates';
 
 const router = createBrowserRouter([
   {
@@ -23,6 +25,8 @@ const router = createBrowserRouter([
       { path: 'documents',    element: <Documents />  },
       { path: 'agents',       element: <Agents />     },
       { path: 'analytics',    element: <Analytics />  },
+      { path: 'settings',     element: <Settings />   },
+      { path: 'templates',    element: <Templates />  },
     ],
   },
 ]);

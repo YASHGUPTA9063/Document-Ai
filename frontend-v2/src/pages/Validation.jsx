@@ -1,11 +1,38 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle, XCircle, Edit3, RefreshCw, AlertTriangle, FileText } from 'lucide-react';
+import { CheckCircle, XCircle, Edit3, RefreshCw, AlertTriangle, FileText, X, Plus } from 'lucide-react';
 import { resumeReview, resumeDuplicate, getExtractedData } from '../api/client';
 import { useApp } from '../store/AppStore';
 import { useDocumentList } from '../hooks/useDocumentList';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { Modal } from '../components/ui/Modal';
+
+function parseArrayOfText(value) {
+  if (value === null || value === undefined) return null;
+  let parsed = value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch (e) {
+        return null;
+      }
+    } else {
+      return null;
+    }
+  }
+  
+  if (Array.isArray(parsed)) {
+    if (parsed.length === 0) {
+      return parsed;
+    }
+    if (parsed.every(item => item !== null && typeof item !== 'object')) {
+      return parsed.map(String);
+    }
+  }
+  return null;
+}
 
 /**
  * Inline field-level corrections editor.
@@ -18,7 +45,10 @@ function InlineCorrectionsEditor({ validatedData, onChange }) {
     const init = {};
     if (validatedData && typeof validatedData === 'object') {
       Object.entries(validatedData).forEach(([k, v]) => {
-        if (v != null && typeof v !== 'object') {
+        const arr = parseArrayOfText(v);
+        if (arr) {
+          init[k] = arr;
+        } else if (v != null && typeof v !== 'object') {
           init[k] = String(v);
         }
       });
@@ -31,7 +61,9 @@ function InlineCorrectionsEditor({ validatedData, onChange }) {
 
   const handleChange = (key, newVal) => {
     const original = validatedData?.[key];
-    const isChanged = String(original) !== newVal;
+    const isChanged = Array.isArray(newVal)
+      ? JSON.stringify(parseArrayOfText(original) || []) !== JSON.stringify(newVal)
+      : String(original) !== newVal;
 
     setChanged((prev) => {
       const next = new Set(prev);
@@ -42,21 +74,19 @@ function InlineCorrectionsEditor({ validatedData, onChange }) {
     const next = { ...edits, [key]: newVal };
     setEdits(next);
 
-    // Only pass changed fields as corrections
-    const corrections = {};
-    [...new Set([...changed, ...(isChanged ? [key] : [])])].forEach((k) => {
-      if (k === key) {
-        if (isChanged) corrections[k] = newVal;
-      } else {
-        corrections[k] = next[k];
-      }
-    });
     // Re-derive corrections from the changed set after this update
     const finalChanged = new Set(changed);
     isChanged ? finalChanged.add(key) : finalChanged.delete(key);
     const finalCorrections = {};
     finalChanged.forEach((k) => {
-      finalCorrections[k] = k === key ? newVal : next[k];
+      let valToSend = next[k];
+      if (Array.isArray(valToSend)) {
+        const origVal = validatedData?.[k];
+        if (typeof origVal === 'string') {
+          valToSend = JSON.stringify(valToSend);
+        }
+      }
+      finalCorrections[k] = valToSend;
     });
     onChange(finalCorrections);
   };
@@ -70,10 +100,13 @@ function InlineCorrectionsEditor({ validatedData, onChange }) {
   }
 
   const primitiveEntries = Object.entries(validatedData).filter(
-    ([, v]) => v != null && typeof v !== 'object'
+    ([, v]) => v != null && typeof v !== 'object' && parseArrayOfText(v) === null
+  );
+  const textArrayEntries = Object.entries(validatedData).filter(
+    ([, v]) => v != null && parseArrayOfText(v) !== null
   );
   const objectEntries = Object.entries(validatedData).filter(
-    ([, v]) => v != null && typeof v === 'object'
+    ([, v]) => v != null && typeof v === 'object' && parseArrayOfText(v) === null
   );
 
   return (
@@ -144,6 +177,121 @@ function InlineCorrectionsEditor({ validatedData, onChange }) {
             {isModified && (
               <div style={{ fontSize: 11, color: 'var(--muted)', paddingLeft: 2 }}>
                 Original: <span style={{ fontFamily: 'monospace', color: 'var(--text-dim)' }}>{String(originalVal)}</span>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {textArrayEntries.map(([key, originalVal]) => {
+        const isModified = changed.has(key);
+        const currentArray = edits[key] || [];
+
+        const handleAdd = (val) => {
+          if (!val.trim()) return;
+          handleChange(key, [...currentArray, val.trim()]);
+        };
+
+        const handleRemove = (idxToRemove) => {
+          handleChange(key, currentArray.filter((_, i) => i !== idxToRemove));
+        };
+
+        return (
+          <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{
+              fontSize: 11, fontWeight: 600, color: isModified ? 'var(--accent)' : 'var(--muted)',
+              letterSpacing: '0.06em', textTransform: 'uppercase',
+              display: 'flex', alignItems: 'center', gap: 5,
+            }}>
+              {key.replace(/_/g, ' ')}
+              {isModified && (
+                <span style={{
+                  fontSize: 10, background: 'var(--accent)', color: 'white',
+                  borderRadius: 99, padding: '1px 6px',
+                }}>modified</span>
+              )}
+            </label>
+            
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 4, background: 'var(--surface)', padding: 8, borderRadius: 6, border: '1px solid var(--border)' }}>
+              {currentArray.length === 0 ? (
+                <span style={{ color: 'var(--muted)', fontStyle: 'italic', fontSize: 12 }}>No items</span>
+              ) : (
+                currentArray.map((item, idx) => (
+                  <span key={idx} style={{
+                    background: 'var(--card-alt)',
+                    color: 'var(--text)',
+                    padding: '3px 8px',
+                    borderRadius: '12px',
+                    border: '1px solid var(--border)',
+                    fontSize: 11,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4
+                  }}>
+                    {item}
+                    <button
+                      type="button"
+                      onClick={() => handleRemove(idx)}
+                      style={{
+                        border: 'none',
+                        background: 'transparent',
+                        color: 'var(--muted)',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: 0
+                      }}
+                    >
+                      <X size={10} />
+                    </button>
+                  </span>
+                ))
+              )}
+            </div>
+
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input
+                type="text"
+                placeholder="Add item..."
+                id={`add-input-${key}`}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleAdd(e.target.value);
+                    e.target.value = '';
+                  }
+                }}
+                style={{
+                  flexGrow: 1,
+                  padding: '6px 10px',
+                  fontSize: 12,
+                  background: 'var(--card-alt)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 4
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const input = document.getElementById(`add-input-${key}`);
+                  if (input) {
+                    handleAdd(input.value);
+                    input.value = '';
+                  }
+                }}
+                className="btn btn-ghost btn-sm"
+                style={{ height: 30, padding: '0 10px', fontSize: 11 }}
+              >
+                <Plus size={11} /> Add
+              </button>
+            </div>
+            
+            {isModified && (
+              <div style={{ fontSize: 11, color: 'var(--muted)', paddingLeft: 2, marginTop: 2 }}>
+                Original: <span style={{ fontFamily: 'monospace', color: 'var(--text-dim)' }}>
+                  {JSON.stringify(parseArrayOfText(originalVal))}
+                </span>
               </div>
             )}
           </div>
@@ -249,14 +397,24 @@ function ReviewCard({ doc, onAction }) {
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
               {Object.entries(extracted.validated_data)
-                .filter(([, v]) => v != null && typeof v !== 'object')
+                .filter(([k, v]) => {
+                  if (v == null) return false;
+                  if (typeof v !== 'object') return true;
+                  return parseArrayOfText(v) !== null;
+                })
                 .slice(0, 8)
-                .map(([k, v]) => (
-                  <div key={k}>
-                    <span style={{ color: 'var(--muted)' }}>{k.replace(/_/g, ' ')}: </span>
-                    <span style={{ color: 'var(--text)', fontWeight: 500 }}>{String(v)}</span>
-                  </div>
-                ))}
+                .map(([k, v]) => {
+                  const arr = parseArrayOfText(v);
+                  const displayVal = arr ? arr.join(', ') : String(v);
+                  return (
+                    <div key={k}>
+                      <span style={{ color: 'var(--muted)' }}>{k.replace(/_/g, ' ')}: </span>
+                      <span style={{ color: 'var(--text)', fontWeight: 500 }} title={displayVal}>
+                        {displayVal.length > 30 ? displayVal.slice(0, 27) + '...' : displayVal}
+                      </span>
+                    </div>
+                  );
+                })}
             </div>
           </div>
         )}

@@ -7,6 +7,13 @@ const initialState = {
   pollingIds: new Set(),
   toasts: [],
   loading: false,
+  confidenceMode: (() => {
+    try {
+      return localStorage.getItem('idp-confidence-mode') || 'word';
+    } catch {
+      return 'word';
+    }
+  })(),
 };
 
 // ─── Reducer ─────────────────────────────────────
@@ -56,6 +63,10 @@ function reducer(state, action) {
     case 'SET_LOADING':
       return { ...state, loading: action.payload };
 
+    case 'SET_CONFIDENCE_MODE':
+      try { localStorage.setItem('idp-confidence-mode', action.payload); } catch {}
+      return { ...state, confidenceMode: action.payload };
+
     default:
       return state;
   }
@@ -76,6 +87,7 @@ export function AppProvider({ children }) {
   const setActiveDoc = useCallback((id)   => dispatch({ type: 'SET_ACTIVE_DOC', payload: id }),   []);
   const addPolling   = useCallback((id)   => dispatch({ type: 'ADD_POLLING',   payload: id }),    []);
   const removePolling= useCallback((id)   => dispatch({ type: 'REMOVE_POLLING',payload: id }),    []);
+  const setConfidenceMode = useCallback((mode) => dispatch({ type: 'SET_CONFIDENCE_MODE', payload: mode }), []);
 
   const toast = useCallback((msg, type = 'info', duration = 4000) => {
     const id = ++toastId;
@@ -105,6 +117,7 @@ export function AppProvider({ children }) {
       removePolling,
       toast,
       dismissToast,
+      setConfidenceMode,
     }}>
       {children}
     </AppContext.Provider>

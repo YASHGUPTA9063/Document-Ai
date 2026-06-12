@@ -41,7 +41,7 @@ async def update_error(document_id: str, error_details: dict):
 async def check_duplicate_filename(filename: str, exclude_id: str = None) -> str:
     """Returns document_id if duplicate filename exists, else None."""
     async with AsyncSessionLocal() as session:
-        query = select(Document).where(Document.filename == filename)
+        query = select(Document).where(Document.filename == filename).where(Document.status != "deleted")
         if exclude_id:
             query = query.where(Document.id != exclude_id)
         result = await session.execute(query)

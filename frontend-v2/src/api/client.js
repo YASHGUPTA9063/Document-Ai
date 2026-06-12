@@ -147,5 +147,24 @@ export function getDocumentFileUrl(documentId) {
   return `${BASE}/documents/${documentId}/file`;
 }
 
+/**
+ * Get templates from backend
+ * @returns {Promise<object>}
+ */
+export async function getTemplates() {
+  const { data } = await api.get('/templates');
+  return data;
+}
+
+/**
+ * Save templates to backend
+ * @param {object} templatesData
+ * @returns {Promise<object>}
+ */
+export async function saveTemplates(templatesData) {
+  const { data } = await api.put('/templates', templatesData);
+  return data;
+}
+
 export default api;
 

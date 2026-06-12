@@ -1,3 +1,4 @@
+import os
 import json
 import logging
 import mistralai.workflows as workflows
@@ -19,12 +20,72 @@ DOC_TYPE_AGENT_MAP = {
     "others":         settings.OTHERS_EXTRACTOR_AGENT_ID,
 }
 
+def get_template_fields(doc_type: str) -> list:
+    normalized = doc_type.lower().replace(" ", "_")
+    templates_path = os.path.join(settings.STORAGE_DIR, "templates.json")
+    if os.path.exists(templates_path):
+        try:
+            with open(templates_path, "r") as f:
+                templates = json.load(f)
+                return templates.get(normalized)
+        except Exception as e:
+            logger.error(f"Failed to read templates from {templates_path}: {e}")
+    return None
+
+
+import re
+
+def _calculate_field_confidence(field_value, word_confidence_scores: list) -> float:
+    if not isinstance(field_value, str):
+        field_str = str(field_value).strip() if field_value is not None else ""
+    else:
+        field_str = field_value.strip()
+        
+    if not field_str:
+        return 1.0
+
+    # Normalize and split field value into word tokens
+    field_words = re.findall(r'\b\w+\b', field_str.lower())
+    if not field_words:
+        return 1.0
+    
+    confidences = []
+    for f_word in field_words:
+        # Search for this word in word_confidence_scores
+        word_matches = [
+            w["confidence"] for w in word_confidence_scores
+            if w["text"].strip().lower() == f_word or f_word in w["text"].strip().lower()
+        ]
+        if word_matches:
+            # Take average of matching word confidences
+            confidences.append(sum(word_matches) / len(word_matches))
+            
+    if confidences:
+        return sum(confidences) / len(confidences)
+    
+    return 1.0
+
+def _compute_confidences_recursive(data, word_confidence_scores):
+    if isinstance(data, dict):
+        conf_dict = {}
+        for k, v in data.items():
+            if isinstance(v, (dict, list)):
+                conf_dict[k] = _compute_confidences_recursive(v, word_confidence_scores)
+            else:
+                conf_dict[k] = _calculate_field_confidence(v, word_confidence_scores)
+        return conf_dict
+    elif isinstance(data, list):
+        return [_compute_confidences_recursive(item, word_confidence_scores) for item in data]
+    else:
+        return _calculate_field_confidence(data, word_confidence_scores)
+
 
 async def _run_extraction_with_agent(
     agent_id: str,
     file_path: str,
     doc_type: str,
-    document_id: str
+    document_id: str,
+    fields_list: list = None
 ) -> dict:
     """
     Shared OCR + function-calling extraction helper.
@@ -62,13 +123,28 @@ async def _run_extraction_with_agent(
         }
     ]
 
+    fields_instruction = ""
+    if fields_list:
+        fields_desc = []
+        for f in fields_list:
+            req_str = "Required" if f.get("required") else "Optional"
+            fields_desc.append(f"- '{f['key']}' ({f['type']}, {req_str}): {f.get('description', '')}")
+        fields_instruction = "\n".join(fields_desc)
+
+    user_prompt = (
+        f"Please extract structured data from the document located at: '{file_path}'. "
+        f"You MUST call the `extract_text_from_document` tool to get the document text first."
+    )
+    if fields_instruction:
+        user_prompt += (
+            f"\n\nWe need to extract exactly the following target schema fields. Once you get the text, "
+            f"your final response must be a JSON object containing ONLY these keys:\n{fields_instruction}"
+        )
+
     messages = [
         {
             "role": "user",
-            "content": (
-                f"Please extract structured data from the document located at: '{file_path}'. "
-                f"You MUST call the `extract_text_from_document` tool to get the document text first."
-            )
+            "content": user_prompt
         }
     ]
 
@@ -82,6 +158,7 @@ async def _run_extraction_with_agent(
     message = response.choices[0].message
     raw_text = ""
     ocr_confidence = 0.0
+    word_confidence_scores = []
 
     if message.tool_calls:
         logger.info(f"[Document {document_id}] Agent requested tool calls: {message.tool_calls}")
@@ -115,6 +192,7 @@ async def _run_extraction_with_agent(
                 ocr_result = extract_with_ocr(target_file_path, doc_type)
                 raw_text = ocr_result.get("raw_text", "")
                 ocr_confidence = ocr_result.get("confidence", 0.0)
+                word_confidence_scores = ocr_result.get("word_confidence_scores", [])
 
                 messages.append({
                     "role": "tool",
@@ -124,6 +202,14 @@ async def _run_extraction_with_agent(
                 })
 
         logger.info(f"[Document {document_id}] Resuming agent with tool result")
+        
+        # Inject custom fields schema instruction reminder
+        if fields_instruction:
+            messages.append({
+                "role": "user",
+                "content": f"Based on the tool output above, extract exactly the target schema fields. Your response MUST be a JSON object containing ONLY these keys:\n{fields_instruction}"
+            })
+
         response = client.agents.complete(
             agent_id=agent_id,
             messages=messages,
@@ -138,21 +224,33 @@ async def _run_extraction_with_agent(
         ocr_result = extract_with_ocr(file_path, doc_type)
         raw_text = ocr_result.get("raw_text", "")
         ocr_confidence = ocr_result.get("confidence", 0.0)
+        word_confidence_scores = ocr_result.get("word_confidence_scores", [])
+
+        fallback_prompt = f"Here is the document text:\n{raw_text}\n\n"
+        if fields_instruction:
+            fallback_prompt += (
+                f"Please extract exactly the following target schema fields. "
+                f"Your response MUST be a JSON object containing ONLY these keys:\n{fields_instruction}"
+            )
+        else:
+            fallback_prompt += "Please extract structured data in JSON format."
 
         response = client.agents.complete(
             agent_id=agent_id,
-            messages=[{"role": "user", "content": raw_text}],
+            messages=[{"role": "user", "content": fallback_prompt}],
             response_format={"type": "json_object"}
         )
         message = response.choices[0].message
 
     content = message.content
     fields = json.loads(content)
+    field_confidences = _compute_confidences_recursive(fields, word_confidence_scores)
 
     return {
         "fields": fields,
         "raw_ocr": raw_text,
-        "confidence": ocr_confidence
+        "confidence": ocr_confidence,
+        "field_confidences": field_confidences
     }
 
 
@@ -161,9 +259,12 @@ async def extractor_activity(document_id: str, file_path: str, doc_type: str) ->
     try:
         logger.info(f"[Document {document_id}] Starting extractor activity for type: {doc_type}")
 
+        # Fetch custom fields template schema if configured
+        fields_list = get_template_fields(doc_type)
+
         agent_id = DOC_TYPE_AGENT_MAP.get(doc_type.lower())
         if agent_id:
-            return await _run_extraction_with_agent(agent_id, file_path, doc_type, document_id)
+            return await _run_extraction_with_agent(agent_id, file_path, doc_type, document_id, fields_list=fields_list)
         else:
             logger.warning(f"[Document {document_id}] Unknown doc type received: '{doc_type}'")
             return {
