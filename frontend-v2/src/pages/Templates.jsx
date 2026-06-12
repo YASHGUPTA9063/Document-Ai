@@ -45,6 +45,28 @@ const DEFAULT_TEMPLATES = {
     { key: 'procedures', label: 'Procedures', type: 'Array of Text', required: false, description: 'Medical procedures performed' },
     { key: 'lab_results', label: 'Lab Results', type: 'Array of Text', required: false, description: 'Laboratory test outcomes or values' },
     { key: 'notes', label: 'Notes', type: 'Text', required: false, description: 'Encounter summaries, clinical observations or general notes' }
+  ],
+  contract: [
+    { key: 'contract_title', label: 'Contract Title', type: 'Text', required: true, description: 'Title or type of the contract' },
+    { key: 'parties', label: 'Parties', type: 'Array of Text', required: true, description: 'Names of the parties involved in the contract' },
+    { key: 'effective_date', label: 'Effective Date', type: 'Date', required: true, description: 'The date the contract starts or becomes active' },
+    { key: 'expiration_date', label: 'Expiration Date', type: 'Date', required: false, description: 'The date the contract expires or terminates' },
+    { key: 'governing_law', label: 'Governing Law', type: 'Text', required: false, description: 'The jurisdiction or governing law under which the contract is executed' },
+    { key: 'contract_value', label: 'Contract Value', type: 'Number', required: false, description: 'Total financial value of the contract' }
+  ],
+  kyc: [
+    { key: 'full_name', label: 'Full Name', type: 'Text', required: true, description: 'Full name of the individual' },
+    { key: 'document_type', label: 'Document Type', type: 'Text', required: true, description: 'Type of identity document (e.g. Passport, Drivers License, National ID)' },
+    { key: 'document_number', label: 'Document Number', type: 'Text', required: true, description: 'Unique number or identifier of the identity document' },
+    { key: 'date_of_birth', label: 'Date of Birth', type: 'Date', required: true, description: 'Date of birth of the individual' },
+    { key: 'expiry_date', label: 'Expiry Date', type: 'Date', required: false, description: 'Expiration date of the identity document' },
+    { key: 'nationality', label: 'Nationality', type: 'Text', required: false, description: 'Nationality or country of citizenship of the individual' }
+  ],
+  others: [
+    { key: 'document_title', label: 'Document Title', type: 'Text', required: true, description: 'Title or main heading of the document' },
+    { key: 'creation_date', label: 'Creation Date', type: 'Date', required: false, description: 'The date the document was created or published' },
+    { key: 'author', label: 'Author', type: 'Text', required: false, description: 'The author, creator, or issuing organization of the document' },
+    { key: 'summary', label: 'Summary', type: 'Text', required: false, description: 'A brief summary of the document content' }
   ]
 };
 
@@ -77,7 +99,14 @@ export function Templates() {
   useEffect(() => {
     getTemplates()
       .then(data => {
-        setTemplates(data || DEFAULT_TEMPLATES);
+        const loadedTemplates = data || DEFAULT_TEMPLATES;
+        setTemplates(loadedTemplates);
+        if (loadedTemplates && !loadedTemplates[activeTab]) {
+          const keys = Object.keys(loadedTemplates);
+          if (keys.length > 0) {
+            setActiveTab(keys[0]);
+          }
+        }
       })
       .catch(err => {
         toast('Failed to load templates: ' + err.message, 'error');
@@ -85,7 +114,7 @@ export function Templates() {
       .finally(() => {
         setLoading(false);
       });
-  }, [toast]);
+  }, [toast, activeTab]);
 
   const currentFields = useMemo(() => {
     return templates[activeTab] || [];
@@ -273,24 +302,15 @@ export function Templates() {
 
       {/* ── Document Type Tabs ── */}
       <div className="tabs">
-        <div 
-          className={`tab ${activeTab === 'invoice' ? 'active' : ''}`}
-          onClick={() => { setActiveTab('invoice'); setSearchQuery(''); }}
-        >
-          Invoice Template
-        </div>
-        <div 
-          className={`tab ${activeTab === 'bank_record' ? 'active' : ''}`}
-          onClick={() => { setActiveTab('bank_record'); setSearchQuery(''); }}
-        >
-          Bank Record Template
-        </div>
-        <div 
-          className={`tab ${activeTab === 'medical_record' ? 'active' : ''}`}
-          onClick={() => { setActiveTab('medical_record'); setSearchQuery(''); }}
-        >
-          Medical Record Template
-        </div>
+        {Object.keys(templates).map((key) => (
+          <div 
+            key={key}
+            className={`tab ${activeTab === key ? 'active' : ''}`}
+            onClick={() => { setActiveTab(key); setSearchQuery(''); }}
+          >
+            {key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')} Template
+          </div>
+        ))}
       </div>
 
       {/* ── Search Bar & Filter Strip ── */}

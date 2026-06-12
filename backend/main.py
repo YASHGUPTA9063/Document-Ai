@@ -666,6 +666,28 @@ DEFAULT_TEMPLATES = {
         {"key": "procedures", "label": "Procedures", "type": "Array of Text", "required": False, "description": "Medical procedures performed"},
         {"key": "lab_results", "label": "Lab Results", "type": "Array of Text", "required": False, "description": "Laboratory test outcomes or values"},
         {"key": "notes", "label": "Notes", "type": "Text", "required": False, "description": "Encounter summaries, clinical observations or general notes"}
+    ],
+    "contract": [
+        {"key": "contract_title", "label": "Contract Title", "type": "Text", "required": True, "description": "Title or type of the contract"},
+        {"key": "parties", "label": "Parties", "type": "Array of Text", "required": True, "description": "Names of the parties involved in the contract"},
+        {"key": "effective_date", "label": "Effective Date", "type": "Date", "required": True, "description": "The date the contract starts or becomes active"},
+        {"key": "expiration_date", "label": "Expiration Date", "type": "Date", "required": False, "description": "The date the contract expires or terminates"},
+        {"key": "governing_law", "label": "Governing Law", "type": "Text", "required": False, "description": "The jurisdiction or governing law under which the contract is executed"},
+        {"key": "contract_value", "label": "Contract Value", "type": "Number", "required": False, "description": "Total financial value of the contract"}
+    ],
+    "kyc": [
+        {"key": "full_name", "label": "Full Name", "type": "Text", "required": True, "description": "Full name of the individual"},
+        {"key": "document_type", "label": "Document Type", "type": "Text", "required": True, "description": "Type of identity document (e.g. Passport, Drivers License, National ID)"},
+        {"key": "document_number", "label": "Document Number", "type": "Text", "required": True, "description": "Unique number or identifier of the identity document"},
+        {"key": "date_of_birth", "label": "Date of Birth", "type": "Date", "required": True, "description": "Date of birth of the individual"},
+        {"key": "expiry_date", "label": "Expiry Date", "type": "Date", "required": False, "description": "Expiration date of the identity document"},
+        {"key": "nationality", "label": "Nationality", "type": "Text", "required": False, "description": "Nationality or country of citizenship of the individual"}
+    ],
+    "others": [
+        {"key": "document_title", "label": "Document Title", "type": "Text", "required": True, "description": "Title or main heading of the document"},
+        {"key": "creation_date", "label": "Creation Date", "type": "Date", "required": False, "description": "The date the document was created or published"},
+        {"key": "author", "label": "Author", "type": "Text", "required": False, "description": "The author, creator, or issuing organization of the document"},
+        {"key": "summary", "label": "Summary", "type": "Text", "required": False, "description": "A brief summary of the document content"}
     ]
 }
 

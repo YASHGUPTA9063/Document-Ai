@@ -460,7 +460,7 @@ function renderFields(data, isEditing, editedData, onChange, confidences = {}, c
           value={v}
           isEditing={isEditing}
           onChange={onChange}
-          conf={confidenceMode === 'word' ? confidences[k] : null}
+          conf={(confidenceMode === 'word' || confidenceMode === 'both') ? confidences[k] : null}
         />
       ))}
     </FieldGroup>
@@ -568,10 +568,15 @@ export function Extraction() {
   const { toast } = useApp();
   const navigate = useNavigate();
 
+  const wordConf = extracted ? getAverageWordConfidence(extracted) : 0;
+  const pageConf = extracted ? (extracted.confidence_score ?? 0) : 0;
+
   const displayConfidence = extracted
     ? (confidenceMode === 'page'
-        ? extracted.confidence_score
-        : getAverageWordConfidence(extracted))
+        ? pageConf
+        : confidenceMode === 'word'
+        ? wordConf
+        : Math.min(wordConf, pageConf))
     : 0;
 
   useEffect(() => { refresh(); }, []);
@@ -797,13 +802,23 @@ export function Extraction() {
                 )}
               </span>
               <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+                {confidenceMode === 'word' && (
+                  <>
+                    Word Conf: <strong style={{ color: 'var(--text)' }}>{Math.round(wordConf * 100)}%</strong>
+                  </>
+                )}
                 {confidenceMode === 'page' && (
                   <>
-                    Confidence: <strong style={{ color: 'var(--text)' }}>{Math.round(displayConfidence * 100)}%</strong>
+                    Page Conf: <strong style={{ color: 'var(--text)' }}>{Math.round(pageConf * 100)}%</strong>
+                  </>
+                )}
+                {confidenceMode === 'both' && (
+                  <>
+                    Word Conf: <strong style={{ color: 'var(--text)' }}>{Math.round(wordConf * 100)}%</strong> · Page Conf: <strong style={{ color: 'var(--text)' }}>{Math.round(pageConf * 100)}%</strong>
                   </>
                 )}
                 {extracted.reviewer_corrections && Object.keys(extracted.reviewer_corrections).length > 0 && (
-                  <span style={{ marginLeft: confidenceMode === 'page' ? 8 : 0, color: 'var(--accent)' }}>
+                  <span style={{ marginLeft: 8, color: 'var(--accent)' }}>
                     · {Object.keys(extracted.reviewer_corrections).length} corrected
                   </span>
                 )}
@@ -817,11 +832,23 @@ export function Extraction() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
             <div>
               <div style={{ fontSize: 15, fontWeight: 700 }}>Extracted Data</div>
-              {extracted && confidenceMode === 'page' && (
+              {extracted && (
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
-                  Confidence: <span style={{ color: 'var(--success)', fontWeight: 600 }}>
-                    {Math.round(displayConfidence * 100)}%
-                  </span>
+                  {confidenceMode === 'word' && (
+                    <>
+                      Word Confidence: <span style={{ color: wordConf >= 0.8 ? 'var(--success)' : 'var(--warn)', fontWeight: 600 }}>{Math.round(wordConf * 100)}%</span>
+                    </>
+                  )}
+                  {confidenceMode === 'page' && (
+                    <>
+                      Page Confidence: <span style={{ color: pageConf >= 0.8 ? 'var(--success)' : 'var(--warn)', fontWeight: 600 }}>{Math.round(pageConf * 100)}%</span>
+                    </>
+                  )}
+                  {confidenceMode === 'both' && (
+                    <>
+                      Word: <span style={{ color: wordConf >= 0.8 ? 'var(--success)' : 'var(--warn)', fontWeight: 600 }}>{Math.round(wordConf * 100)}%</span> · Page: <span style={{ color: pageConf >= 0.8 ? 'var(--success)' : 'var(--warn)', fontWeight: 600 }}>{Math.round(pageConf * 100)}%</span>
+                    </>
+                  )}
                 </div>
               )}
             </div>

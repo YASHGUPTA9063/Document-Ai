@@ -4,9 +4,27 @@ import { Settings as SettingsIcon, CheckCircle2, Circle } from 'lucide-react';
 export function Settings() {
   const { confidenceMode, setConfidenceMode, toast } = useApp();
 
-  const handleModeChange = (mode) => {
-    setConfidenceMode(mode);
-    toast(`Confidence score granularity set to ${mode === 'word' ? 'Word-wise' : 'Page-wise'} ✓`, 'success');
+  const isWordActive = confidenceMode === 'word' || confidenceMode === 'both';
+  const isPageActive = confidenceMode === 'page' || confidenceMode === 'both';
+
+  const toggleWord = () => {
+    if (isWordActive && !isPageActive) {
+      toast('At least one confidence score type must be active.', 'error');
+      return;
+    }
+    const nextMode = isWordActive ? 'page' : 'both';
+    setConfidenceMode(nextMode);
+    toast(`Confidence score granularity set to ${nextMode === 'both' ? 'Both Word-wise & Page-wise' : 'Page-wise'} ✓`, 'success');
+  };
+
+  const togglePage = () => {
+    if (isPageActive && !isWordActive) {
+      toast('At least one confidence score type must be active.', 'error');
+      return;
+    }
+    const nextMode = isPageActive ? 'word' : 'both';
+    setConfidenceMode(nextMode);
+    toast(`Confidence score granularity set to ${nextMode === 'both' ? 'Both Word-wise & Page-wise' : 'Word-wise'} ✓`, 'success');
   };
 
   return (
@@ -14,7 +32,7 @@ export function Settings() {
       <div className="card" style={{ padding: 24, borderRadius: 'var(--radius)' }}>
         <div className="card-header" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 16, marginBottom: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div className="empty-icon-wrap" style={{ width: 38, height: 38, background: 'var(--accent-dim)', color: 'var(--accent)', borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <div className="empty-icon-wrap" style={{ width: 38, height: 38, background: 'var(--accent-dim)', color: 'var(--accent)', borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
               <SettingsIcon size={20} />
             </div>
             <div>
@@ -31,35 +49,35 @@ export function Settings() {
               Confidence Score Granularity
             </label>
             <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16, lineHeight: 1.5 }}>
-              Choose how the confidence scores are calculated and displayed on the Extraction page.
+              Choose how the confidence scores are calculated and displayed on the Extraction page. You can select one or both score granularities.
             </p>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {/* Option 1: Word-wise */}
               <div
-                onClick={() => handleModeChange('word')}
+                onClick={toggleWord}
                 style={{
                   display: 'flex',
                   alignItems: 'flex-start',
                   gap: 14,
                   padding: 16,
                   borderRadius: 'var(--radius-sm)',
-                  border: confidenceMode === 'word' ? '1px solid var(--accent)' : '1px solid var(--border)',
-                  background: confidenceMode === 'word' ? 'var(--accent-dim)' : 'var(--card-alt)',
+                  border: isWordActive ? '1px solid var(--accent)' : '1px solid var(--border)',
+                  background: isWordActive ? 'var(--accent-dim)' : 'var(--card-alt)',
                   cursor: 'pointer',
                   transition: 'all 0.2s ease',
                 }}
                 className="setting-option"
               >
                 <div style={{ marginTop: 2, flexShrink: 0 }}>
-                  {confidenceMode === 'word' ? (
+                  {isWordActive ? (
                     <CheckCircle2 size={18} color="var(--accent)" />
                   ) : (
                     <Circle size={18} color="var(--muted)" />
                   )}
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600, fontSize: 14, color: confidenceMode === 'word' ? 'var(--accent)' : 'var(--text)' }}>
+                  <div style={{ fontWeight: 600, fontSize: 14, color: isWordActive ? 'var(--accent)' : 'var(--text)' }}>
                     Word-wise Confidence (Recommended)
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4, lineHeight: 1.5 }}>
@@ -70,29 +88,29 @@ export function Settings() {
 
               {/* Option 2: Page-wise */}
               <div
-                onClick={() => handleModeChange('page')}
+                onClick={togglePage}
                 style={{
                   display: 'flex',
                   alignItems: 'flex-start',
                   gap: 14,
                   padding: 16,
                   borderRadius: 'var(--radius-sm)',
-                  border: confidenceMode === 'page' ? '1px solid var(--accent)' : '1px solid var(--border)',
-                  background: confidenceMode === 'page' ? 'var(--accent-dim)' : 'var(--card-alt)',
+                  border: isPageActive ? '1px solid var(--accent)' : '1px solid var(--border)',
+                  background: isPageActive ? 'var(--accent-dim)' : 'var(--card-alt)',
                   cursor: 'pointer',
                   transition: 'all 0.2s ease',
                 }}
                 className="setting-option"
               >
                 <div style={{ marginTop: 2, flexShrink: 0 }}>
-                  {confidenceMode === 'page' ? (
+                  {isPageActive ? (
                     <CheckCircle2 size={18} color="var(--accent)" />
                   ) : (
                     <Circle size={18} color="var(--muted)" />
                   )}
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600, fontSize: 14, color: confidenceMode === 'page' ? 'var(--accent)' : 'var(--text)' }}>
+                  <div style={{ fontWeight: 600, fontSize: 14, color: isPageActive ? 'var(--accent)' : 'var(--text)' }}>
                     Page-wise Confidence
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4, lineHeight: 1.5 }}>
