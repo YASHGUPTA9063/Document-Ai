@@ -20,7 +20,7 @@ const TYPE_ICONS = {
 };
 
 export function Templates() {
-  const { toast } = useApp();
+  const { toast, fieldHighlightThreshold } = useApp();
   const [activeTab, setActiveTab] = useState('');
   const [templates, setTemplates] = useState(DEFAULT_TEMPLATES);
   const [loading, setLoading] = useState(true);
@@ -33,7 +33,8 @@ export function Templates() {
     label: '',
     type: 'Text',
     required: false,
-    description: ''
+    description: '',
+    confidence_threshold: ''
   });
 
   const [createTemplateModalOpen, setCreateTemplateModalOpen] = useState(false);
@@ -88,7 +89,8 @@ export function Templates() {
       label: '',
       type: 'Text',
       required: false,
-      description: ''
+      description: '',
+      confidence_threshold: ''
     });
     setModalOpen(true);
   };
@@ -100,7 +102,8 @@ export function Templates() {
       label: field.label,
       type: field.type,
       required: field.required,
-      description: field.description
+      description: field.description || '',
+      confidence_threshold: field.confidence_threshold !== undefined && field.confidence_threshold !== null ? field.confidence_threshold : ''
     });
     setModalOpen(true);
   };
@@ -205,7 +208,8 @@ export function Templates() {
       label: formData.label.trim(),
       type: formData.type,
       required: formData.required,
-      description: formData.description.trim()
+      description: formData.description.trim(),
+      confidence_threshold: formData.confidence_threshold !== '' ? Number(formData.confidence_threshold) : null
     };
 
     let updatedList;
@@ -368,21 +372,22 @@ export function Templates() {
 
           {/* ── Fields Table Card ── */}
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-            <div className="table-wrap">
+            <div className="table-wrap" style={{ maxHeight: 'calc(100vh - 280px)', overflowY: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: 'var(--card-alt)' }}>
-                    <th style={{ padding: '12px 16px', width: '25%' }}>Field Name / Key</th>
-                    <th style={{ padding: '12px 16px', width: '15%' }}>Type</th>
-                    <th style={{ padding: '12px 16px', width: '40%' }}>Description</th>
-                    <th style={{ padding: '12px 16px', width: '10%', textAlign: 'center' }}>Required</th>
-                    <th style={{ padding: '12px 16px', width: '10%', textAlign: 'right' }}>Actions</th>
+                    <th style={{ padding: '12px 16px', width: '20%', position: 'sticky', top: 0, zIndex: 10, background: 'var(--card-alt)' }}>Field Name / Key</th>
+                    <th style={{ padding: '12px 16px', width: '12%', position: 'sticky', top: 0, zIndex: 10, background: 'var(--card-alt)' }}>Type</th>
+                    <th style={{ padding: '12px 16px', width: '33%', position: 'sticky', top: 0, zIndex: 10, background: 'var(--card-alt)' }}>Description</th>
+                    <th style={{ padding: '12px 16px', width: '15%', textAlign: 'center', position: 'sticky', top: 0, zIndex: 10, background: 'var(--card-alt)' }}>Highlight Threshold</th>
+                    <th style={{ padding: '12px 16px', width: '10%', textAlign: 'center', position: 'sticky', top: 0, zIndex: 10, background: 'var(--card-alt)' }}>Required</th>
+                    <th style={{ padding: '12px 16px', width: '10%', textAlign: 'right', position: 'sticky', top: 0, zIndex: 10, background: 'var(--card-alt)' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredFields.length === 0 ? (
                     <tr>
-                      <td colSpan={5} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--muted)' }}>
+                      <td colSpan={6} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--muted)' }}>
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
                           <AlertCircle size={24} style={{ opacity: 0.5 }} />
                           <span>No fields match the search query</span>
@@ -421,6 +426,13 @@ export function Templates() {
                           </td>
                           <td style={{ padding: '12px 16px', verticalAlign: 'top', color: 'var(--text-dim)', fontSize: 12, lineHeight: 1.5, whiteSpace: 'normal', maxBreakWord: 'break-all' }}>
                             {field.description || <span style={{ fontStyle: 'italic', color: 'var(--muted)' }}>No description provided.</span>}
+                          </td>
+                          <td style={{ padding: '12px 16px', verticalAlign: 'top', textAlign: 'center' }}>
+                            {field.confidence_threshold !== undefined && field.confidence_threshold !== null ? (
+                              <span style={{ fontWeight: 600, color: 'var(--warn)' }}>{field.confidence_threshold}%</span>
+                            ) : (
+                              <span style={{ color: 'var(--muted)', fontSize: 11 }}>{fieldHighlightThreshold}% (Default)</span>
+                            )}
                           </td>
                           <td style={{ padding: '12px 16px', verticalAlign: 'top', textAlign: 'center' }}>
                             {field.required ? (
@@ -551,6 +563,25 @@ export function Templates() {
                 onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
                 style={{ minHeight: 60, resize: 'vertical' }}
               />
+            </div>
+
+            {/* Custom Confidence Threshold */}
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-dim)', marginBottom: 6 }}>
+                Custom Highlight Threshold (%)
+              </label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                className="styled-input"
+                value={formData.confidence_threshold}
+                placeholder={`Leave blank to use default (${fieldHighlightThreshold}%)`}
+                onChange={(e) => setFormData(prev => ({ ...prev, confidence_threshold: e.target.value }))}
+              />
+              <span style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4, display: 'block' }}>
+                Highlight this field if its extraction confidence falls below this value.
+              </span>
             </div>
 
             {/* Required Toggle */}

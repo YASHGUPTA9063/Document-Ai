@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Copy, Download, ChevronDown, ChevronRight, Maximize2, ExternalLink, FileText, FileSearch, CheckCircle2, AlertTriangle, Edit2, Check, X, Trash2, Plus } from 'lucide-react';
-import { getExtractedData, getDocumentFileUrl, updateExtractedData } from '../api/client';
+import { getExtractedData, getDocumentFileUrl, updateExtractedData, getTemplates } from '../api/client';
 import { useApp } from '../store/AppStore';
 import { useDocumentList } from '../hooks/useDocumentList';
 
@@ -69,6 +69,25 @@ const getTableHeaders = (items) => {
   return Array.from(keysSet);
 };
 
+/** Recursively collect all leaf numbers from a nested confidence structure and average them. */
+function flattenConfidence(conf) {
+  if (conf == null) return null;
+  if (typeof conf === 'number') return conf;
+  const nums = [];
+  const collect = (node) => {
+    if (typeof node === 'number') {
+      nums.push(node);
+    } else if (Array.isArray(node)) {
+      node.forEach(collect);
+    } else if (node && typeof node === 'object') {
+      Object.values(node).forEach(collect);
+    }
+  };
+  collect(conf);
+  if (nums.length === 0) return null;
+  return nums.reduce((s, n) => s + n, 0) / nums.length;
+}
+
 const getDefaultHeaders = (key) => {
   const k = (key || '').toLowerCase();
   if (k.includes('item')) {
@@ -80,11 +99,13 @@ const getDefaultHeaders = (key) => {
   return ['description', 'quantity', 'unit_price', 'total'];
 };
 
-function FieldRow({ label, fieldKey, value, isEditing, onChange, conf }) {
+function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighThreshold = 90, confMedThreshold = 70, fieldHighlightThreshold = 95 }) {
   const [newInputVal, setNewInputVal] = useState('');
-  const pct = conf != null ? Math.round(conf * 100) : null;
-  const confClass = pct == null ? '' : pct >= 90 ? 'conf-high' : pct >= 70 ? 'conf-med' : 'conf-low';
-  const confColor = pct == null ? '' : pct >= 90 ? 'var(--success)' : pct >= 70 ? 'var(--warn)' : 'var(--danger)';
+  // conf may be a nested structure for table/array fields — flatten to a single average number
+  const resolvedConf = flattenConfidence(conf);
+  const pct = resolvedConf != null ? Math.round(resolvedConf * 100) : null;
+  const confClass = pct == null ? '' : pct >= confHighThreshold ? 'conf-high' : pct >= confMedThreshold ? 'conf-med' : 'conf-low';
+  const confColor = pct == null ? '' : pct >= confHighThreshold ? 'var(--success)' : pct >= confMedThreshold ? 'var(--warn)' : 'var(--danger)';
 
   const tableData = parseTableData(value, fieldKey);
   const stringArray = parseArrayOfText(value);
@@ -388,7 +409,7 @@ function FieldRow({ label, fieldKey, value, isEditing, onChange, conf }) {
               <code style={{ fontSize: 11, background: 'transparent', color: 'inherit' }}>{JSON.stringify(value)}</code> : 
               String(value);
             
-            if (!isEditing && pct != null && pct < 95) {
+            if (!isEditing && pct != null && pct < fieldHighlightThreshold) {
               return (
                 <span style={{ 
                   background: 'rgba(245, 158, 11, 0.12)', 
@@ -436,7 +457,7 @@ function FieldGroup({ title, children }) {
   );
 }
 
-function renderFields(data, isEditing, editedData, onChange, confidences = {}, confidenceMode = 'word') {
+function renderFields(data, isEditing, editedData, onChange, confidences = {}, confidenceMode = 'word', confHighThreshold = 90, confMedThreshold = 70, fieldHighlightThreshold = 95, fieldThresholds = {}) {
   if (!data || typeof data !== 'object') return null;
   const groups = {};
   const renderSource = isEditing ? editedData : data;
@@ -461,6 +482,9 @@ function renderFields(data, isEditing, editedData, onChange, confidences = {}, c
           isEditing={isEditing}
           onChange={onChange}
           conf={(confidenceMode === 'word' || confidenceMode === 'both') ? confidences[k] : null}
+          confHighThreshold={confHighThreshold}
+          confMedThreshold={confMedThreshold}
+          fieldHighlightThreshold={fieldThresholds[k] ?? fieldHighlightThreshold}
         />
       ))}
     </FieldGroup>
@@ -555,7 +579,7 @@ function getAverageWordConfidence(extracted) {
 }
 
 export function Extraction() {
-  const { completedDocs, confidenceMode } = useApp();
+  const { completedDocs, confidenceMode, fieldHighlightThreshold, autoApproveThreshold, confHighThreshold, confMedThreshold } = useApp();
   const { refresh } = useDocumentList();
   const [activeId, setActiveId] = useState(null);
   const [extracted, setExtracted] = useState(null);
@@ -565,8 +589,15 @@ export function Extraction() {
   const [isEditing, setIsEditing] = useState(false);
   const [editedData, setEditedData] = useState({});
   const [saving, setSaving] = useState(false);
+  const [templates, setTemplates] = useState({});
   const { toast } = useApp();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    getTemplates()
+      .then(data => setTemplates(data || {}))
+      .catch(err => console.error('Failed to load templates:', err));
+  }, []);
 
   const wordConf = extracted ? getAverageWordConfidence(extracted) : 0;
   const pageConf = extracted ? (extracted.confidence_score ?? 0) : 0;
@@ -640,6 +671,21 @@ export function Extraction() {
   };
 
   const activeDoc = completedDocs.find((d) => d.id === activeId);
+
+  const fieldThresholds = useMemo(() => {
+    const map = {};
+    if (activeDoc?.doc_type) {
+      const docTypeKey = activeDoc.doc_type.toLowerCase().replace(/\s+/g, '_');
+      const fields = templates[docTypeKey] || [];
+      fields.forEach(f => {
+        if (f.confidence_threshold !== undefined && f.confidence_threshold !== null) {
+          map[f.key] = f.confidence_threshold;
+        }
+      });
+    }
+    return map;
+  }, [templates, activeDoc?.doc_type]);
+
   const fileUrl = activeId ? getDocumentFileUrl(activeId) : '';
   const ext = activeDoc?.filename?.split('.').pop()?.toLowerCase() ?? '';
 
@@ -777,19 +823,19 @@ export function Extraction() {
             <div style={{
               padding: '9px 14px', flexShrink: 0,
               borderTop: '1px solid var(--border)',
-              background: displayConfidence >= 0.8
+              background: displayConfidence >= autoApproveThreshold / 100
                 ? 'rgba(16,185,129,0.06)'
                 : 'rgba(245,158,11,0.06)',
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             }}>
               <span style={{
                 fontSize: 12, fontWeight: 600,
-                color: displayConfidence >= 0.8 ? 'var(--success)' : 'var(--warn)',
+                color: displayConfidence >= autoApproveThreshold / 100 ? 'var(--success)' : 'var(--warn)',
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 5,
               }}>
-                {displayConfidence >= 0.8 ? (
+                {displayConfidence >= autoApproveThreshold / 100 ? (
                   <>
                     <CheckCircle2 size={13} />
                     High Confidence
@@ -836,17 +882,17 @@ export function Extraction() {
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
                   {confidenceMode === 'word' && (
                     <>
-                      Word Confidence: <span style={{ color: wordConf >= 0.8 ? 'var(--success)' : 'var(--warn)', fontWeight: 600 }}>{Math.round(wordConf * 100)}%</span>
+                      Word Confidence: <span style={{ color: wordConf >= autoApproveThreshold / 100 ? 'var(--success)' : 'var(--warn)', fontWeight: 600 }}>{Math.round(wordConf * 100)}%</span>
                     </>
                   )}
                   {confidenceMode === 'page' && (
                     <>
-                      Page Confidence: <span style={{ color: pageConf >= 0.8 ? 'var(--success)' : 'var(--warn)', fontWeight: 600 }}>{Math.round(pageConf * 100)}%</span>
+                      Page Confidence: <span style={{ color: pageConf >= autoApproveThreshold / 100 ? 'var(--success)' : 'var(--warn)', fontWeight: 600 }}>{Math.round(pageConf * 100)}%</span>
                     </>
                   )}
                   {confidenceMode === 'both' && (
                     <>
-                      Word: <span style={{ color: wordConf >= 0.8 ? 'var(--success)' : 'var(--warn)', fontWeight: 600 }}>{Math.round(wordConf * 100)}%</span> · Page: <span style={{ color: pageConf >= 0.8 ? 'var(--success)' : 'var(--warn)', fontWeight: 600 }}>{Math.round(pageConf * 100)}%</span>
+                      Word: <span style={{ color: wordConf >= autoApproveThreshold / 100 ? 'var(--success)' : 'var(--warn)', fontWeight: 600 }}>{Math.round(wordConf * 100)}%</span> · Page: <span style={{ color: pageConf >= autoApproveThreshold / 100 ? 'var(--success)' : 'var(--warn)', fontWeight: 600 }}>{Math.round(pageConf * 100)}%</span>
                     </>
                   )}
                 </div>
@@ -906,7 +952,7 @@ export function Extraction() {
           {extracted && !loadingEx && (
             <>
               {extracted.validated_data ? (
-                renderFields(extracted.validated_data, isEditing, editedData, handleFieldChange, extracted.raw_extracted?.field_confidences || {}, confidenceMode)
+                renderFields(extracted.validated_data, isEditing, editedData, handleFieldChange, extracted.raw_extracted?.field_confidences || {}, confidenceMode, confHighThreshold, confMedThreshold, fieldHighlightThreshold, fieldThresholds)
               ) : (
                 <div className="empty-state" style={{ padding: 24 }}>
                   <div className="empty-sub">No structured data extracted yet.</div>

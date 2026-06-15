@@ -11,15 +11,8 @@ logger = logging.getLogger(__name__)
 client = Mistral(api_key=settings.MISTRAL_API_KEY)
 
 def get_supported_doc_types() -> dict:
-    # Default types and their friendly display names
-    types_map = {
-        "invoice": "Invoice",
-        "contract": "Contract",
-        "kyc": "KYC",
-        "medical_record": "Medical Record",
-        "bank_record": "Bank Record"
-    }
-    
+    # Strictly load document types from user-configured templates only
+    types_map = {}
     templates_path = os.path.join(settings.STORAGE_DIR, "templates.json")
     if os.path.exists(templates_path):
         try:
@@ -27,14 +20,13 @@ def get_supported_doc_types() -> dict:
                 templates = json.load(f)
                 for key in templates.keys():
                     normalized_key = key.lower().replace(" ", "_")
-                    if normalized_key not in types_map:
-                        # e.g., "purchase_order" -> "Purchase Order"
-                        display_name = " ".join(word.capitalize() for word in normalized_key.split("_"))
-                        types_map[normalized_key] = display_name
+                    # e.g., "purchase_order" -> "Purchase Order"
+                    display_name = " ".join(word.capitalize() for word in normalized_key.split("_"))
+                    types_map[normalized_key] = display_name
         except Exception as e:
             logger.error(f"Failed to read templates in classifier: {e}")
-            
     return types_map
+
 
 @workflows.activity()
 async def classifier_activity(document_id: str, file_path: str) -> dict:
@@ -60,8 +52,8 @@ async def classifier_activity(document_id: str, file_path: str) -> dict:
             f"- 'reasoning': A brief explanation of why you selected this document type."
         )
         
-        response = client.chat.complete(
-            model="mistral-large-latest",
+        response = client.agents.complete(
+            agent_id=settings.CLASSIFIER_AGENT_ID,
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"}
         )
