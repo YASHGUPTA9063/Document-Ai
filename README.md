@@ -32,35 +32,47 @@ The application is engineered using professional, premium front-end styling prac
 
 ## 🚀 Getting Started
 
-Since **DocuMind AI** is fully client-side and built with native technologies, launching it locally is instant and dependency-free.
+**DocuMind AI** is composed of a FastAPI backend and a Vite+React frontend.
 
-### Option 1: Direct Access
-Simply double-click the `index.html` file in your file explorer to open the dashboard directly in your favorite modern web browser.
+### 1. Start the Backend
 
-### Option 2: Local Web Server
-For the best experience, run it using a local development server:
+1. Navigate to the `backend` directory.
+2. Create your `.env` file from the example: `cp .env.example .env` and fill in your API keys and Mistral Agent IDs.
+3. Install the dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+4. Run the server:
+   ```bash
+   uvicorn main:app --reload --port 8000
+   ```
 
-**Using Node.js (`npx`):**
-```bash
-npx live-server
-```
+### 2. Start the Frontend
 
-**Using Python:**
-```bash
-python -m http.server 8000
-```
-Then visit `http://localhost:8000` in your browser.
+1. Navigate to the `frontend-v2` directory.
+2. Install the frontend dependencies:
+   ```bash
+   npm install
+   ```
+3. Run the development server:
+   ```bash
+   npm run dev
+   ```
+4. Open the displayed local URL in your browser to access the dashboard.
 
 ---
 
 ## 🛠️ Built With
 
-*   **HTML5** — Semantic markup structure.
-*   **Vanilla CSS3** — CSS Custom Variables, modern flexbox/grid layouts, animations, and premium glassmorphism filters.
-*   **ES6+ JavaScript** — Client-side view routing, real-time log stream simulators, and dynamic active-component states.
+**Frontend (`frontend-v2`):**
+*   **Vite & React** — Fast build tool and component-based UI framework.
+*   **Vanilla CSS3** — CSS Custom Variables, modern layouts, and premium glassmorphism filters.
+*   **Lucide React** — Elegant iconography.
+
+**Backend (`backend`):**
+*   **FastAPI & Uvicorn** — High-performance asynchronous API framework.
+*   **Mistral AI & Workflows** — Intelligent agents for document extraction, classification, and validation.
+*   **SQLAlchemy & SQLite** — Asynchronous data persistence.
 
 ---
 
-## 📄 License
-
-This project is licensed under the MIT License. Feel free to use, adapt, and build upon it!
