@@ -709,6 +709,7 @@ async def delete_template(template_name: str):
 async def generate_template_from_sample(
     template_name: str = Query(...),
     is_kyc: bool = Query(False),
+    kyc_boxes: str = Query(None, description="JSON string of {signature: {x1,y1,x2,y2}, photo: {x1,y1,x2,y2}} percentages"),
     file: UploadFile = File(...)
 ):
     # Save the file temporarily
@@ -842,10 +843,22 @@ async def generate_template_from_sample(
         # Save to templates (new format with is_kyc metadata)
         templates = load_templates()
         normalized_name = template_name.strip().lower().replace(" ", "_")
-        templates[normalized_name] = {
+        template_entry = {
             "fields": validated_fields,
             "is_kyc": is_kyc
         }
+
+        # Parse and attach kyc_boxes if provided
+        if kyc_boxes:
+            try:
+                parsed_boxes = json.loads(kyc_boxes)
+                if isinstance(parsed_boxes, dict):
+                    template_entry["kyc_boxes"] = parsed_boxes
+                    logger.info(f"Saved kyc_boxes for template '{normalized_name}': {parsed_boxes}")
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning(f"Failed to parse kyc_boxes: {e}")
+
+        templates[normalized_name] = template_entry
         save_templates_to_file(templates)
         
         return {"success": True, "template_name": normalized_name, "fields": validated_fields, "is_kyc": is_kyc}

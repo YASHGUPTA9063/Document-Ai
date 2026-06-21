@@ -1,9 +1,9 @@
 import { X } from 'lucide-react';
 
-export function Modal({ title, subtitle, onClose, children, footer }) {
+export function Modal({ title, subtitle, onClose, children, footer, wide }) {
   return (
     <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose?.()}>
-      <div className="modal">
+      <div className={`modal${wide ? ' modal-wide' : ''}`}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
           <div>
             <div className="modal-title">{title}</div>
@@ -19,7 +19,9 @@ export function Modal({ title, subtitle, onClose, children, footer }) {
             </button>
           )}
         </div>
-        {children}
+        <div style={{ maxHeight: '70vh', overflowY: 'auto' }}>
+          {children}
+        </div>
         {footer && <div className="modal-footer">{footer}</div>}
       </div>
     </div>

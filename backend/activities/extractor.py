@@ -45,13 +45,16 @@ def get_template_fields(doc_type: str) -> list:
 
 
 def get_template_metadata(doc_type: str) -> dict:
-    """Get template metadata including is_kyc flag."""
+    """Get template metadata including is_kyc flag and kyc_boxes."""
     raw = _load_template_raw(doc_type)
     if raw is None:
         return {}
     if isinstance(raw, dict):
-        return {"is_kyc": raw.get("is_kyc", False)}
-    return {"is_kyc": False}  # old format has no KYC flag
+        return {
+            "is_kyc": raw.get("is_kyc", False),
+            "kyc_boxes": raw.get("kyc_boxes", None)
+        }
+    return {"is_kyc": False, "kyc_boxes": None}  # old format has no KYC flag
 
 
 import re
@@ -107,7 +110,8 @@ async def _run_extraction_with_agent(
     doc_type: str,
     document_id: str,
     fields_list: list = None,
-    is_kyc: bool = False
+    is_kyc: bool = False,
+    kyc_boxes: dict = None
 ) -> dict:
     """
     Shared OCR + function-calling extraction helper.
@@ -276,13 +280,18 @@ async def _run_extraction_with_agent(
     # For KYC docs: ALWAYS run signature+photo extraction directly
     # (we don't rely on the agent to call the tool — it's unreliable)
     if is_kyc:
+        if kyc_boxes:
+            logger.info(f"[Document {document_id}] Using template manual coordinates for KYC extraction (skipping Pixtral)")
+        else:
+            logger.info(f"[Document {document_id}] No manual coordinates — falling back to Pixtral vision")
         logger.info(f"[Document {document_id}] Running KYC image extraction (signature + photo)...")
         try:
             from utils.signature_extractor import extract_signature_and_photo
             kyc_image_result = extract_signature_and_photo(
                 file_path=file_path,
                 document_id=document_id,
-                output_dir=os.path.join(settings.STORAGE_DIR, "crops", document_id)
+                output_dir=os.path.join(settings.STORAGE_DIR, "crops", document_id),
+                kyc_boxes=kyc_boxes
             )
             logger.info(f"[Document {document_id}] KYC extraction result: sig={kyc_image_result.get('has_signature')}, photo={kyc_image_result.get('has_photo')}")
         except Exception as e:
@@ -332,7 +341,7 @@ async def extractor_activity(document_id: str, file_path: str, doc_type: str) ->
             logger.info(f"[Document {document_id}] Custom doc type '{doc_type}' using OTHERS fallback agent: {agent_id}")
 
         if agent_id:
-            return await _run_extraction_with_agent(agent_id, file_path, doc_type, document_id, fields_list=fields_list, is_kyc=is_kyc)
+            return await _run_extraction_with_agent(agent_id, file_path, doc_type, document_id, fields_list=fields_list, is_kyc=is_kyc, kyc_boxes=template_meta.get("kyc_boxes"))
         else:
             logger.warning(f"[Document {document_id}] Unknown doc type received and no OTHERS fallback agent: '{doc_type}'")
             return {

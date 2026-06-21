@@ -272,12 +272,18 @@ def extract_signature_and_photo(
     file_path: str,
     document_id: str,
     output_dir: str = None,
+    kyc_boxes: dict = None,
 ) -> dict:
     """
-    Two-pass KYC image extraction.
+    KYC image extraction with optional template-level manual coordinates.
 
-    Pass 1: mistral-ocr-latest with document_annotation → detect signature + get OCR landmarks
-    Pass 2: pixtral-large-latest → pixel-precise bboxes for signature AND photo
+    If `kyc_boxes` is provided (e.g. {"signature": {"x1":40,"y1":80,"x2":95,"y2":95}, ...}),
+    coordinates are treated as percentages (0-100) of the image dimensions. The image is
+    cropped directly — no Mistral API calls needed. This gives 100% reliable extraction.
+
+    If `kyc_boxes` is None, falls back to the two-pass approach:
+      Pass 1: mistral-ocr-latest with document_annotation → detect signature + get OCR landmarks
+      Pass 2: pixtral-large-latest → pixel-precise bboxes for signature AND photo
     Then crop using Pillow, save to disk, and return base64.
 
     Returns:
@@ -316,13 +322,68 @@ def extract_signature_and_photo(
         "signer_name": None,
     }
 
-    # ── Prepare Image and URL ────────────────────────────────────────────────
+    # ── Prepare Image ────────────────────────────────────────────────────
     try:
         img, resolved_url = _prepare_image_and_url(file_path)
         width, height = img.size
     except Exception as e:
         logger.error(f"[Document {document_id}] Failed to prepare image: {e}")
         return result
+
+    # ══════════════════════════════════════════════════════════════════════
+    # FAST PATH: Template-level manual coordinates (skip Pixtral entirely)
+    # ══════════════════════════════════════════════════════════════════════
+    if kyc_boxes:
+        logger.info(f"[Document {document_id}] Using MANUAL template coordinates for extraction (no API calls)")
+
+        # --- Crop signature from percentage coordinates ---
+        sig_box = kyc_boxes.get("signature")
+        if sig_box:
+            sx1 = int(sig_box["x1"] / 100.0 * width)
+            sy1 = int(sig_box["y1"] / 100.0 * height)
+            sx2 = int(sig_box["x2"] / 100.0 * width)
+            sy2 = int(sig_box["y2"] / 100.0 * height)
+            logger.info(f"[Document {document_id}] Signature manual bbox: ({sx1},{sy1})->({sx2},{sy2}) from pct ({sig_box})")
+
+            cropped = _crop_region(img, sx1, sy1, sx2, sy2)
+            if cropped:
+                result["has_signature"] = True
+                result["signature_bbox"] = {"x1": sx1, "y1": sy1, "x2": sx2, "y2": sy2}
+                sig_path = os.path.join(output_dir, "signature.png")
+                cropped.save(sig_path)
+                result["signature_crop_path"] = os.path.abspath(sig_path)
+                result["signature_base64"] = _image_to_base64(cropped)
+                result["confidence"] = "high"
+                logger.info(f"[Document {document_id}] Signature crop saved (manual): {sig_path}")
+            else:
+                logger.warning(f"[Document {document_id}] Signature crop returned empty region")
+
+        # --- Crop photo from percentage coordinates ---
+        photo_box = kyc_boxes.get("photo")
+        if photo_box:
+            px1 = int(photo_box["x1"] / 100.0 * width)
+            py1 = int(photo_box["y1"] / 100.0 * height)
+            px2 = int(photo_box["x2"] / 100.0 * width)
+            py2 = int(photo_box["y2"] / 100.0 * height)
+            logger.info(f"[Document {document_id}] Photo manual bbox: ({px1},{py1})->({px2},{py2}) from pct ({photo_box})")
+
+            cropped = _crop_region(img, px1, py1, px2, py2)
+            if cropped:
+                result["has_photo"] = True
+                result["photo_bbox"] = {"x1": px1, "y1": py1, "x2": px2, "y2": py2}
+                photo_path = os.path.join(output_dir, "photo.png")
+                cropped.save(photo_path)
+                result["photo_crop_path"] = os.path.abspath(photo_path)
+                result["photo_base64"] = _image_to_base64(cropped)
+                logger.info(f"[Document {document_id}] Photo crop saved (manual): {photo_path}")
+            else:
+                logger.warning(f"[Document {document_id}] Photo crop returned empty region")
+
+        return result
+
+    # ══════════════════════════════════════════════════════════════════════
+    # FALLBACK PATH: Two-pass Pixtral approach (when no manual coords)
+    # ══════════════════════════════════════════════════════════════════════
 
     # ── Pass 1: Document annotation via Mistral OCR ──────────────────────
     logger.info(f"[Document {document_id}] KYC Pass 1: Running document_annotation...")

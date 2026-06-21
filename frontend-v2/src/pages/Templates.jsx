@@ -1,10 +1,12 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   FileCode, Plus, RotateCcw, Edit2, Trash2, Calendar, 
   Type, Hash, ToggleLeft, List, Table, Check, X, Search, 
-  AlertCircle, CheckCircle2, ChevronRight, Image, ShieldCheck 
+  AlertCircle, CheckCircle2, ChevronRight, Image, ShieldCheck,
+  Crop
 } from 'lucide-react';
 import { Modal } from '../components/ui/Modal';
+import { RegionSelector } from '../components/ui/RegionSelector';
 import { useApp } from '../store/AppStore';
 import { getTemplates, saveTemplates, generateTemplateFromSample, deleteTemplate } from '../api/client';
 
@@ -43,6 +45,24 @@ export function Templates() {
   const [isKycTemplate, setIsKycTemplate] = useState(false);
   const [sampleFile, setSampleFile] = useState(null);
   const [generatingTemplate, setGeneratingTemplate] = useState(false);
+  const [createKycRegions, setCreateKycRegions] = useState({ signature: null, photo: null });
+
+  // Preview URL for the sample file (only for images)
+  const samplePreviewUrl = useMemo(() => {
+    if (!sampleFile) return null;
+    const imageTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
+    if (imageTypes.includes(sampleFile.type)) {
+      return URL.createObjectURL(sampleFile);
+    }
+    return null;
+  }, [sampleFile]);
+
+  // Cleanup preview URL on unmount or change
+  useEffect(() => {
+    return () => {
+      if (samplePreviewUrl) URL.revokeObjectURL(samplePreviewUrl);
+    };
+  }, [samplePreviewUrl]);
 
   useEffect(() => {
     getTemplates()
@@ -79,6 +99,8 @@ export function Templates() {
     if (!t || Array.isArray(t)) return false;
     return t.is_kyc === true;
   }, [templates, activeTab]);
+
+
 
   const filteredFields = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
@@ -159,6 +181,8 @@ export function Templates() {
     }
   };
 
+
+
   const handleGenerateTemplate = async (e) => {
     e.preventDefault();
     if (!newTemplateName.trim()) {
@@ -172,7 +196,15 @@ export function Templates() {
     
     setGeneratingTemplate(true);
     try {
-      const res = await generateTemplateFromSample(newTemplateName, sampleFile, isKycTemplate);
+      // Build kyc_boxes from drawn regions (only non-null entries)
+      let kycBoxesToSend = null;
+      if (isKycTemplate && (createKycRegions.signature || createKycRegions.photo)) {
+        kycBoxesToSend = {};
+        if (createKycRegions.signature) kycBoxesToSend.signature = createKycRegions.signature;
+        if (createKycRegions.photo) kycBoxesToSend.photo = createKycRegions.photo;
+      }
+
+      const res = await generateTemplateFromSample(newTemplateName, sampleFile, isKycTemplate, kycBoxesToSend);
       toast(`Template "${res.template_name}" generated successfully ✓`, 'success');
       const updated = await getTemplates();
       setTemplates(updated || {});
@@ -181,6 +213,7 @@ export function Templates() {
       setNewTemplateName('');
       setIsKycTemplate(false);
       setSampleFile(null);
+      setCreateKycRegions({ signature: null, photo: null });
     } catch (err) {
       toast(`Failed to generate template: ${err.message}`, 'error');
     } finally {
@@ -501,6 +534,8 @@ export function Templates() {
               </table>
             </div>
           </div>
+
+
         </>
       )}
 
@@ -639,6 +674,7 @@ export function Templates() {
           title="Create Template from Sample Document"
           subtitle="Upload a sample document and the AI will analyze its layout and fields to generate a template."
           onClose={() => !generatingTemplate && setCreateTemplateModalOpen(false)}
+          wide={isKycTemplate && !!samplePreviewUrl}
           footer={
             <div style={{ display: 'flex', gap: 8, width: '100%', justifyContent: 'flex-end' }}>
               <button 
@@ -752,6 +788,45 @@ export function Templates() {
                 </div>
               </div>
             </div>
+
+            {/* Visual Region Selector — shown when KYC + image file */}
+            {isKycTemplate && samplePreviewUrl && (
+              <div style={{
+                padding: 16, borderRadius: 'var(--radius)',
+                background: 'rgba(79, 110, 247, 0.04)',
+                border: '1px solid rgba(79, 110, 247, 0.15)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+                  <Crop size={14} style={{ color: 'var(--accent)' }} />
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>Select Extraction Regions</span>
+                  <span style={{
+                    fontSize: 9, fontWeight: 700, color: 'var(--accent)',
+                    background: 'var(--accent-dim)', border: '1px solid rgba(79,110,247,0.25)',
+                    padding: '1px 5px', borderRadius: 4,
+                  }}>Optional</span>
+                </div>
+                <p style={{ fontSize: 11, color: 'var(--muted)', margin: '0 0 10px 0', lineHeight: 1.5 }}>
+                  Draw rectangles on the sample image to define where the signature and photo are located. These coordinates will be used for precise extraction.
+                </p>
+                <RegionSelector
+                  imageUrl={samplePreviewUrl}
+                  regions={createKycRegions}
+                  onChange={setCreateKycRegions}
+                />
+              </div>
+            )}
+
+            {/* PDF notice */}
+            {isKycTemplate && sampleFile && !samplePreviewUrl && (
+              <div style={{
+                padding: '10px 14px', borderRadius: 'var(--radius)',
+                background: 'rgba(245, 158, 11, 0.08)',
+                border: '1px solid rgba(245, 158, 11, 0.2)',
+                fontSize: 11, color: 'var(--warn)', lineHeight: 1.5,
+              }}>
+                <strong>Note:</strong> Visual region selection is available for image files (PNG, JPG, WEBP). For PDFs, you can set extraction coordinates manually after the template is created.
+              </div>
+            )}
           </form>
         </Modal>
       )}

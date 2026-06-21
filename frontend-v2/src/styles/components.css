@@ -453,6 +453,7 @@ tbody tr:hover .row-arrow { opacity: 1; color: var(--accent); }
 }
 .modal-title { font-size: var(--text-xl); font-weight: 700; margin-bottom: 6px; letter-spacing: -0.2px; }
 .modal-sub { font-size: var(--text-base); color: var(--muted); margin-bottom: 20px; }
+.modal-wide { max-width: 720px; }
 .modal-footer { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
 
 /* ─── Toast ─────────────────────────────────────── */
