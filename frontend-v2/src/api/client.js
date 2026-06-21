@@ -170,13 +170,14 @@ export async function saveTemplates(templatesData) {
  * Generate a template from a sample document.
  * @param {string} templateName
  * @param {File} file
- * @returns {Promise<{success: boolean, template_name: string, fields: Array}>}
+ * @param {boolean} isKyc
+ * @returns {Promise<{success: boolean, template_name: string, fields: Array, is_kyc: boolean}>}
  */
-export async function generateTemplateFromSample(templateName, file) {
+export async function generateTemplateFromSample(templateName, file, isKyc = false) {
   const form = new FormData();
   form.append('file', file);
   const { data } = await api.post('/templates/generate', form, {
-    params: { template_name: templateName },
+    params: { template_name: templateName, is_kyc: isKyc },
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: 120000,
   });
@@ -191,6 +192,16 @@ export async function generateTemplateFromSample(templateName, file) {
 export async function deleteTemplate(templateName) {
   const { data } = await api.delete(`/templates/${templateName}`);
   return data;
+}
+
+/**
+ * Get the URL for a cropped signature/photo image.
+ * @param {string} documentId
+ * @param {string} filename - e.g. "signature.png" or "photo.png"
+ * @returns {string}
+ */
+export function getCropUrl(documentId, filename) {
+  return `${BASE}/documents/${documentId}/crops/${filename}`;
 }
 
 export default api;

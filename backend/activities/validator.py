@@ -16,7 +16,12 @@ def get_template_fields(doc_type: str) -> list:
         try:
             with open(templates_path, "r") as f:
                 templates = json.load(f)
-                return templates.get(normalized)
+                template_data = templates.get(normalized)
+                if isinstance(template_data, dict):
+                    return template_data.get("fields", [])
+                elif isinstance(template_data, list):
+                    return template_data
+                return None
         except Exception as e:
             logger.error(f"Failed to read templates from {templates_path}: {e}")
     return None
@@ -32,7 +37,12 @@ async def validator_activity(
     try:
         logger.info(f"[Document {document_id}] Starting validator activity")
         
-        json_data = json.dumps(extracted_data)
+        # Remove massive base64 images from the prompt to avoid overwhelming the LLM
+        prompt_data = extracted_data.copy()
+        sig_img = prompt_data.pop("signature_image", None)
+        photo_img = prompt_data.pop("photo_image", None)
+        
+        json_data = json.dumps(prompt_data)
         
         # Load custom templates if configured
         fields_list = get_template_fields(doc_type)
@@ -64,11 +74,19 @@ async def validator_activity(
         content = response.choices[0].message.content
         parsed = json.loads(content)
         
+        validated_data = parsed.get("validated_data", prompt_data)
+        
+        # Re-inject the massive base64 strings so they are saved to the database
+        if sig_img is not None:
+            validated_data["signature_image"] = sig_img
+        if photo_img is not None:
+            validated_data["photo_image"] = photo_img
+        
         return {
             "is_valid": parsed.get("is_valid", False),
             "confidence_score": ocr_confidence, # Pass through the OCR native confidence score
             "validation_errors": parsed.get("validation_errors", []),
-            "validated_data": parsed.get("validated_data", extracted_data),
+            "validated_data": validated_data,
             "field_confidences": field_confidences or {}
         }
     except Exception as e:

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Copy, Download, ChevronDown, ChevronRight, Maximize2, ExternalLink, FileText, FileSearch, CheckCircle2, AlertTriangle, Edit2, Check, X, Trash2, Plus } from 'lucide-react';
+import { Copy, Download, ChevronDown, ChevronRight, Maximize2, ExternalLink, FileText, FileSearch, CheckCircle2, AlertTriangle, Edit2, Check, X, Trash2, Plus, ShieldCheck, UserCircle2, PenTool, ZoomIn } from 'lucide-react';
 import { getExtractedData, getDocumentFileUrl, updateExtractedData, getTemplates } from '../api/client';
 import { useApp } from '../store/AppStore';
 import { useDocumentList } from '../hooks/useDocumentList';
@@ -457,11 +457,16 @@ function FieldGroup({ title, children }) {
   );
 }
 
+// Keys that hold KYC image data — excluded from regular field rendering
+const KYC_IMAGE_KEYS = new Set(['signature_image', 'photo_image', 'signature_detected', 'photo_detected']);
+
 function renderFields(data, isEditing, editedData, onChange, confidences = {}, confidenceMode = 'word', confHighThreshold = 90, confMedThreshold = 70, fieldHighlightThreshold = 95, fieldThresholds = {}) {
   if (!data || typeof data !== 'object') return null;
   const groups = {};
   const renderSource = isEditing ? editedData : data;
   Object.entries(renderSource).forEach(([k, v]) => {
+    // Skip KYC image fields — they are rendered separately in the Identity Verification section
+    if (KYC_IMAGE_KEYS.has(k)) return;
     const group = k.startsWith('vendor') ? 'Vendor' :
                   k.startsWith('bill') || k.startsWith('line') ? 'Billing' :
                   ['subtotal','tax','total_amount','currency'].includes(k) ? 'Financial' :
@@ -489,6 +494,208 @@ function renderFields(data, isEditing, editedData, onChange, confidences = {}, c
       ))}
     </FieldGroup>
   ));
+}
+
+
+/** KYC Image Card — glassmorphic card for displaying cropped signature/photo */
+function KycImageCard({ label, icon: Icon, base64Data, detected, accentColor }) {
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+
+  const handleDownload = () => {
+    if (!base64Data) return;
+    const a = document.createElement('a');
+    a.href = `data:image/png;base64,${base64Data}`;
+    a.download = `${label.toLowerCase().replace(/\s+/g, '_')}.png`;
+    a.click();
+  };
+
+  if (!detected || !base64Data) {
+    return (
+      <div style={{
+        flex: 1,
+        minWidth: 200,
+        padding: '20px 16px',
+        borderRadius: 'var(--radius)',
+        border: '1.5px dashed var(--border)',
+        background: 'var(--surface-sunken)',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        textAlign: 'center',
+      }}>
+        <div style={{
+          width: 40, height: 40, borderRadius: '50%',
+          background: 'rgba(107,114,128,0.1)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center'
+        }}>
+          <Icon size={20} style={{ color: 'var(--muted)', opacity: 0.6 }} />
+        </div>
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)' }}>{label}</span>
+        <span style={{
+          fontSize: 10, color: 'var(--warn)',
+          background: 'rgba(245,158,11,0.08)',
+          border: '1px solid rgba(245,158,11,0.2)',
+          padding: '2px 8px', borderRadius: 99,
+          display: 'inline-flex', alignItems: 'center', gap: 4
+        }}>
+          <AlertTriangle size={10} /> Not Detected
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div style={{
+        flex: 1,
+        minWidth: 200,
+        padding: 0,
+        borderRadius: 'var(--radius)',
+        border: `1.5px solid ${accentColor}25`,
+        background: `linear-gradient(135deg, ${accentColor}08, ${accentColor}03)`,
+        backdropFilter: 'blur(12px)',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+      }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.transform = 'translateY(-2px)';
+          e.currentTarget.style.boxShadow = `0 8px 24px ${accentColor}15`;
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.transform = 'translateY(0)';
+          e.currentTarget.style.boxShadow = 'none';
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          padding: '8px 12px',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          borderBottom: `1px solid ${accentColor}15`,
+        }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: accentColor, display: 'flex', alignItems: 'center', gap: 5, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            <Icon size={12} /> {label}
+          </span>
+          <span style={{
+            fontSize: 9, fontWeight: 600,
+            color: 'var(--success)',
+            background: 'rgba(16,185,129,0.08)',
+            border: '1px solid rgba(16,185,129,0.2)',
+            padding: '1px 6px', borderRadius: 99,
+            display: 'inline-flex', alignItems: 'center', gap: 3
+          }}>
+            <CheckCircle2 size={8} /> Detected
+          </span>
+        </div>
+
+        {/* Image */}
+        <div
+          style={{
+            padding: 12,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minHeight: 100,
+            cursor: 'pointer',
+            position: 'relative',
+          }}
+          onClick={() => setLightboxOpen(true)}
+          title="Click to expand"
+        >
+          <img
+            src={`data:image/png;base64,${base64Data}`}
+            alt={label}
+            style={{
+              maxWidth: '100%',
+              maxHeight: 140,
+              objectFit: 'contain',
+              borderRadius: 4,
+              border: '1px solid var(--border)',
+            }}
+          />
+          <div style={{
+            position: 'absolute', bottom: 16, right: 16,
+            background: 'rgba(0,0,0,0.5)', color: '#fff',
+            borderRadius: '50%', width: 24, height: 24,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            opacity: 0.7, transition: 'opacity 0.2s',
+          }}>
+            <ZoomIn size={12} />
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div style={{
+          padding: '6px 12px 8px',
+          display: 'flex', gap: 6, justifyContent: 'flex-end',
+          borderTop: `1px solid ${accentColor}10`,
+        }}>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={handleDownload}
+            style={{ fontSize: 10, padding: '2px 8px', gap: 4 }}
+          >
+            <Download size={10} /> Download
+          </button>
+        </div>
+      </div>
+
+      {/* Lightbox modal */}
+      {lightboxOpen && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1100,
+            background: 'rgba(8,11,20,0.92)', backdropFilter: 'blur(20px)',
+            display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center',
+            animation: 'fade-in 150ms ease',
+            cursor: 'pointer',
+          }}
+          onClick={() => setLightboxOpen(false)}
+        >
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            position: 'absolute', top: 20, right: 20,
+          }}>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={(e) => { e.stopPropagation(); handleDownload(); }}
+              style={{ color: '#fff', borderColor: 'rgba(255,255,255,0.2)', fontSize: 11, gap: 5 }}
+            >
+              <Download size={12} /> Download
+            </button>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => setLightboxOpen(false)}
+              style={{ color: '#fff', borderColor: 'rgba(255,255,255,0.2)', fontSize: 11 }}
+            >
+              ✕ Close
+            </button>
+          </div>
+          <div style={{
+            fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.7)',
+            marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6,
+          }}>
+            <Icon size={14} /> {label}
+          </div>
+          <img
+            src={`data:image/png;base64,${base64Data}`}
+            alt={label}
+            style={{
+              maxWidth: '90vw', maxHeight: '80vh',
+              objectFit: 'contain', borderRadius: 8,
+              border: '1px solid rgba(255,255,255,0.1)',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
+    </>
+  );
 }
 
 /** Inline document viewer — PDF / image / fallback */
@@ -676,7 +883,9 @@ export function Extraction() {
     const map = {};
     if (activeDoc?.doc_type) {
       const docTypeKey = activeDoc.doc_type.toLowerCase().replace(/\s+/g, '_');
-      const fields = templates[docTypeKey] || [];
+      const raw = templates[docTypeKey];
+      // Handle both old (list) and new ({fields, is_kyc}) formats
+      const fields = Array.isArray(raw) ? raw : (raw?.fields || []);
       fields.forEach(f => {
         if (f.confidence_threshold !== undefined && f.confidence_threshold !== null) {
           map[f.key] = f.confidence_threshold;
@@ -951,6 +1160,40 @@ export function Extraction() {
 
           {extracted && !loadingEx && (
             <>
+              {/* ── Identity Verification Section (KYC signature/photo) ── */}
+              {extracted.validated_data && (
+                extracted.validated_data.signature_image || extracted.validated_data.photo_image ||
+                extracted.validated_data.signature_detected !== undefined || extracted.validated_data.photo_detected !== undefined
+              ) && (
+                <FieldGroup title="Identity Verification">
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    marginBottom: 10, padding: '6px 0',
+                  }}>
+                    <ShieldCheck size={14} style={{ color: 'var(--accent)' }} />
+                    <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)' }}>
+                      KYC Document — Signature & Photo Extraction
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                    <KycImageCard
+                      label="Signature"
+                      icon={PenTool}
+                      base64Data={extracted.validated_data.signature_image}
+                      detected={extracted.validated_data.signature_detected}
+                      accentColor="#7c3aed"
+                    />
+                    <KycImageCard
+                      label="Photo"
+                      icon={UserCircle2}
+                      base64Data={extracted.validated_data.photo_image}
+                      detected={extracted.validated_data.photo_detected}
+                      accentColor="#3b82f6"
+                    />
+                  </div>
+                </FieldGroup>
+              )}
+
               {extracted.validated_data ? (
                 renderFields(extracted.validated_data, isEditing, editedData, handleFieldChange, extracted.raw_extracted?.field_confidences || {}, confidenceMode, confHighThreshold, confMedThreshold, fieldHighlightThreshold, fieldThresholds)
               ) : (

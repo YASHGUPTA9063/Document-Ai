@@ -655,10 +655,27 @@ TEMPLATES_FILE = os.path.join(settings.STORAGE_DIR, "templates.json")
 DEFAULT_TEMPLATES = {}
 
 def load_templates():
+    """Load templates, handling both old (bare list) and new ({fields, is_kyc}) formats."""
     if os.path.exists(TEMPLATES_FILE):
         try:
             with open(TEMPLATES_FILE, "r") as f:
-                return json.load(f)
+                raw = json.load(f)
+                # Normalize: ensure each template entry is in the new dict format
+                normalized = {}
+                for key, value in raw.items():
+                    if isinstance(value, list):
+                        # Old format: bare list of fields
+                        normalized[key] = {"fields": value, "is_kyc": False}
+                    elif isinstance(value, dict):
+                        # New format: already has fields + is_kyc
+                        if "fields" not in value:
+                            value["fields"] = []
+                        if "is_kyc" not in value:
+                            value["is_kyc"] = False
+                        normalized[key] = value
+                    else:
+                        normalized[key] = {"fields": [], "is_kyc": False}
+                return normalized
         except Exception as e:
             logger.error(f"Failed to load templates: {e}")
     return DEFAULT_TEMPLATES
@@ -691,6 +708,7 @@ async def delete_template(template_name: str):
 @app.post("/templates/generate")
 async def generate_template_from_sample(
     template_name: str = Query(...),
+    is_kyc: bool = Query(False),
     file: UploadFile = File(...)
 ):
     # Save the file temporarily
@@ -783,13 +801,54 @@ async def generate_template_from_sample(
         if not validated_fields:
             raise ValueError("No valid fields could be parsed from the generated schema.")
             
-        # Save to templates
+        # If KYC, auto-append signature_image and photo_image fields
+        if is_kyc:
+            kyc_image_fields = [
+                {
+                    "key": "signature_image",
+                    "label": "Signature",
+                    "type": "Image",
+                    "required": False,
+                    "description": "Handwritten signature extracted from the KYC document."
+                },
+                {
+                    "key": "photo_image",
+                    "label": "Photo",
+                    "type": "Image",
+                    "required": False,
+                    "description": "Cardholder photograph extracted from the KYC document."
+                },
+                {
+                    "key": "signature_detected",
+                    "label": "Signature Detected",
+                    "type": "Boolean",
+                    "required": False,
+                    "description": "Whether a handwritten signature was found in the document."
+                },
+                {
+                    "key": "photo_detected",
+                    "label": "Photo Detected",
+                    "type": "Boolean",
+                    "required": False,
+                    "description": "Whether a cardholder photo was found in the document."
+                }
+            ]
+            # Remove any duplicates (in case AI already generated these)
+            existing_keys = {f["key"] for f in validated_fields}
+            for kf in kyc_image_fields:
+                if kf["key"] not in existing_keys:
+                    validated_fields.append(kf)
+
+        # Save to templates (new format with is_kyc metadata)
         templates = load_templates()
         normalized_name = template_name.strip().lower().replace(" ", "_")
-        templates[normalized_name] = validated_fields
+        templates[normalized_name] = {
+            "fields": validated_fields,
+            "is_kyc": is_kyc
+        }
         save_templates_to_file(templates)
         
-        return {"success": True, "template_name": normalized_name, "fields": validated_fields}
+        return {"success": True, "template_name": normalized_name, "fields": validated_fields, "is_kyc": is_kyc}
     except Exception as e:
         logger.error(f"Error generating template from sample: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -797,3 +856,25 @@ async def generate_template_from_sample(
         # Cleanup sample file
         if os.path.exists(file_path):
             delete_file(file_path)
+
+
+@app.get("/documents/{document_id}/crops/{filename}")
+async def get_document_crop(document_id: str, filename: str):
+    """Serve cropped signature/photo images from storage/crops/{document_id}/."""
+    # Sanitize filename to prevent directory traversal
+    import re
+    if not re.match(r'^[a-zA-Z0-9_.-]+$', filename):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    
+    crop_path = os.path.join(settings.STORAGE_DIR, "crops", document_id, filename)
+    if not os.path.exists(crop_path):
+        raise HTTPException(status_code=404, detail="Crop file not found")
+    
+    return FileResponse(
+        crop_path,
+        media_type="image/png",
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Cache-Control": "public, max-age=3600",
+        }
+    )

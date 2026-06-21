@@ -20,7 +20,8 @@ DOC_TYPE_AGENT_MAP = {
     "others":         settings.OTHERS_EXTRACTOR_AGENT_ID,
 }
 
-def get_template_fields(doc_type: str) -> list:
+def _load_template_raw(doc_type: str):
+    """Load the raw template entry (could be a list or {fields, is_kyc} dict)."""
     normalized = doc_type.lower().replace(" ", "_")
     templates_path = os.path.join(settings.STORAGE_DIR, "templates.json")
     if os.path.exists(templates_path):
@@ -31,6 +32,26 @@ def get_template_fields(doc_type: str) -> list:
         except Exception as e:
             logger.error(f"Failed to read templates from {templates_path}: {e}")
     return None
+
+
+def get_template_fields(doc_type: str) -> list:
+    """Get the fields list, handling both old (list) and new ({fields, is_kyc}) formats."""
+    raw = _load_template_raw(doc_type)
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        return raw.get("fields", [])
+    return raw  # old format: bare list
+
+
+def get_template_metadata(doc_type: str) -> dict:
+    """Get template metadata including is_kyc flag."""
+    raw = _load_template_raw(doc_type)
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return {"is_kyc": raw.get("is_kyc", False)}
+    return {"is_kyc": False}  # old format has no KYC flag
 
 
 import re
@@ -85,15 +106,17 @@ async def _run_extraction_with_agent(
     file_path: str,
     doc_type: str,
     document_id: str,
-    fields_list: list = None
+    fields_list: list = None,
+    is_kyc: bool = False
 ) -> dict:
     """
     Shared OCR + function-calling extraction helper.
 
     1. Sends the agent a user message asking it to call `extract_text_from_document`.
     2. If the agent issues the tool call, runs OCR locally and returns the text as a tool result.
-    3. Resumes the agent to get the final structured JSON extraction.
-    4. Falls back to direct OCR if the agent skips the tool call.
+    3. For KYC docs: also provides `extract_kyc_images` tool that runs signature+photo extraction.
+    4. Resumes the agent to get the final structured JSON extraction.
+    5. Falls back to direct OCR if the agent skips the tool call.
 
     Returns: {"fields": dict, "raw_ocr": str, "confidence": float}
     """
@@ -135,6 +158,7 @@ async def _run_extraction_with_agent(
         f"Please extract structured data from the document located at: '{file_path}'. "
         f"You MUST call the `extract_text_from_document` tool to get the document text first."
     )
+
     if fields_instruction:
         user_prompt += (
             f"\n\nWe need to extract exactly the following target schema fields. Once you get the text, "
@@ -148,7 +172,7 @@ async def _run_extraction_with_agent(
         }
     ]
 
-    logger.info(f"[Document {document_id}] Sending initial request to agent {agent_id} (type: {doc_type})")
+    logger.info(f"[Document {document_id}] Sending initial request to agent {agent_id} (type: {doc_type}, is_kyc={is_kyc})")
     response = client.agents.complete(
         agent_id=agent_id,
         messages=messages,
@@ -159,6 +183,7 @@ async def _run_extraction_with_agent(
     raw_text = ""
     ocr_confidence = 0.0
     word_confidence_scores = []
+    kyc_image_result = None
 
     if message.tool_calls:
         logger.info(f"[Document {document_id}] Agent requested tool calls: {message.tool_calls}")
@@ -200,6 +225,8 @@ async def _run_extraction_with_agent(
                     "content": raw_text,
                     "tool_call_id": tool_call.id
                 })
+
+
 
         logger.info(f"[Document {document_id}] Resuming agent with tool result")
         
@@ -246,6 +273,33 @@ async def _run_extraction_with_agent(
     fields = json.loads(content)
     field_confidences = _compute_confidences_recursive(fields, word_confidence_scores)
 
+    # For KYC docs: ALWAYS run signature+photo extraction directly
+    # (we don't rely on the agent to call the tool — it's unreliable)
+    if is_kyc:
+        logger.info(f"[Document {document_id}] Running KYC image extraction (signature + photo)...")
+        try:
+            from utils.signature_extractor import extract_signature_and_photo
+            kyc_image_result = extract_signature_and_photo(
+                file_path=file_path,
+                document_id=document_id,
+                output_dir=os.path.join(settings.STORAGE_DIR, "crops", document_id)
+            )
+            logger.info(f"[Document {document_id}] KYC extraction result: sig={kyc_image_result.get('has_signature')}, photo={kyc_image_result.get('has_photo')}")
+        except Exception as e:
+            logger.error(f"[Document {document_id}] KYC image extraction failed: {e}")
+            kyc_image_result = None
+
+    # Merge KYC image data into the extracted fields
+    if kyc_image_result:
+        if kyc_image_result.get("signature_base64"):
+            fields["signature_image"] = kyc_image_result["signature_base64"]
+        fields["signature_detected"] = kyc_image_result.get("has_signature", False)
+        if kyc_image_result.get("photo_base64"):
+            fields["photo_image"] = kyc_image_result["photo_base64"]
+        fields["photo_detected"] = kyc_image_result.get("has_photo", False)
+        if kyc_image_result.get("signer_name"):
+            fields["signer_name"] = kyc_image_result["signer_name"]
+
     return {
         "fields": fields,
         "raw_ocr": raw_text,
@@ -261,6 +315,15 @@ async def extractor_activity(document_id: str, file_path: str, doc_type: str) ->
 
         # Fetch custom fields template schema if configured
         fields_list = get_template_fields(doc_type)
+        template_meta = get_template_metadata(doc_type)
+        is_kyc = template_meta.get("is_kyc", False)
+
+        # Also treat classifier-emitted "KYC" type as KYC even without template flag
+        if doc_type.lower() == "kyc":
+            is_kyc = True
+
+        if is_kyc:
+            logger.info(f"[Document {document_id}] KYC document detected — will extract signature + photo")
 
         agent_id = DOC_TYPE_AGENT_MAP.get(doc_type.lower())
         if not agent_id:
@@ -269,7 +332,7 @@ async def extractor_activity(document_id: str, file_path: str, doc_type: str) ->
             logger.info(f"[Document {document_id}] Custom doc type '{doc_type}' using OTHERS fallback agent: {agent_id}")
 
         if agent_id:
-            return await _run_extraction_with_agent(agent_id, file_path, doc_type, document_id, fields_list=fields_list)
+            return await _run_extraction_with_agent(agent_id, file_path, doc_type, document_id, fields_list=fields_list, is_kyc=is_kyc)
         else:
             logger.warning(f"[Document {document_id}] Unknown doc type received and no OTHERS fallback agent: '{doc_type}'")
             return {

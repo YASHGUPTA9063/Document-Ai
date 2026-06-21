@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { 
   FileCode, Plus, RotateCcw, Edit2, Trash2, Calendar, 
   Type, Hash, ToggleLeft, List, Table, Check, X, Search, 
-  AlertCircle, CheckCircle2, ChevronRight 
+  AlertCircle, CheckCircle2, ChevronRight, Image, ShieldCheck 
 } from 'lucide-react';
 import { Modal } from '../components/ui/Modal';
 import { useApp } from '../store/AppStore';
@@ -16,7 +16,8 @@ const TYPE_ICONS = {
   'Date': Calendar,
   'Boolean': ToggleLeft,
   'Array of Text': List,
-  'Array of Objects': Table
+  'Array of Objects': Table,
+  'Image': Image
 };
 
 export function Templates() {
@@ -39,6 +40,7 @@ export function Templates() {
 
   const [createTemplateModalOpen, setCreateTemplateModalOpen] = useState(false);
   const [newTemplateName, setNewTemplateName] = useState('');
+  const [isKycTemplate, setIsKycTemplate] = useState(false);
   const [sampleFile, setSampleFile] = useState(null);
   const [generatingTemplate, setGeneratingTemplate] = useState(false);
 
@@ -65,7 +67,17 @@ export function Templates() {
   }, [toast, activeTab]);
 
   const currentFields = useMemo(() => {
-    return templates[activeTab] || [];
+    const t = templates[activeTab];
+    if (!t) return [];
+    // Handle both old (list) and new ({fields, is_kyc}) formats
+    if (Array.isArray(t)) return t;
+    return t.fields || [];
+  }, [templates, activeTab]);
+
+  const isActiveKyc = useMemo(() => {
+    const t = templates[activeTab];
+    if (!t || Array.isArray(t)) return false;
+    return t.is_kyc === true;
   }, [templates, activeTab]);
 
   const filteredFields = useMemo(() => {
@@ -111,7 +123,10 @@ export function Templates() {
   const handleDeleteField = async (fieldKey) => {
     if (window.confirm(`Are you sure you want to delete the field "${fieldKey}"?`)) {
       const updatedList = currentFields.filter(f => f.key !== fieldKey);
-      const updatedTemplates = { ...templates, [activeTab]: updatedList };
+      // Preserve template metadata (is_kyc flag) when updating fields
+      const existingTemplate = templates[activeTab];
+      const templateMeta = (existingTemplate && !Array.isArray(existingTemplate)) ? existingTemplate : {};
+      const updatedTemplates = { ...templates, [activeTab]: { ...templateMeta, fields: updatedList } };
       
       try {
         setTemplates(updatedTemplates);
@@ -157,13 +172,14 @@ export function Templates() {
     
     setGeneratingTemplate(true);
     try {
-      const res = await generateTemplateFromSample(newTemplateName, sampleFile);
+      const res = await generateTemplateFromSample(newTemplateName, sampleFile, isKycTemplate);
       toast(`Template "${res.template_name}" generated successfully ✓`, 'success');
       const updated = await getTemplates();
       setTemplates(updated || {});
       setActiveTab(res.template_name);
       setCreateTemplateModalOpen(false);
       setNewTemplateName('');
+      setIsKycTemplate(false);
       setSampleFile(null);
     } catch (err) {
       toast(`Failed to generate template: ${err.message}`, 'error');
@@ -218,7 +234,10 @@ export function Templates() {
     } else {
       updatedList = currentFields.map(f => f.key === editingField.key ? fieldObj : f);
     }
-    const updatedTemplates = { ...templates, [activeTab]: updatedList };
+    // Preserve template metadata (is_kyc flag) when updating fields
+    const existingTemplate = templates[activeTab];
+    const templateMeta = (existingTemplate && !Array.isArray(existingTemplate)) ? existingTemplate : {};
+    const updatedTemplates = { ...templates, [activeTab]: { ...templateMeta, fields: updatedList } };
 
     try {
       setTemplates(updatedTemplates);
@@ -312,15 +331,28 @@ export function Templates() {
         <>
           {/* ── Document Type Tabs ── */}
           <div className="tabs">
-            {templateKeys.map((key) => (
+            {templateKeys.map((key) => {
+            const tpl = templates[key];
+            const kycFlag = tpl && !Array.isArray(tpl) && tpl.is_kyc;
+            return (
               <div 
                 key={key}
                 className={`tab ${activeTab === key ? 'active' : ''}`}
                 onClick={() => { setActiveTab(key); setSearchQuery(''); }}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
               >
+                {kycFlag && <ShieldCheck size={12} style={{ color: 'var(--accent)' }} />}
                 {key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')} Template
+                {kycFlag && (
+                  <span style={{
+                    fontSize: 9, fontWeight: 700, color: 'var(--accent)',
+                    background: 'var(--accent-dim)', border: '1px solid rgba(79,110,247,0.25)',
+                    padding: '1px 5px', borderRadius: 4, marginLeft: 2
+                  }}>KYC</span>
+                )}
               </div>
-            ))}
+            );
+          })}
           </div>
 
           {/* ── Search Bar & Filter Strip ── */}
@@ -650,6 +682,33 @@ export function Templates() {
               <span style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4, display: 'block' }}>
                 This name will be used to identify and classify documents of this type.
               </span>
+            </div>
+
+            {/* KYC Document Toggle */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
+              background: isKycTemplate ? 'rgba(79, 110, 247, 0.08)' : 'var(--surface-sunken)',
+              border: isKycTemplate ? '1.5px solid rgba(79, 110, 247, 0.3)' : '1px solid var(--border)',
+              borderRadius: 'var(--radius)', cursor: 'pointer',
+              transition: 'all 0.2s ease'
+            }} onClick={() => !generatingTemplate && setIsKycTemplate(prev => !prev)}>
+              <input
+                type="checkbox"
+                id="kyc-toggle"
+                checked={isKycTemplate}
+                onChange={(e) => setIsKycTemplate(e.target.checked)}
+                disabled={generatingTemplate}
+                style={{ width: 16, height: 16, accentColor: 'var(--accent)', cursor: 'pointer' }}
+              />
+              <div style={{ flex: 1 }}>
+                <label htmlFor="kyc-toggle" style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <ShieldCheck size={14} style={{ color: 'var(--accent)' }} />
+                  KYC Identity Document
+                </label>
+                <span style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, display: 'block' }}>
+                  Enable signature and photo extraction from identity cards (Aadhaar, PAN, etc.)
+                </span>
+              </div>
             </div>
 
             <div>
