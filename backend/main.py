@@ -422,14 +422,28 @@ STATIC_AGENTS = [
         "key": "signature_verifier",
         "name": "Signature Verifier Agent",
         "step": 3,
-        "role": "Signature & photo forensic verification",
-        "description": "Compares extracted signatures/photos against a reference using DINOv2 embeddings and Mistral Vision forensic analysis, then a Judge agent produces the final verdict.",
+        "role": "Signature forensic verification",
+        "description": "Compares extracted signatures against a reference using DINOv2 embeddings and Mistral Vision forensic analysis, then a Judge agent produces the final verdict.",
         "emoji": "🔍",
         "color": "rgba(168,85,247,0.15)",
         "border": "#a855f7",
         "model": "dinov2-small + mistral-small-latest",
         "agent_id": None,
         "tools": ["DINOv2 Embeddings", "Mistral Vision Agent", "Judge Agent"],
+        "source": "workflow",
+    },
+    {
+        "key": "face_verifier",
+        "name": "Face Verifier Agent",
+        "step": 3,
+        "role": "Multi-agent forensic face comparison",
+        "description": "Compares extracted photos against a reference using 3 parallel forensic analysis agents (morphology, age variation) and a final arbitration judge.",
+        "emoji": "👤",
+        "color": "rgba(59,130,246,0.15)",
+        "border": "#3b82f6",
+        "model": "mistral-small-latest (×4 agents)",
+        "agent_id": None,
+        "tools": ["Morphology Part 1", "Morphology Part 2", "Age Variation", "Face Judge"],
         "source": "workflow",
     },
     {
@@ -979,13 +993,21 @@ async def verify_signature(
         with open(ref_img_path, "wb") as f:
             f.write(ref_content)
 
-        # 3. Run the verification pipeline
-        from utils.signature_verifier import run_verification_pipeline
-        pipeline_result = await run_verification_pipeline(
-            doc_path=doc_img_path,
-            ref_path=ref_img_path,
-            debug_dir=None,
-        )
+        # 3. Run the appropriate verification pipeline
+        if verification_type == "photo":
+            from utils.face_verifier import run_face_verification_pipeline
+            pipeline_result = await run_face_verification_pipeline(
+                doc_path=doc_img_path,
+                ref_path=ref_img_path,
+                debug_dir=None,
+            )
+        else:
+            from utils.signature_verifier import run_verification_pipeline
+            pipeline_result = await run_verification_pipeline(
+                doc_path=doc_img_path,
+                ref_path=ref_img_path,
+                debug_dir=None,
+            )
 
         # 4. Persist result to database
         async with AsyncSessionLocal() as session:

@@ -1091,3 +1091,146 @@ input[type='range']::-webkit-slider-runnable-track {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ─── Face Verification Panel ─────────────────────── */
+
+/* Signal badges (supports_same / supports_different / inconclusive) */
+.face-signal-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.face-signal-same {
+  background: rgba(16,185,129,0.1);
+  color: #059669;
+  border: 1px solid rgba(16,185,129,0.2);
+}
+.face-signal-diff {
+  background: rgba(239,68,68,0.1);
+  color: #dc2626;
+  border: 1px solid rgba(239,68,68,0.2);
+}
+.face-signal-inc {
+  background: rgba(245,158,11,0.1);
+  color: #d97706;
+  border: 1px solid rgba(245,158,11,0.2);
+}
+
+/* Feature analysis blocks */
+.face-feature-block {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.face-feature-block:last-child {
+  border-bottom: none;
+}
+.face-feature-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.face-feature-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+/* Confidence badges (low / medium / high) */
+.face-conf-badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 99px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.face-conf-badge.high {
+  background: rgba(16,185,129,0.1);
+  color: #059669;
+  border: 1px solid rgba(16,185,129,0.2);
+}
+.face-conf-badge.medium {
+  background: rgba(245,158,11,0.1);
+  color: #d97706;
+  border: 1px solid rgba(245,158,11,0.2);
+}
+.face-conf-badge.low {
+  background: rgba(239,68,68,0.1);
+  color: #dc2626;
+  border: 1px solid rgba(239,68,68,0.2);
+}
+
+/* Points lists (same / different) */
+.face-points-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: flex-start;
+  margin-bottom: 6px;
+}
+.face-points-label {
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+  width: 100%;
+  margin-bottom: 2px;
+}
+.face-points-list.same .face-points-label { color: #059669; }
+.face-points-list.diff .face-points-label { color: #dc2626; }
+
+.face-point {
+  font-size: 10px;
+  color: var(--text-dim);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  line-height: 1.5;
+}
+
+/* Variability chips */
+.face-variability-chip {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+.face-variability-chip.ok {
+  background: rgba(16,185,129,0.08);
+  color: #059669;
+  border: 1px solid rgba(16,185,129,0.15);
+}
+.face-variability-chip.mild {
+  background: rgba(245,158,11,0.08);
+  color: #d97706;
+  border: 1px solid rgba(245,158,11,0.15);
+}
+.face-variability-chip.sig {
+  background: rgba(239,68,68,0.08);
+  color: #dc2626;
+  border: 1px solid rgba(239,68,68,0.15);
+}
+
+/* Age gap badge */
+.face-age-gap-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(59,130,246,0.08);
+  color: #3b82f6;
+  border: 1px solid rgba(59,130,246,0.15);
+  text-transform: capitalize;
+}
+

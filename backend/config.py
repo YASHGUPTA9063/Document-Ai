@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     SIGNATURE_VISION_AGENT_ID: str = Field(..., description="Signature Vision Agent ID from Mistral Studio")
     SIGNATURE_JUDGE_AGENT_ID: str = Field(..., description="Signature Judge Agent ID from Mistral Studio")
 
+    # Face Verification Agent IDs (optional — run create_face_agents.py to generate)
+    FACE_MORPHOLOGY1_AGENT_ID: str = Field(default="", description="Face Morphology Part 1 Agent ID (Geometry/Eyes/Nose)")
+    FACE_MORPHOLOGY2_AGENT_ID: str = Field(default="", description="Face Morphology Part 2 Agent ID (Mouth/Ears/Secondary)")
+    FACE_AGE_AGENT_ID: str = Field(default="", description="Face Age Variation Agent ID")
+    FACE_JUDGE_AGENT_ID: str = Field(default="", description="Face Judge Agent ID")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

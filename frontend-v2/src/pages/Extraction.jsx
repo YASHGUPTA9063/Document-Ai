@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Copy, Download, ChevronDown, ChevronRight, Maximize2, ExternalLink, FileText, FileSearch, CheckCircle2, AlertTriangle, Edit2, Check, X, Trash2, Plus, ShieldCheck, UserCircle2, PenTool, ZoomIn, Upload, RotateCcw, Shield, Eye, Fingerprint } from 'lucide-react';
+import { Copy, Download, ChevronDown, ChevronRight, Maximize2, ExternalLink, FileText, FileSearch, CheckCircle2, AlertTriangle, Edit2, Check, X, Trash2, Plus, ShieldCheck, UserCircle2, PenTool, ZoomIn, Upload, RotateCcw, Shield, Eye, Fingerprint, Users } from 'lucide-react';
 import { getExtractedData, getDocumentFileUrl, updateExtractedData, getTemplates, verifySignature } from '../api/client';
 import { useApp } from '../store/AppStore';
 import { useDocumentList } from '../hooks/useDocumentList';
@@ -698,6 +698,233 @@ function SignatureVerdictPanel({ result, verificationType, onReset }) {
   );
 }
 
+/** Full verdict panel for face/photo verification results (multi-agent pipeline) */
+function FaceVerdictPanel({ result, onReset }) {
+  if (!result) return null;
+
+  const mod1 = result.module1 || {};
+  const mod2 = result.module2 || {};
+  const mod3 = result.module3 || {};
+  const outputCode = result.output_code;
+  const verdict = (result.verdict || 'needs_review').toLowerCase();
+  const verdictLabel = result.verdict_label || 'NEEDS REVIEW';
+
+  const verdictIcon = verdict === 'same_person' ? <CheckCircle2 size={16} /> : verdict === 'different_person' ? <Shield size={16} /> : <AlertTriangle size={16} />;
+  const verdictClass = verdict === 'same_person' ? 'genuine' : verdict === 'different_person' ? 'forged' : 'uncertain';
+
+  const [showMod1, setShowMod1] = useState(false);
+  const [showMod2, setShowMod2] = useState(false);
+  const [showMod3, setShowMod3] = useState(false);
+
+  const getSignalBadge = (signal) => {
+    if (!signal) return null;
+    const cls = signal === 'supports_same' ? 'face-signal-same' : signal === 'supports_different' ? 'face-signal-diff' : 'face-signal-inc';
+    const label = signal === 'supports_same' ? 'Supports Same' : signal === 'supports_different' ? 'Supports Different' : 'Inconclusive';
+    return <span className={`face-signal-badge ${cls}`}>{label}</span>;
+  };
+
+  const renderFeaturePoints = (label, same, diff, confidence) => (
+    <div className="face-feature-block">
+      <div className="face-feature-header">
+        <span className="face-feature-name">{label}</span>
+        {confidence && <span className={`face-conf-badge ${confidence}`}>{confidence}</span>}
+      </div>
+      {same && same.length > 0 && (
+        <div className="face-points-list same">
+          <span className="face-points-label">✓ Similar:</span>
+          {same.map((p, i) => <span key={i} className="face-point">{p}</span>)}
+        </div>
+      )}
+      {diff && diff.length > 0 && (
+        <div className="face-points-list diff">
+          <span className="face-points-label">✗ Different:</span>
+          {diff.map((p, i) => <span key={i} className="face-point">{p}</span>)}
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="verdict-panel" style={{ marginTop: 12 }}>
+      {/* Header */}
+      <div className={`verdict-header ${verdictClass}`}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span className={`verdict-badge ${verdictClass}`}>
+            {verdictIcon} {verdictLabel}
+          </span>
+          <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+            Score: <strong style={{ color: 'var(--text)' }}>{outputCode}/5</strong>
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 10, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Users size={10} /> Face Verification
+          </span>
+          <button className="btn btn-ghost btn-sm" onClick={onReset} style={{ fontSize: 10, padding: '2px 8px', gap: 3 }}>
+            <RotateCcw size={10} /> Reset
+          </button>
+        </div>
+      </div>
+
+      {/* Module Signals Overview */}
+      <div style={{ padding: '12px 18px', display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', borderBottom: '1px solid var(--border)' }}>
+        <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)' }}>Agent Signals</span>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>M1: {getSignalBadge(mod1.signal)}</span>
+          <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>M2: {getSignalBadge(mod2.signal)}</span>
+          <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>M3: {getSignalBadge(mod3.signal)}</span>
+        </div>
+      </div>
+
+      {/* Module 1 — Morphology Part 1 */}
+      <div style={{ borderBottom: '1px solid var(--border)' }}>
+        <div
+          style={{ padding: '10px 18px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.06em' }}
+          onClick={() => setShowMod1(s => !s)}
+        >
+          {showMod1 ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+          Module 1 — Face Geometry / Eyes / Nose
+          <span style={{ marginLeft: 'auto' }}>{getSignalBadge(mod1.signal)}</span>
+        </div>
+        {showMod1 && (
+          <div style={{ padding: '0 18px 12px' }}>
+            {mod1.features?.facial_geometry && renderFeaturePoints('Facial Geometry', mod1.features.facial_geometry.same_points, mod1.features.facial_geometry.different_points, mod1.features.facial_geometry.confidence)}
+            {mod1.features?.eyes && renderFeaturePoints('Eyes', mod1.features.eyes.same_points, mod1.features.eyes.different_points, mod1.features.eyes.confidence)}
+            {mod1.features?.nose && renderFeaturePoints('Nose', mod1.features.nose.same_points, mod1.features.nose.different_points, mod1.features.nose.confidence)}
+            {mod1.asymmetry && (
+              <div className="face-feature-block">
+                <div className="face-feature-header"><span className="face-feature-name">Asymmetry</span></div>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5 }}>
+                  <div>Image A: {mod1.asymmetry.image_a || '—'}</div>
+                  <div>Image B: {mod1.asymmetry.image_b || '—'}</div>
+                  <div>Match: <strong>{mod1.asymmetry.match || '—'}</strong></div>
+                </div>
+              </div>
+            )}
+            {mod1.anchor_features && mod1.anchor_features.length > 0 && (
+              <div style={{ marginTop: 8, fontSize: 11, color: 'var(--muted)' }}>
+                <strong>Anchor features:</strong> {mod1.anchor_features.join(', ')}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Module 2 — Morphology Part 2 */}
+      <div style={{ borderBottom: '1px solid var(--border)' }}>
+        <div
+          style={{ padding: '10px 18px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.06em' }}
+          onClick={() => setShowMod2(s => !s)}
+        >
+          {showMod2 ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+          Module 2 — Mouth / Ears / Jaw / Secondary
+          <span style={{ marginLeft: 'auto' }}>{getSignalBadge(mod2.signal)}</span>
+        </div>
+        {showMod2 && (
+          <div style={{ padding: '0 18px 12px' }}>
+            {mod2.features?.mouth_lips && renderFeaturePoints('Mouth & Lips', mod2.features.mouth_lips.same_points, mod2.features.mouth_lips.different_points, mod2.features.mouth_lips.confidence)}
+            {mod2.features?.ears && renderFeaturePoints('Ears', mod2.features.ears.same_points, mod2.features.ears.different_points, mod2.features.ears.confidence)}
+            {mod2.features?.jaw_chin_secondary && renderFeaturePoints('Jaw / Chin / Secondary', mod2.features.jaw_chin_secondary.same_points, mod2.features.jaw_chin_secondary.different_points, mod2.features.jaw_chin_secondary.confidence)}
+            {mod2.variability_factors && (
+              <div className="face-feature-block">
+                <div className="face-feature-header"><span className="face-feature-name">Variability Factors</span></div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
+                  {Object.entries(mod2.variability_factors).map(([k, v]) => (
+                    <span key={k} className={`face-variability-chip ${v === 'none' ? 'ok' : v === 'mild' ? 'mild' : 'sig'}`}>
+                      {k.replace(/_/g, ' ')}: {v}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Module 3 — Age Variation */}
+      <div style={{ borderBottom: '1px solid var(--border)' }}>
+        <div
+          style={{ padding: '10px 18px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.06em' }}
+          onClick={() => setShowMod3(s => !s)}
+        >
+          {showMod3 ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+          Module 3 — Age Variation Analysis
+          <span style={{ marginLeft: 'auto' }}>{getSignalBadge(mod3.signal)}</span>
+        </div>
+        {showMod3 && (
+          <div style={{ padding: '0 18px 12px' }}>
+            {mod3.estimated_age_gap && (
+              <div className="face-feature-block">
+                <div className="face-feature-header"><span className="face-feature-name">Estimated Age Gap</span></div>
+                <span className="face-age-gap-badge">{(mod3.estimated_age_gap || '').replace(/_/g, ' ')}</span>
+                {mod3.age_cues_used && mod3.age_cues_used.length > 0 && (
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Cues: {mod3.age_cues_used.join(', ')}</div>
+                )}
+              </div>
+            )}
+            {mod3.stable_features && (
+              <div className="face-feature-block">
+                <div className="face-feature-header">
+                  <span className="face-feature-name">Stable Features (Bone-Anchored)</span>
+                  {mod3.stable_features.confidence && <span className={`face-conf-badge ${mod3.stable_features.confidence}`}>{mod3.stable_features.confidence}</span>}
+                </div>
+                {mod3.stable_features.consistent && mod3.stable_features.consistent.length > 0 && (
+                  <div className="face-points-list same">
+                    <span className="face-points-label">✓ Consistent:</span>
+                    {mod3.stable_features.consistent.map((p, i) => <span key={i} className="face-point">{p}</span>)}
+                  </div>
+                )}
+                {mod3.stable_features.inconsistent && mod3.stable_features.inconsistent.length > 0 && (
+                  <div className="face-points-list diff">
+                    <span className="face-points-label">✗ Inconsistent:</span>
+                    {mod3.stable_features.inconsistent.map((p, i) => <span key={i} className="face-point">{p}</span>)}
+                  </div>
+                )}
+              </div>
+            )}
+            {mod3.soft_tissue_differences && (
+              <div className="face-feature-block">
+                <div className="face-feature-header"><span className="face-feature-name">Soft Tissue Differences</span></div>
+                {mod3.soft_tissue_differences.age_explained && mod3.soft_tissue_differences.age_explained.length > 0 && (
+                  <div className="face-points-list same">
+                    <span className="face-points-label">Age-explained:</span>
+                    {mod3.soft_tissue_differences.age_explained.map((p, i) => <span key={i} className="face-point">{p}</span>)}
+                  </div>
+                )}
+                {mod3.soft_tissue_differences.biologically_inconsistent && mod3.soft_tissue_differences.biologically_inconsistent.length > 0 && (
+                  <div className="face-points-list diff">
+                    <span className="face-points-label">⚠ Biologically inconsistent:</span>
+                    {mod3.soft_tissue_differences.biologically_inconsistent.map((p, i) => <span key={i} className="face-point">{p}</span>)}
+                  </div>
+                )}
+              </div>
+            )}
+            {mod3.non_age_explained_differences && mod3.non_age_explained_differences.length > 0 && (
+              <div style={{ padding: '8px 0', fontSize: 11, color: 'var(--danger)', display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+                <AlertTriangle size={11} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>Non-age-explained differences: {mod3.non_age_explained_differences.join(', ')}</span>
+              </div>
+            )}
+            {mod3.aging_trajectory && (
+              <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text-dim)' }}>
+                Aging trajectory: <strong>{mod3.aging_trajectory}</strong>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Recommendation */}
+      {outputCode && (
+        <div className={`recommendation-banner ${outputCode === 5 ? 'accept' : outputCode === 3 ? 'review' : 'reject'}`}>
+          {outputCode === 5 ? <CheckCircle2 size={12} /> : outputCode === 3 ? <Eye size={12} /> : <Shield size={12} />}
+          {outputCode === 5 ? 'Accept — Same Person' : outputCode === 3 ? 'Manual Review Required' : 'Reject — Different Person'}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function renderFields(data, isEditing, editedData, onChange, confidences = {}, confidenceMode = 'word', confHighThreshold = 90, confMedThreshold = 70, fieldHighlightThreshold = 95, fieldThresholds = {}) {
   if (!data || typeof data !== 'object') return null;
   const groups = {};
@@ -908,7 +1135,7 @@ function KycImageCard({ label, icon: Icon, base64Data, detected, accentColor, ve
           <div className="verification-loading">
             <div className="verify-spinner" />
             <div className="verify-text">Analyzing {verificationType}...</div>
-            <div className="verify-subtext">Running DINOv2 embeddings and Mistral Vision forensic analysis</div>
+            <div className="verify-subtext">{verificationType === 'photo' ? 'Running 3 forensic face analysis agents in parallel' : 'Running DINOv2 embeddings and Mistral Vision forensic analysis'}</div>
           </div>
         )}
 
@@ -962,12 +1189,12 @@ function KycImageCard({ label, icon: Icon, base64Data, detected, accentColor, ve
               </button>
               {isPhotoType ? (
                 <button
-                  className="btn btn-ghost btn-sm"
-                  disabled
-                  style={{ fontSize: 10, padding: '2px 10px', gap: 4, opacity: 0.5 }}
-                  title="Photo verification logic coming soon"
+                  className="btn btn-primary btn-sm"
+                  disabled={!refFile}
+                  onClick={(e) => { e.stopPropagation(); handleVerifyClick(); }}
+                  style={{ fontSize: 10, padding: '2px 10px', gap: 4, background: '#3b82f6', borderColor: '#3b82f6' }}
                 >
-                  <Shield size={10} /> Coming Soon
+                  <Users size={10} /> Run Face Verification
                 </button>
               ) : (
                 <button
@@ -1624,11 +1851,10 @@ export function Extraction() {
                     />
                   )}
 
-                  {/* Photo Verification Verdict Panel */}
+                  {/* Photo Verification Verdict Panel (Face multi-agent pipeline) */}
                   {photoResult && (
-                    <SignatureVerdictPanel
+                    <FaceVerdictPanel
                       result={photoResult}
-                      verificationType="photo"
                       onReset={() => handleResetVerification('photo')}
                     />
                   )}
