@@ -20,9 +20,9 @@ class Settings(BaseSettings):
     VALIDATOR_AGENT_ID: str = Field(..., description="Validator Agent ID from Mistral Studio")
     REVIEWER_AGENT_ID: str = Field(..., description="Reviewer Agent ID from Mistral Studio")
 
-    # Signature Verification Agent IDs — auto-created on first run if left empty
-    SIGNATURE_VISION_AGENT_ID: str = Field("", description="Signature Vision Agent ID (auto-created if empty)")
-    SIGNATURE_JUDGE_AGENT_ID: str = Field("", description="Signature Judge Agent ID (auto-created if empty)")
+    # Signature Verification Agent IDs
+    SIGNATURE_VISION_AGENT_ID: str = Field(..., description="Signature Vision Agent ID from Mistral Studio")
+    SIGNATURE_JUDGE_AGENT_ID: str = Field(..., description="Signature Judge Agent ID from Mistral Studio")
 
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
