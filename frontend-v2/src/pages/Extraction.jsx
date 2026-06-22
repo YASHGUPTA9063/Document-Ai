@@ -1,7 +1,7 @@
-import { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Copy, Download, ChevronDown, ChevronRight, Maximize2, ExternalLink, FileText, FileSearch, CheckCircle2, AlertTriangle, Edit2, Check, X, Trash2, Plus, ShieldCheck, UserCircle2, PenTool, ZoomIn } from 'lucide-react';
-import { getExtractedData, getDocumentFileUrl, updateExtractedData, getTemplates } from '../api/client';
+import { Copy, Download, ChevronDown, ChevronRight, Maximize2, ExternalLink, FileText, FileSearch, CheckCircle2, AlertTriangle, Edit2, Check, X, Trash2, Plus, ShieldCheck, UserCircle2, PenTool, ZoomIn, Upload, RotateCcw, Shield, Eye, Fingerprint } from 'lucide-react';
+import { getExtractedData, getDocumentFileUrl, updateExtractedData, getTemplates, verifySignature } from '../api/client';
 import { useApp } from '../store/AppStore';
 import { useDocumentList } from '../hooks/useDocumentList';
 
@@ -460,6 +460,244 @@ function FieldGroup({ title, children }) {
 // Keys that hold KYC image data — excluded from regular field rendering
 const KYC_IMAGE_KEYS = new Set(['signature_image', 'photo_image', 'signature_detected', 'photo_detected']);
 
+
+/** Score classification helper */
+function getScoreClass(score, max = 100) {
+  const pct = max === 1 ? score * 100 : score;
+  if (pct >= 75) return 'high';
+  if (pct >= 55) return 'medium';
+  return 'low';
+}
+
+/** Score bar sub-component */
+function ScoreBar({ label, value, max = 100, suffix = '' }) {
+  const pct = max === 1 ? (value * 100) : (value / max * 100);
+  const displayVal = max === 1 ? value.toFixed(4) : Math.round(value);
+  const cls = getScoreClass(value, max);
+  return (
+    <div className="score-bar-row">
+      <div className="score-bar-label">{label}</div>
+      <div className="score-bar-track">
+        <div className={`score-bar-fill ${cls}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+      </div>
+      <div className="score-bar-value" style={{ color: cls === 'high' ? '#059669' : cls === 'medium' ? '#d97706' : '#dc2626' }}>
+        {displayVal}{suffix}
+      </div>
+    </div>
+  );
+}
+
+/** Analysis dimension row */
+function AnalysisRow({ name, data }) {
+  if (!data) return null;
+  const score = data.score ?? 0;
+  const cls = getScoreClass(score);
+  return (
+    <div className="analysis-row">
+      <div className="analysis-dimension">{name}</div>
+      <div className={`analysis-score ${cls}`}>{score}</div>
+      <div className="analysis-observation">{data.observation || '—'}</div>
+    </div>
+  );
+}
+
+/** Authenticity flag row */
+function FlagRow({ label, flagged }) {
+  return (
+    <div className="flag-row">
+      <div className={`flag-indicator ${flagged ? 'danger' : 'safe'}`} />
+      <div className="flag-label">{label}{flagged ? ' — Detected' : ' — Clear'}</div>
+    </div>
+  );
+}
+
+/** Full verdict panel for signature/photo verification results */
+function SignatureVerdictPanel({ result, verificationType, onReset }) {
+  if (!result) return null;
+
+  const judge = result.judge || {};
+  const dino = result.dino || {};
+  const vision = result.mistral_vision || {};
+  const scores = judge.scores || {};
+  const verdict = (judge.verdict || result.verdict || 'unknown').toLowerCase();
+  const confidence = judge.confidence ?? 0;
+  const recommendation = judge.recommendation || '';
+  const summary = judge.summary || '';
+
+  const verdictIcon = verdict === 'genuine' ? <CheckCircle2 size={16} /> : verdict === 'uncertain' ? <AlertTriangle size={16} /> : <Shield size={16} />;
+  const verdictLabel = verdict === 'genuine' ? 'GENUINE' : verdict === 'uncertain' ? 'UNCERTAIN' : 'FORGED';
+
+  const recClass = recommendation.toLowerCase().includes('accept') ? 'accept'
+    : recommendation.toLowerCase().includes('review') ? 'review' : 'reject';
+  const recIcon = recClass === 'accept' ? <CheckCircle2 size={12} /> : recClass === 'review' ? <Eye size={12} /> : <Shield size={12} />;
+
+  const [showStructural, setShowStructural] = useState(false);
+  const [showSpatial, setShowSpatial] = useState(false);
+  const [showFlags, setShowFlags] = useState(false);
+  const [showUnique, setShowUnique] = useState(false);
+
+  const structural = judge.structural_analysis || vision.structural_analysis || {};
+  const spatial = judge.spatial_analysis || vision.spatial_analysis || {};
+  const flags = judge.authenticity_flags || vision.authenticity_flags || {};
+  const unique = judge.unique_features || vision.unique_features || {};
+
+  return (
+    <div className="verdict-panel">
+      {/* Header with verdict badge */}
+      <div className={`verdict-header ${verdict}`}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span className={`verdict-badge ${verdict}`}>
+            {verdictIcon} {verdictLabel}
+          </span>
+          <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+            Confidence: <strong style={{ color: 'var(--text)' }}>{confidence}%</strong>
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 10, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Fingerprint size={10} />
+            {verificationType === 'signature' ? 'Signature' : 'Photo'} Verification
+          </span>
+          <button className="btn btn-ghost btn-sm" onClick={onReset} style={{ fontSize: 10, padding: '2px 8px', gap: 3 }}>
+            <RotateCcw size={10} /> Reset
+          </button>
+        </div>
+      </div>
+
+      {/* Score Breakdown */}
+      <div className="score-bar-container">
+        <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', marginBottom: 2 }}>Score Breakdown</div>
+        <ScoreBar label="DINOv2" value={scores.embedding_cosine_score ?? dino.score ?? 0} max={1} />
+        <ScoreBar label="LLM Visual" value={scores.llm_visual_score ?? vision.llm_visual_score ?? 0} max={100} />
+        <ScoreBar label="Combined" value={scores.combined_weighted_score ?? 0} max={100} />
+        {(scores.penalties_applied != null && scores.penalties_applied > 0) && (
+          <div style={{ fontSize: 10, color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
+            <AlertTriangle size={10} />
+            {scores.penalties_applied} point penalty applied
+            {scores.penalty_reasons?.length > 0 && ` (${scores.penalty_reasons.join(', ')})`}
+          </div>
+        )}
+      </div>
+
+      {/* Structural Analysis Accordion */}
+      <div style={{ borderTop: '1px solid var(--border)' }}>
+        <div
+          style={{ padding: '10px 18px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.06em' }}
+          onClick={() => setShowStructural(s => !s)}
+        >
+          {showStructural ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+          Structural Analysis (5 dimensions)
+        </div>
+        {showStructural && (
+          <div style={{ padding: '0 18px 12px' }}>
+            <AnalysisRow name="Stroke Flow" data={structural.stroke_flow} />
+            <AnalysisRow name="Stroke Thickness" data={structural.stroke_thickness} />
+            <AnalysisRow name="Loop Morphology" data={structural.loop_morphology} />
+            <AnalysisRow name="Connectivity" data={structural.connectivity_pattern} />
+            <AnalysisRow name="Entry/Exit" data={structural.entry_exit_strokes} />
+          </div>
+        )}
+      </div>
+
+      {/* Spatial Analysis Accordion */}
+      <div style={{ borderTop: '1px solid var(--border)' }}>
+        <div
+          style={{ padding: '10px 18px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.06em' }}
+          onClick={() => setShowSpatial(s => !s)}
+        >
+          {showSpatial ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+          Spatial Analysis (4 dimensions)
+        </div>
+        {showSpatial && (
+          <div style={{ padding: '0 18px 12px' }}>
+            <AnalysisRow name="Slant Angle" data={spatial.slant_angle} />
+            <AnalysisRow name="Baseline" data={spatial.baseline_alignment} />
+            <AnalysisRow name="Proportions" data={spatial.proportions} />
+            <AnalysisRow name="Spacing" data={spatial.spacing} />
+          </div>
+        )}
+      </div>
+
+      {/* Authenticity Flags Accordion */}
+      <div style={{ borderTop: '1px solid var(--border)' }}>
+        <div
+          style={{ padding: '10px 18px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.06em' }}
+          onClick={() => setShowFlags(s => !s)}
+        >
+          {showFlags ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+          Authenticity Flags
+        </div>
+        {showFlags && (
+          <div style={{ padding: '0 18px 12px' }}>
+            <FlagRow label="Tremor / Shakiness" flagged={flags.tremor_detected} />
+            <FlagRow label="Retouching" flagged={flags.retouching_detected} />
+            <FlagRow label="Hesitation Marks" flagged={flags.hesitation_marks} />
+            <FlagRow label="Unnatural Slowness" flagged={flags.unnatural_slowness} />
+            <FlagRow label="Pen Lift Mismatch" flagged={flags.pen_lift_mismatch} />
+            {flags.flag_details && (
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6, fontStyle: 'italic', lineHeight: 1.5 }}>
+                {flags.flag_details}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Unique Features Accordion */}
+      <div style={{ borderTop: '1px solid var(--border)' }}>
+        <div
+          style={{ padding: '10px 18px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.06em' }}
+          onClick={() => setShowUnique(s => !s)}
+        >
+          {showUnique ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+          Unique Features
+        </div>
+        {showUnique && (
+          <div style={{ padding: '0 18px 12px' }}>
+            <div className="flag-row">
+              <div className={`flag-indicator ${unique.idiosyncratic_marks_present ? 'safe' : 'danger'}`} />
+              <div className="flag-label">Idiosyncratic marks {unique.idiosyncratic_marks_present ? 'present' : 'not found'}</div>
+            </div>
+            {unique.idiosyncratic_marks_present && (
+              <div className="flag-row">
+                <div className={`flag-indicator ${unique.marks_match ? 'safe' : 'danger'}`} />
+                <div className="flag-label">Marks {unique.marks_match ? 'match' : 'do not match'}</div>
+              </div>
+            )}
+            {unique.details && (
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6, fontStyle: 'italic', lineHeight: 1.5 }}>
+                {unique.details}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Summary */}
+      {summary && (
+        <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border)', fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.6, fontStyle: 'italic' }}>
+          {summary}
+        </div>
+      )}
+
+      {/* Override notice */}
+      {judge.override_applied && (
+        <div style={{ padding: '8px 18px', borderTop: '1px solid var(--border)', fontSize: 10, color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(239,68,68,0.03)' }}>
+          <AlertTriangle size={10} />
+          Override applied: {judge.override_reason}
+        </div>
+      )}
+
+      {/* Recommendation */}
+      {recommendation && (
+        <div className={`recommendation-banner ${recClass}`}>
+          {recIcon} {recommendation}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function renderFields(data, isEditing, editedData, onChange, confidences = {}, confidenceMode = 'word', confHighThreshold = 90, confMedThreshold = 70, fieldHighlightThreshold = 95, fieldThresholds = {}) {
   if (!data || typeof data !== 'object') return null;
   const groups = {};
@@ -498,8 +736,13 @@ function renderFields(data, isEditing, editedData, onChange, confidences = {}, c
 
 
 /** KYC Image Card — glassmorphic card for displaying cropped signature/photo */
-function KycImageCard({ label, icon: Icon, base64Data, detected, accentColor }) {
+function KycImageCard({ label, icon: Icon, base64Data, detected, accentColor, verificationType, documentId, verificationResult, onVerify, isVerifying }) {
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [showUpload, setShowUpload] = useState(false);
+  const [refFile, setRefFile] = useState(null);
+  const [refPreview, setRefPreview] = useState(null);
+  const fileInputRef = React.useRef(null);
 
   const handleDownload = () => {
     if (!base64Data) return;
@@ -507,6 +750,33 @@ function KycImageCard({ label, icon: Icon, base64Data, detected, accentColor }) 
     a.href = `data:image/png;base64,${base64Data}`;
     a.download = `${label.toLowerCase().replace(/\s+/g, '_')}.png`;
     a.click();
+  };
+
+  const handleFileSelect = (file) => {
+    if (!file || !file.type.startsWith('image/')) return;
+    setRefFile(file);
+    const reader = new FileReader();
+    reader.onload = (e) => setRefPreview(e.target.result);
+    reader.readAsDataURL(file);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer?.files?.[0];
+    handleFileSelect(file);
+  };
+
+  const handleVerifyClick = () => {
+    if (refFile && onVerify) {
+      onVerify(refFile, verificationType);
+    }
+  };
+
+  const handleReset = () => {
+    setRefFile(null);
+    setRefPreview(null);
+    setShowUpload(false);
   };
 
   if (!detected || !base64Data) {
@@ -546,9 +816,11 @@ function KycImageCard({ label, icon: Icon, base64Data, detected, accentColor }) 
     );
   }
 
+  const isPhotoType = verificationType === 'photo';
+
   return (
     <>
-      <div style={{
+      <div className={isVerifying ? 'kyc-card-verifying' : ''} style={{
         flex: 1,
         minWidth: 200,
         padding: 0,
@@ -562,12 +834,16 @@ function KycImageCard({ label, icon: Icon, base64Data, detected, accentColor }) 
         transition: 'transform 0.2s ease, box-shadow 0.2s ease',
       }}
         onMouseEnter={(e) => {
-          e.currentTarget.style.transform = 'translateY(-2px)';
-          e.currentTarget.style.boxShadow = `0 8px 24px ${accentColor}15`;
+          if (!isVerifying) {
+            e.currentTarget.style.transform = 'translateY(-2px)';
+            e.currentTarget.style.boxShadow = `0 8px 24px ${accentColor}15`;
+          }
         }}
         onMouseLeave={(e) => {
-          e.currentTarget.style.transform = 'translateY(0)';
-          e.currentTarget.style.boxShadow = 'none';
+          if (!isVerifying) {
+            e.currentTarget.style.transform = 'translateY(0)';
+            e.currentTarget.style.boxShadow = 'none';
+          }
         }}
       >
         {/* Header */}
@@ -627,6 +903,86 @@ function KycImageCard({ label, icon: Icon, base64Data, detected, accentColor }) 
           </div>
         </div>
 
+        {/* Verification Loading State */}
+        {isVerifying && (
+          <div className="verification-loading">
+            <div className="verify-spinner" />
+            <div className="verify-text">Analyzing {verificationType}...</div>
+            <div className="verify-subtext">Running DINOv2 embeddings and Mistral Vision forensic analysis</div>
+          </div>
+        )}
+
+        {/* Upload area (when verify mode is active and not currently verifying) */}
+        {showUpload && !isVerifying && !verificationResult && (
+          <div style={{ padding: '0 12px 8px' }}>
+            <div
+              className={`verify-dropzone ${dragOver ? 'dragover' : ''}`}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <div className="verify-drop-icon">
+                <Upload size={14} />
+              </div>
+              <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-dim)' }}>
+                Drop reference {verificationType} or click to browse
+              </span>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={(e) => handleFileSelect(e.target.files?.[0])}
+              />
+            </div>
+
+            {/* Reference preview */}
+            {refPreview && (
+              <div className="ref-preview">
+                <img src={refPreview} alt="Reference" />
+                <span className="ref-name">{refFile?.name}</span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setRefFile(null); setRefPreview(null); }}
+                  style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', padding: 0, display: 'flex' }}
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            )}
+
+            {/* Action buttons */}
+            <div style={{ display: 'flex', gap: 6, marginTop: 8, justifyContent: 'flex-end' }}>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={(e) => { e.stopPropagation(); handleReset(); }}
+                style={{ fontSize: 10, padding: '2px 8px' }}
+              >
+                Cancel
+              </button>
+              {isPhotoType ? (
+                <button
+                  className="btn btn-ghost btn-sm"
+                  disabled
+                  style={{ fontSize: 10, padding: '2px 10px', gap: 4, opacity: 0.5 }}
+                  title="Photo verification logic coming soon"
+                >
+                  <Shield size={10} /> Coming Soon
+                </button>
+              ) : (
+                <button
+                  className="btn btn-primary btn-sm"
+                  disabled={!refFile}
+                  onClick={(e) => { e.stopPropagation(); handleVerifyClick(); }}
+                  style={{ fontSize: 10, padding: '2px 10px', gap: 4, background: '#a855f7', borderColor: '#a855f7' }}
+                >
+                  <Fingerprint size={10} /> Run Verification
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Actions */}
         <div style={{
           padding: '6px 12px 8px',
@@ -640,6 +996,30 @@ function KycImageCard({ label, icon: Icon, base64Data, detected, accentColor }) 
           >
             <Download size={10} /> Download
           </button>
+          {!verificationResult && !showUpload && !isVerifying && (
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => setShowUpload(true)}
+              style={{ fontSize: 10, padding: '2px 8px', gap: 4, color: '#a855f7', borderColor: 'rgba(168,85,247,0.25)' }}
+            >
+              <Fingerprint size={10} /> Verify
+            </button>
+          )}
+          {verificationResult && (
+            <span style={{
+              fontSize: 9, fontWeight: 600,
+              padding: '2px 8px', borderRadius: 99,
+              display: 'inline-flex', alignItems: 'center', gap: 3,
+              ...(verificationResult.verdict === 'genuine'
+                ? { color: '#059669', background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)' }
+                : verificationResult.verdict === 'uncertain'
+                ? { color: '#d97706', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }
+                : { color: '#dc2626', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' })
+            }}>
+              {verificationResult.verdict === 'genuine' ? <CheckCircle2 size={8} /> : verificationResult.verdict === 'uncertain' ? <AlertTriangle size={8} /> : <Shield size={8} />}
+              {(verificationResult.verdict || 'unknown').toUpperCase()}
+            </span>
+          )}
         </div>
       </div>
 
@@ -797,6 +1177,10 @@ export function Extraction() {
   const [editedData, setEditedData] = useState({});
   const [saving, setSaving] = useState(false);
   const [templates, setTemplates] = useState({});
+  const [sigVerifying, setSigVerifying] = useState(false);
+  const [sigResult, setSigResult] = useState(null);
+  const [photoVerifying, setPhotoVerifying] = useState(false);
+  const [photoResult, setPhotoResult] = useState(null);
   const { toast } = useApp();
   const navigate = useNavigate();
 
@@ -834,6 +1218,9 @@ export function Extraction() {
         if (data?.validated_data) {
           setEditedData(data.validated_data);
         }
+        // Load persisted verification results
+        setSigResult(data?.signature_verification || null);
+        setPhotoResult(data?.photo_verification || null);
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoadingEx(false));
@@ -875,6 +1262,32 @@ export function Extraction() {
       setEditedData(extracted.validated_data);
     }
     setIsEditing(false);
+  };
+
+  const handleVerify = async (file, type) => {
+    if (!activeId) return;
+    const setVerifying = type === 'signature' ? setSigVerifying : setPhotoVerifying;
+    const setResult = type === 'signature' ? setSigResult : setPhotoResult;
+    setVerifying(true);
+    try {
+      const result = await verifySignature(activeId, file, type);
+      setResult(result);
+      toast(`${type === 'signature' ? 'Signature' : 'Photo'} verification complete: ${(result.verdict || 'unknown').toUpperCase()}`, 
+        result.verdict === 'genuine' ? 'success' : result.verdict === 'uncertain' ? 'warn' : 'error'
+      );
+    } catch (err) {
+      toast(`Verification failed: ${err.message}`, 'error');
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const handleResetVerification = (type) => {
+    if (type === 'signature') {
+      setSigResult(null);
+    } else {
+      setPhotoResult(null);
+    }
   };
 
   const activeDoc = completedDocs.find((d) => d.id === activeId);
@@ -1182,6 +1595,11 @@ export function Extraction() {
                       base64Data={extracted.validated_data.signature_image}
                       detected={extracted.validated_data.signature_detected}
                       accentColor="#7c3aed"
+                      verificationType="signature"
+                      documentId={activeId}
+                      verificationResult={sigResult}
+                      onVerify={handleVerify}
+                      isVerifying={sigVerifying}
                     />
                     <KycImageCard
                       label="Photo"
@@ -1189,8 +1607,31 @@ export function Extraction() {
                       base64Data={extracted.validated_data.photo_image}
                       detected={extracted.validated_data.photo_detected}
                       accentColor="#3b82f6"
+                      verificationType="photo"
+                      documentId={activeId}
+                      verificationResult={photoResult}
+                      onVerify={handleVerify}
+                      isVerifying={photoVerifying}
                     />
                   </div>
+
+                  {/* Signature Verification Verdict Panel */}
+                  {sigResult && (
+                    <SignatureVerdictPanel
+                      result={sigResult}
+                      verificationType="signature"
+                      onReset={() => handleResetVerification('signature')}
+                    />
+                  )}
+
+                  {/* Photo Verification Verdict Panel */}
+                  {photoResult && (
+                    <SignatureVerdictPanel
+                      result={photoResult}
+                      verificationType="photo"
+                      onReset={() => handleResetVerification('photo')}
+                    />
+                  )}
                 </FieldGroup>
               )}
 

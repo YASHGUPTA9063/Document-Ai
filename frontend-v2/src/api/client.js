@@ -209,5 +209,27 @@ export function getCropUrl(documentId, filename) {
   return `${BASE}/documents/${documentId}/crops/${filename}`;
 }
 
-export default api;
+/**
+ * Verify a signature or photo against a reference image.
+ * Runs the DINO + Mistral Vision + Judge pipeline.
+ * @param {string} documentId
+ * @param {File} referenceFile - The reference signature/photo to compare against
+ * @param {'signature'|'photo'} verificationType
+ * @returns {Promise<object>} Full verification result with verdict, scores, analysis
+ */
+export async function verifySignature(documentId, referenceFile, verificationType = 'signature') {
+  const form = new FormData();
+  form.append('file', referenceFile);
+  const { data } = await api.post(
+    `/documents/${documentId}/verify-signature`,
+    form,
+    {
+      params: { verification_type: verificationType },
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120000, // 2 min — ML inference + Mistral API calls
+    }
+  );
+  return data;
+}
 
+export default api;

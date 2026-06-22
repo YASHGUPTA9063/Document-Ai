@@ -1,4 +1,5 @@
 import os
+import tempfile
 from typing import List
 os.environ["DEPLOYMENT_NAME"] = "document-processing-workflow"
 import logging
@@ -42,6 +43,15 @@ async def lifespan(app: FastAPI):
     
     logger.info("Ensuring storage directory exists...")
     os.makedirs(settings.STORAGE_DIR, exist_ok=True)
+    
+    # Preload DINOv2 model at startup for fast signature verification
+    logger.info("Preloading DINOv2 model for signature verification...")
+    try:
+        from utils.signature_verifier import DinoVerifier
+        # Run in a background thread to prevent blocking server startup while downloading weights
+        asyncio.create_task(asyncio.to_thread(DinoVerifier.preload))
+    except Exception as e:
+        logger.warning(f"Failed to initiate DINOv2 preload: {e}")
     
     logger.info("Starting Mistral Workflow worker...")
     global worker_task
@@ -366,6 +376,14 @@ AGENT_PIPELINE_META = {
         "pipeline_tools": ["Generic OCR", "Key-Value Parser", "Layout Analyzer"],
     },
     # ─────────────────────────────────────────────────────────────────────────
+    "signature_verifier": {
+        "step": 3,
+        "role": "Signature & photo forensic verification",
+        "emoji": "🔍",
+        "color": "rgba(168,85,247,0.15)",
+        "border": "#a855f7",
+        "pipeline_tools": ["DINOv2 Embeddings", "Mistral Vision Agent", "Judge Agent"],
+    },
     "validator": {
         "step": 4,
         "role": "Data quality assurance",
@@ -398,6 +416,20 @@ STATIC_AGENTS = [
         "model": "workflow-activity",
         "agent_id": None,
         "tools": ["File Validator", "Duplicate Checker", "DB Writer"],
+        "source": "workflow",
+    },
+    {
+        "key": "signature_verifier",
+        "name": "Signature Verifier Agent",
+        "step": 3,
+        "role": "Signature & photo forensic verification",
+        "description": "Compares extracted signatures/photos against a reference using DINOv2 embeddings and Mistral Vision forensic analysis, then a Judge agent produces the final verdict.",
+        "emoji": "🔍",
+        "color": "rgba(168,85,247,0.15)",
+        "border": "#a855f7",
+        "model": "dinov2-small + mistral-small-latest",
+        "agent_id": None,
+        "tools": ["DINOv2 Embeddings", "Mistral Vision Agent", "Judge Agent"],
         "source": "workflow",
     },
     {
@@ -553,7 +585,9 @@ async def get_extracted_data(document_id: str):
             "raw_extracted": data.raw_extracted,
             "validated_data": data.validated_data,
             "confidence_score": data.confidence_score,
-            "reviewer_corrections": data.reviewer_corrections
+            "reviewer_corrections": data.reviewer_corrections,
+            "signature_verification": data.signature_verification,
+            "photo_verification": data.photo_verification,
         }
 
 @app.put("/documents/{document_id}/extracted")
@@ -891,3 +925,92 @@ async def get_document_crop(document_id: str, filename: str):
             "Cache-Control": "public, max-age=3600",
         }
     )
+
+
+@app.post("/documents/{document_id}/verify-signature")
+async def verify_signature(
+    document_id: str,
+    file: UploadFile = File(...),
+    verification_type: str = Query("signature", description="'signature' or 'photo'"),
+):
+    """
+    Compare an extracted signature/photo against a user-uploaded reference image.
+    
+    Runs the full verification pipeline:
+      DINO embeddings (thread) ∥ Mistral Vision Agent (async) → Judge Agent → final verdict
+    
+    The result is persisted on the ExtractedData row for future retrieval.
+    """
+    if verification_type not in ("signature", "photo"):
+        raise HTTPException(status_code=400, detail="verification_type must be 'signature' or 'photo'")
+
+    # 1. Load extracted data to get the base64 crop
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(ExtractedData).where(ExtractedData.document_id == document_id)
+        )
+        data = result.scalar_one_or_none()
+        if not data:
+            raise HTTPException(status_code=404, detail="Extracted data not found for this document")
+
+        image_key = "signature_image" if verification_type == "signature" else "photo_image"
+        detected_key = "signature_detected" if verification_type == "signature" else "photo_detected"
+
+        if not data.validated_data or not data.validated_data.get(image_key):
+            raise HTTPException(
+                status_code=400,
+                detail=f"No {verification_type} image found in extracted data. Ensure the document has been processed as a KYC document."
+            )
+
+    base64_data = data.validated_data[image_key]
+
+    # 2. Save both images to temp files
+    tmp_dir = tempfile.mkdtemp(prefix="sig_verify_")
+    try:
+        # Save extracted image (from base64)
+        import base64 as b64mod
+        doc_img_path = os.path.join(tmp_dir, f"extracted_{verification_type}.png")
+        with open(doc_img_path, "wb") as f:
+            f.write(b64mod.b64decode(base64_data))
+
+        # Save uploaded reference image
+        ref_img_path = os.path.join(tmp_dir, f"reference_{verification_type}.png")
+        ref_content = await file.read()
+        with open(ref_img_path, "wb") as f:
+            f.write(ref_content)
+
+        # 3. Run the verification pipeline
+        from utils.signature_verifier import run_verification_pipeline
+        pipeline_result = await run_verification_pipeline(
+            doc_path=doc_img_path,
+            ref_path=ref_img_path,
+            debug_dir=None,
+        )
+
+        # 4. Persist result to database
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(ExtractedData).where(ExtractedData.document_id == document_id)
+            )
+            data = result.scalar_one_or_none()
+            if data:
+                if verification_type == "signature":
+                    data.signature_verification = pipeline_result
+                else:
+                    data.photo_verification = pipeline_result
+
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(data, f"{verification_type}_verification")
+                await session.commit()
+
+        return pipeline_result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Signature verification failed for document {document_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Verification failed: {str(e)}")
+    finally:
+        # Cleanup temp files
+        import shutil
+        shutil.rmtree(tmp_dir, ignore_errors=True)
