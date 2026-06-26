@@ -1,12 +1,13 @@
-import { Check, Cpu, Tag, FileSearch, CheckCircle, UserCheck, Package } from 'lucide-react';
+import { Check, Cpu, Tag, FileSearch, CheckCircle, UserCheck, Package, Shield } from 'lucide-react';
 
 const STEPS = [
-  { key: 'intake',    label: 'Intake',    icon: Package   },
-  { key: 'classify',  label: 'Classify',  icon: Tag       },
-  { key: 'extract',   label: 'Extract',   icon: FileSearch },
-  { key: 'validate',  label: 'Validate',  icon: CheckCircle },
-  { key: 'review',    label: 'Review',    icon: UserCheck },
-  { key: 'output',    label: 'Output',    icon: Cpu       },
+  { key: 'intake',       label: 'Intake',       icon: Package   },
+  { key: 'pre_validate', label: 'Pre-Validate', icon: Shield    },
+  { key: 'classify',     label: 'Classify',     icon: Tag       },
+  { key: 'extract',      label: 'Extract',      icon: FileSearch },
+  { key: 'validate',     label: 'Validate',     icon: CheckCircle },
+  { key: 'review',       label: 'Review',       icon: UserCheck },
+  { key: 'output',       label: 'Output',       icon: Cpu       },
 ];
 
 /**
@@ -16,16 +17,19 @@ function getStepState(status, idx) {
   const order = {
     pending:         -1,
     processing:       0,  // intake step
-    classifying:      1,
-    extracting:       2,
-    validating:       3,
-    awaiting_review:  4,  // review step
-    completed:        6,  // all done
+    pre_validating:   1,  // pre-validate step
+    classifying:      2,
+    fraud_checking:   2,
+    extracting:       3,
+    validating:       4,
+    awaiting_review:  5,  // review step
+    completed:        7,  // all done
     rejected:         -2,
     error:            -2,
   };
+
   const active = order[status] ?? -1;
-  if (active === 6) return 'done';
+  if (active === 7) return 'done';
   if (idx < active) return 'done';
   if (idx === active) return 'running';
   return '';

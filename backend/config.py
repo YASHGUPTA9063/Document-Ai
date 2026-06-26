@@ -17,8 +17,12 @@ class Settings(BaseSettings):
     MEDICAL_EXTRACTOR_AGENT_ID: str = Field(..., description="Medical Record Extractor Agent ID from Mistral Studio")
     BANK_EXTRACTOR_AGENT_ID: str = Field(..., description="Bank Statement Extractor Agent ID from Mistral Studio")
     OTHERS_EXTRACTOR_AGENT_ID: str = Field(..., description="Others/Generic Extractor Agent ID from Mistral Studio")
+    GENERAL_EXTRACTOR_AGENT_ID: str = Field(default="", description="General Extractor Agent ID from Mistral Studio")
     VALIDATOR_AGENT_ID: str = Field(..., description="Validator Agent ID from Mistral Studio")
     REVIEWER_AGENT_ID: str = Field(..., description="Reviewer Agent ID from Mistral Studio")
+
+    # Pre-Validation Agent
+    PRE_VALIDATOR_AGENT_ID: str = Field(default="", description="Pre-Validation Vision Agent ID from Mistral Studio")
 
     # Signature Verification Agent IDs
     SIGNATURE_VISION_AGENT_ID: str = Field(..., description="Signature Vision Agent ID from Mistral Studio")
@@ -30,7 +34,14 @@ class Settings(BaseSettings):
     FACE_AGE_AGENT_ID: str = Field(default="", description="Face Age Variation Agent ID")
     FACE_JUDGE_AGENT_ID: str = Field(default="", description="Face Judge Agent ID")
 
+    # Google Document AI settings
+    GOOGLE_APPLICATION_CREDENTIALS: str = Field(default="", description="Path to Google Cloud service account JSON key file")
+    DOCUMENTAI_PROJECT_ID: str = Field(default="458272416814", description="Google Cloud Project ID")
+    DOCUMENTAI_LOCATION: str = Field(default="us", description="Document AI processor location (us or eu)")
+    DOCUMENTAI_PROCESSOR_ID: str = Field(default="ae6356d350bf69a6", description="Document AI Identity document proofing processor ID")
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
 
 try:
     settings = Settings()

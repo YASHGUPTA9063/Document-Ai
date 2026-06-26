@@ -35,6 +35,8 @@ class ExtractedData(Base):
     reviewer_corrections = Column(JSON, nullable=True)
     signature_verification = Column(JSON, nullable=True)
     photo_verification = Column(JSON, nullable=True)
+    fraud_check = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
 
     document = relationship("Document", back_populates="extracted_data")

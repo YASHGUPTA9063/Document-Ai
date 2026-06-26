@@ -34,3 +34,8 @@ async def init_db():
             await conn.execute(text("ALTER TABLE extracted_data ADD COLUMN photo_verification JSON"))
         except Exception:
             pass
+        try:
+            await conn.execute(text("ALTER TABLE extracted_data ADD COLUMN fraud_check JSON"))
+        except Exception:
+            pass
+

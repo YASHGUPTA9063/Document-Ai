@@ -319,16 +319,16 @@ async def resume_review(workflow_run_id: str, decision: ReviewerDecisionRequest)
 # step index, icon, accent color, and the workflow tools it runs alongside.
 AGENT_PIPELINE_META = {
     "classifier": {
-        "step": 2,
+        "step": 3,
         "role": "Document type identification",
         "emoji": "🏷️",
         "color": "rgba(124,58,237,0.15)",
         "border": "#7c3aed",
         "pipeline_tools": ["Mistral OCR", "Type Classifier", "Confidence Scorer"],
     },
-    # ── Extractor variants (step 3, conditional on doc type) ──────────────────
+    # ── Extractor variants (step 4, conditional on doc type) ──────────────────
     "invoice_extractor": {
-        "step": 3,
+        "step": 4,
         "role": "Invoice field extraction",
         "emoji": "🧾",
         "color": "rgba(16,185,129,0.15)",
@@ -336,7 +336,7 @@ AGENT_PIPELINE_META = {
         "pipeline_tools": ["Mistral OCR", "Line Item Parser", "Tax Calculator"],
     },
     "contract_extractor": {
-        "step": 3,
+        "step": 4,
         "role": "Contract clause extraction",
         "emoji": "📝",
         "color": "rgba(20,184,166,0.15)",
@@ -344,7 +344,7 @@ AGENT_PIPELINE_META = {
         "pipeline_tools": ["Clause Detector", "Party Extractor", "Date Parser"],
     },
     "kyc_extractor": {
-        "step": 3,
+        "step": 4,
         "role": "KYC identity field extraction",
         "emoji": "🪪",
         "color": "rgba(59,130,246,0.15)",
@@ -352,7 +352,7 @@ AGENT_PIPELINE_META = {
         "pipeline_tools": ["ID Validator", "Face Match", "Address Normalizer"],
     },
     "medical_extractor": {
-        "step": 3,
+        "step": 4,
         "role": "Medical record data extraction",
         "emoji": "🏥",
         "color": "rgba(239,68,68,0.15)",
@@ -360,7 +360,7 @@ AGENT_PIPELINE_META = {
         "pipeline_tools": ["ICD-10 Mapper", "Drug Name Parser", "Lab Value Extractor"],
     },
     "bank_extractor": {
-        "step": 3,
+        "step": 4,
         "role": "Bank statement extraction",
         "emoji": "🏦",
         "color": "rgba(234,179,8,0.15)",
@@ -368,7 +368,7 @@ AGENT_PIPELINE_META = {
         "pipeline_tools": ["Transaction Parser", "Balance Checker", "IBAN Validator"],
     },
     "others_extractor": {
-        "step": 3,
+        "step": 4,
         "role": "Generic document extraction",
         "emoji": "📄",
         "color": "rgba(107,114,128,0.15)",
@@ -377,7 +377,7 @@ AGENT_PIPELINE_META = {
     },
     # ─────────────────────────────────────────────────────────────────────────
     "signature_verifier": {
-        "step": 3,
+        "step": 4,
         "role": "Signature & photo forensic verification",
         "emoji": "🔍",
         "color": "rgba(168,85,247,0.15)",
@@ -385,7 +385,7 @@ AGENT_PIPELINE_META = {
         "pipeline_tools": ["DINOv2 Embeddings", "Mistral Vision Agent", "Judge Agent"],
     },
     "validator": {
-        "step": 4,
+        "step": 5,
         "role": "Data quality assurance",
         "emoji": "✅",
         "color": "rgba(245,158,11,0.15)",
@@ -393,7 +393,7 @@ AGENT_PIPELINE_META = {
         "pipeline_tools": ["Math Validator", "Date Checker", "Schema Validator"],
     },
     "reviewer": {
-        "step": 5,
+        "step": 6,
         "role": "Human-in-the-loop review",
         "emoji": "👤",
         "color": "rgba(240,64,96,0.15)",
@@ -404,6 +404,31 @@ AGENT_PIPELINE_META = {
 
 # Static agents that don't have Mistral agent IDs (they're pure workflow activities)
 STATIC_AGENTS = [
+    {
+        "key": "pre_validator",
+        "name": "Pre-Validation Agent",
+        "step": 2,
+        "role": "Document quality gate",
+        "description": (
+            "Visually inspects every document after intake. "
+            "Checks blur, brightness, skew, readability, and orientation — rejecting unprocessable files. "
+            "Watermarks are flagged as warnings only. DOCX files auto-pass."
+        ),
+        "emoji": "🛡️",
+        "color": "rgba(6,182,212,0.15)",
+        "border": "#06b6d4",
+        "model": "mistral-small-latest (vision)",
+        "agent_id": settings.PRE_VALIDATOR_AGENT_ID or None,
+        "tools": [
+            "Blur Detector",
+            "Brightness Checker",
+            "Skew Detector",
+            "Readability Judge",
+            "Watermark Scanner",
+            "Orientation Checker",
+        ],
+        "source": "mistral",
+    },
     {
         "key": "intake",
         "name": "Intake Agent",
@@ -421,7 +446,7 @@ STATIC_AGENTS = [
     {
         "key": "signature_verifier",
         "name": "Signature Verifier Agent",
-        "step": 3,
+        "step": 4,
         "role": "Signature forensic verification",
         "description": "Compares extracted signatures against a reference using DINOv2 embeddings and Mistral Vision forensic analysis, then a Judge agent produces the final verdict.",
         "emoji": "🔍",
@@ -435,7 +460,7 @@ STATIC_AGENTS = [
     {
         "key": "face_verifier",
         "name": "Face Verifier Agent",
-        "step": 3,
+        "step": 4,
         "role": "Multi-agent forensic face comparison",
         "description": "Compares extracted photos against a reference using 3 parallel forensic analysis agents (morphology, age variation) and a final arbitration judge.",
         "emoji": "👤",
@@ -449,7 +474,7 @@ STATIC_AGENTS = [
     {
         "key": "output",
         "name": "Output Agent",
-        "step": 6,
+        "step": 7,
         "role": "Result persistence and export",
         "description": "Stores validated extracted data and reviewer corrections to the database. Marks the document as completed.",
         "emoji": "📤",
@@ -543,7 +568,7 @@ async def list_agents():
             all_agents.append({
                 "key": f"{norm_key}_extractor",
                 "name": f"{display_name} Agent",
-                "step": 3,
+                "step": 4,
                 "role": f"{display_name} field extraction",
                 "description": f"Dynamic extraction agent customized for {display_name} documents.",
                 "emoji": "📄",
@@ -602,7 +627,9 @@ async def get_extracted_data(document_id: str):
             "reviewer_corrections": data.reviewer_corrections,
             "signature_verification": data.signature_verification,
             "photo_verification": data.photo_verification,
+            "fraud_check": data.fraud_check,
         }
+
 
 @app.put("/documents/{document_id}/extracted")
 async def update_extracted_data(document_id: str, payload: UpdateExtractedDataRequest):

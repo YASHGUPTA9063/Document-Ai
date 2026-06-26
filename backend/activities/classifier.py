@@ -33,7 +33,23 @@ async def classifier_activity(document_id: str, file_path: str) -> dict:
     try:
         logger.info(f"[Document {document_id}] Starting classifier activity")
         
-        ocr_result = extract_with_ocr(file_path, "unknown")
+        _, ext = os.path.splitext(file_path.lower())
+        pages = None
+        if ext == ".pdf":
+            try:
+                import pypdf
+                reader = pypdf.PdfReader(file_path)
+                total_pages = len(reader.pages)
+                if total_pages >= 2:
+                    pages = [0, 1]
+                    logger.info(f"[Document {document_id}] PDF has {total_pages} pages. Restricting classification OCR to pages 1 and 2.")
+                else:
+                    logger.info(f"[Document {document_id}] PDF has {total_pages} page(s). Performing full file OCR for classification.")
+            except Exception as e:
+                logger.error(f"[Document {document_id}] Failed to count PDF pages: {e}")
+                pages = [0, 1] # default restriction as fallback
+        
+        ocr_result = extract_with_ocr(file_path, "unknown", pages=pages)
         raw_text = ocr_result.get("raw_text", "")
         
         # Get dynamic list of supported document types

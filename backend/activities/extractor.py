@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import re
 import mistralai.workflows as workflows
 from mistralai.client import Mistral
 from config import settings
@@ -10,15 +11,6 @@ import db.operations as db
 logger = logging.getLogger(__name__)
 client = Mistral(api_key=settings.MISTRAL_API_KEY)
 
-# Maps classifier-emitted doc_type strings (lowercased) to their dedicated Mistral Agent ID.
-DOC_TYPE_AGENT_MAP = {
-    "invoice":        settings.INVOICE_EXTRACTOR_AGENT_ID,
-    "contract":       settings.CONTRACT_EXTRACTOR_AGENT_ID,
-    "kyc":            settings.KYC_EXTRACTOR_AGENT_ID,
-    "medical record": settings.MEDICAL_EXTRACTOR_AGENT_ID,
-    "bank record":    settings.BANK_EXTRACTOR_AGENT_ID,
-    "others":         settings.OTHERS_EXTRACTOR_AGENT_ID,
-}
 
 def _load_template_raw(doc_type: str):
     """Load the raw template entry (could be a list or {fields, is_kyc} dict)."""
@@ -56,8 +48,6 @@ def get_template_metadata(doc_type: str) -> dict:
         }
     return {"is_kyc": False, "kyc_boxes": None}  # old format has no KYC flag
 
-
-import re
 
 def _calculate_field_confidence(field_value, word_confidence_scores: list) -> float:
     if not isinstance(field_value, str):
@@ -104,6 +94,88 @@ def _compute_confidences_recursive(data, word_confidence_scores):
         return _calculate_field_confidence(data, word_confidence_scores)
 
 
+def build_json_schema_from_fields(fields_list: list) -> dict:
+    properties = {}
+    required = []
+    
+    if not fields_list:
+        # Default simple schema if fields_list is empty
+        return {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "generic_document_extraction",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "document_title": {"type": "string", "description": "Title or main heading of the document"},
+                        "document_date": {"type": "string", "description": "Date associated with the document"},
+                        "summary": {"type": "string", "description": "Brief summary of the document contents"}
+                    },
+                    "required": ["document_title"]
+                }
+            }
+        }
+
+    for f in fields_list:
+        key = f["key"]
+        f_type = f.get("type", "Text").lower()
+        desc = f.get("description", "")
+        
+        # Build property definition
+        if "array" in f_type or f_type == "list":
+            properties[key] = {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "description": {"type": "string", "description": "Item description or label"},
+                        "quantity": {"type": "string", "description": "Quantity or count of items"},
+                        "unit_price": {"type": "string", "description": "Price per unit"},
+                        "amount": {"type": "string", "description": "Total amount for the item line"}
+                    }
+                },
+                "description": desc
+            }
+        else:
+            properties[key] = {
+                "type": "string",
+                "description": desc
+            }
+            
+        if f.get("required"):
+            required.append(key)
+            
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "document_fields_schema",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": properties,
+                "required": required
+            }
+        }
+    }
+
+
+def build_ocr_prompt_from_fields(fields_list: list) -> str:
+    if not fields_list:
+        return "Extract structured data from the document."
+    
+    desc_lines = []
+    for f in fields_list:
+        req_str = "Required" if f.get("required") else "Optional"
+        desc_lines.append(f"- '{f['key']}' ({f.get('type', 'Text')}, {req_str}): {f.get('description', '')}")
+        
+    fields_instruction = "\n".join(desc_lines)
+    return (
+        f"Extract key fields from the document following this schema:\n{fields_instruction}\n\n"
+        f"Return the exact text as written in the document without normalization or cleaning."
+    )
+
+
 async def _run_extraction_with_agent(
     agent_id: str,
     file_path: str,
@@ -114,15 +186,7 @@ async def _run_extraction_with_agent(
     kyc_boxes: dict = None
 ) -> dict:
     """
-    Shared OCR + function-calling extraction helper.
-
-    1. Sends the agent a user message asking it to call `extract_text_from_document`.
-    2. If the agent issues the tool call, runs OCR locally and returns the text as a tool result.
-    3. For KYC docs: also provides `extract_kyc_images` tool that runs signature+photo extraction.
-    4. Resumes the agent to get the final structured JSON extraction.
-    5. Falls back to direct OCR if the agent skips the tool call.
-
-    Returns: {"fields": dict, "raw_ocr": str, "confidence": float}
+    Consolidated agent extraction logic using dynamic Mistral OCR structured annotation parameters.
     """
     tools = [
         {
@@ -130,18 +194,15 @@ async def _run_extraction_with_agent(
             "function": {
                 "name": "extract_text_from_document",
                 "description": (
-                    "Extracts raw text and markdown from a document file path "
-                    "using OCR or document parsing."
+                    "Extracts structured data from a document file path "
+                    "using advanced OCR and dynamic schema mapping."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "file_path": {
                             "type": "string",
-                            "description": (
-                                "The absolute or relative file path of the document "
-                                "(PDF, PNG, JPG, DOCX)."
-                            )
+                            "description": "The file path of the document (PDF, PNG, JPG, DOCX)."
                         }
                     },
                     "required": ["file_path"]
@@ -149,6 +210,10 @@ async def _run_extraction_with_agent(
             }
         }
     ]
+
+    # Build schema and prompts for Mistral OCR
+    annotation_format = build_json_schema_from_fields(fields_list)
+    annotation_prompt = build_ocr_prompt_from_fields(fields_list)
 
     fields_instruction = ""
     if fields_list:
@@ -158,16 +223,21 @@ async def _run_extraction_with_agent(
             fields_desc.append(f"- '{f['key']}' ({f['type']}, {req_str}): {f.get('description', '')}")
         fields_instruction = "\n".join(fields_desc)
 
-    user_prompt = (
-        f"Please extract structured data from the document located at: '{file_path}'. "
-        f"You MUST call the `extract_text_from_document` tool to get the document text first."
+    prompt_format = (
+        "Your final response MUST be a JSON object containing EXACTLY these two keys:\n"
+        "1. 'raw_extracted': A JSON object containing the raw field values exactly as returned by the OCR tool (without formatting/cleaning).\n"
+        "2. 'normalized_extracted': A JSON object containing the normalized/cleaned field values. Apply standard formatting rules:\n"
+        "   - Dates: Normalize to YYYY-MM-DD format (e.g. '25 June 2026' -> '2026-06-25'). If invalid or missing, keep empty.\n"
+        "   - Amounts/Numbers: Convert to float/integer numbers (e.g. '$1,250.50' -> 1250.5).\n"
+        "   - Names & Addresses: Normalize spelling and standardize to Title Case.\n\n"
+        f"Target fields to extract under both 'raw_extracted' and 'normalized_extracted':\n{fields_instruction}"
     )
 
-    if fields_instruction:
-        user_prompt += (
-            f"\n\nWe need to extract exactly the following target schema fields. Once you get the text, "
-            f"your final response must be a JSON object containing ONLY these keys:\n{fields_instruction}"
-        )
+    user_prompt = (
+        f"Please extract structured data from the document located at: '{file_path}'. "
+        f"You MUST call the `extract_text_from_document` tool to get the document text first.\n\n"
+        f"{prompt_format}"
+    )
 
     messages = [
         {
@@ -176,7 +246,7 @@ async def _run_extraction_with_agent(
         }
     ]
 
-    logger.info(f"[Document {document_id}] Sending initial request to agent {agent_id} (type: {doc_type}, is_kyc={is_kyc})")
+    logger.info(f"[Document {document_id}] Sending initial request to general extractor agent {agent_id} (is_kyc={is_kyc})")
     response = client.agents.complete(
         agent_id=agent_id,
         messages=messages,
@@ -188,6 +258,7 @@ async def _run_extraction_with_agent(
     ocr_confidence = 0.0
     word_confidence_scores = []
     kyc_image_result = None
+    doc_annotation = {}
 
     if message.tool_calls:
         logger.info(f"[Document {document_id}] Agent requested tool calls: {message.tool_calls}")
@@ -214,32 +285,39 @@ async def _run_extraction_with_agent(
             if tool_call.function.name == "extract_text_from_document":
                 args = json.loads(tool_call.function.arguments)
                 target_file_path = args.get("file_path", file_path)
-                # Strip surrounding quotes the agent sometimes wraps the path in
                 target_file_path = target_file_path.strip("'\"").strip()
 
-                logger.info(f"[Document {document_id}] Executing OCR tool for file: {target_file_path}")
-                ocr_result = extract_with_ocr(target_file_path, doc_type)
+                logger.info(f"[Document {document_id}] Executing OCR tool with annotation parameters for file: {target_file_path}")
+                ocr_result = extract_with_ocr(
+                    file_path=target_file_path, 
+                    doc_type=doc_type,
+                    document_annotation_format=annotation_format,
+                    document_annotation_prompt=annotation_prompt
+                )
                 raw_text = ocr_result.get("raw_text", "")
                 ocr_confidence = ocr_result.get("confidence", 0.0)
                 word_confidence_scores = ocr_result.get("word_confidence_scores", [])
+                doc_annotation = ocr_result.get("document_annotation") or {}
+
+                tool_output = json.dumps({
+                    "raw_ocr_text": raw_text,
+                    "structured_ocr_extraction": doc_annotation
+                })
 
                 messages.append({
                     "role": "tool",
                     "name": "extract_text_from_document",
-                    "content": raw_text,
+                    "content": tool_output,
                     "tool_call_id": tool_call.id
                 })
-
-
 
         logger.info(f"[Document {document_id}] Resuming agent with tool result")
         
         # Inject custom fields schema instruction reminder
-        if fields_instruction:
-            messages.append({
-                "role": "user",
-                "content": f"Based on the tool output above, extract exactly the target schema fields. Your response MUST be a JSON object containing ONLY these keys:\n{fields_instruction}"
-            })
+        messages.append({
+            "role": "user",
+            "content": f"Based on the tool output above, extract the target schema fields. {prompt_format}"
+        })
 
         response = client.agents.complete(
             agent_id=agent_id,
@@ -248,23 +326,25 @@ async def _run_extraction_with_agent(
         )
         message = response.choices[0].message
     else:
-        # Fallback: agent skipped the tool — run OCR ourselves and send raw text
-        logger.warning(
-            f"[Document {document_id}] Agent did not request tool call. Performing fallback OCR."
+        # Fallback: agent skipped the tool — run OCR ourselves
+        logger.warning(f"[Document {document_id}] Agent did not request tool call. Performing fallback OCR.")
+        ocr_result = extract_with_ocr(
+            file_path=file_path, 
+            doc_type=doc_type,
+            document_annotation_format=annotation_format,
+            document_annotation_prompt=annotation_prompt
         )
-        ocr_result = extract_with_ocr(file_path, doc_type)
         raw_text = ocr_result.get("raw_text", "")
         ocr_confidence = ocr_result.get("confidence", 0.0)
         word_confidence_scores = ocr_result.get("word_confidence_scores", [])
+        doc_annotation = ocr_result.get("document_annotation") or {}
 
-        fallback_prompt = f"Here is the document text:\n{raw_text}\n\n"
-        if fields_instruction:
-            fallback_prompt += (
-                f"Please extract exactly the following target schema fields. "
-                f"Your response MUST be a JSON object containing ONLY these keys:\n{fields_instruction}"
-            )
-        else:
-            fallback_prompt += "Please extract structured data in JSON format."
+        fallback_prompt = (
+            f"Here is the document OCR output:\n"
+            f"Structured OCR Extraction: {json.dumps(doc_annotation)}\n"
+            f"Raw text: {raw_text}\n\n"
+            f"Please extract the target schema fields. {prompt_format}"
+        )
 
         response = client.agents.complete(
             agent_id=agent_id,
@@ -274,14 +354,31 @@ async def _run_extraction_with_agent(
         message = response.choices[0].message
 
     content = message.content
-    fields = json.loads(content)
-    field_confidences = _compute_confidences_recursive(fields, word_confidence_scores)
+    try:
+        parsed_response = json.loads(content)
+    except Exception as e:
+        logger.error(f"[Document {document_id}] Failed to parse agent JSON output: {content}")
+        # Robust fallback regex parser if JSON format is wrapped
+        match = re.search(r"\{.*\}", content, re.DOTALL)
+        if match:
+            parsed_response = json.loads(match.group(0))
+        else:
+            raise
+
+    raw_extracted = parsed_response.get("raw_extracted", {})
+    normalized_extracted = parsed_response.get("normalized_extracted", {})
+
+    # Fallback if the agent returned a flat structure instead of nesting
+    if not raw_extracted and not normalized_extracted:
+        raw_extracted = parsed_response
+        normalized_extracted = parsed_response
+
+    field_confidences = _compute_confidences_recursive(normalized_extracted, word_confidence_scores)
 
     # For KYC docs: ALWAYS run signature+photo extraction directly
-    # (we don't rely on the agent to call the tool — it's unreliable)
     if is_kyc:
         if kyc_boxes:
-            logger.info(f"[Document {document_id}] Using template manual coordinates for KYC extraction (skipping Pixtral)")
+            logger.info(f"[Document {document_id}] Using template manual coordinates for KYC extraction")
         else:
             logger.info(f"[Document {document_id}] No manual coordinates — falling back to Pixtral vision")
         logger.info(f"[Document {document_id}] Running KYC image extraction (signature + photo)...")
@@ -300,17 +397,19 @@ async def _run_extraction_with_agent(
 
     # Merge KYC image data into the extracted fields
     if kyc_image_result:
-        if kyc_image_result.get("signature_base64"):
-            fields["signature_image"] = kyc_image_result["signature_base64"]
-        fields["signature_detected"] = kyc_image_result.get("has_signature", False)
-        if kyc_image_result.get("photo_base64"):
-            fields["photo_image"] = kyc_image_result["photo_base64"]
-        fields["photo_detected"] = kyc_image_result.get("has_photo", False)
-        if kyc_image_result.get("signer_name"):
-            fields["signer_name"] = kyc_image_result["signer_name"]
+        for f_dict in [normalized_extracted, raw_extracted]:
+            if kyc_image_result.get("signature_base64"):
+                f_dict["signature_image"] = kyc_image_result["signature_base64"]
+            f_dict["signature_detected"] = kyc_image_result.get("has_signature", False)
+            if kyc_image_result.get("photo_base64"):
+                f_dict["photo_image"] = kyc_image_result["photo_base64"]
+            f_dict["photo_detected"] = kyc_image_result.get("has_photo", False)
+            if kyc_image_result.get("signer_name"):
+                f_dict["signer_name"] = kyc_image_result["signer_name"]
 
     return {
-        "fields": fields,
+        "fields": normalized_extracted,
+        "raw_extracted": raw_extracted,
         "raw_ocr": raw_text,
         "confidence": ocr_confidence,
         "field_confidences": field_confidences
@@ -327,28 +426,39 @@ async def extractor_activity(document_id: str, file_path: str, doc_type: str) ->
         template_meta = get_template_metadata(doc_type)
         is_kyc = template_meta.get("is_kyc", False)
 
-        # Also treat classifier-emitted "KYC" type as KYC even without template flag
         if doc_type.lower() == "kyc":
             is_kyc = True
 
         if is_kyc:
             logger.info(f"[Document {document_id}] KYC document detected — will extract signature + photo")
 
-        agent_id = DOC_TYPE_AGENT_MAP.get(doc_type.lower())
+        # Route extraction to the new general extractor agent settings
+        agent_id = settings.GENERAL_EXTRACTOR_AGENT_ID
         if not agent_id:
-            # Fall back to others extractor for custom template types
+            # Fall back to others extractor if general agent not yet configured
             agent_id = settings.OTHERS_EXTRACTOR_AGENT_ID
-            logger.info(f"[Document {document_id}] Custom doc type '{doc_type}' using OTHERS fallback agent: {agent_id}")
+            logger.info(f"[Document {document_id}] GENERAL_EXTRACTOR_AGENT_ID not configured. Falling back to OTHERS: {agent_id}")
+        else:
+            logger.info(f"[Document {document_id}] Routing to general extractor agent: {agent_id}")
 
         if agent_id:
-            return await _run_extraction_with_agent(agent_id, file_path, doc_type, document_id, fields_list=fields_list, is_kyc=is_kyc, kyc_boxes=template_meta.get("kyc_boxes"))
+            return await _run_extraction_with_agent(
+                agent_id=agent_id, 
+                file_path=file_path, 
+                doc_type=doc_type, 
+                document_id=document_id, 
+                fields_list=fields_list, 
+                is_kyc=is_kyc, 
+                kyc_boxes=template_meta.get("kyc_boxes")
+            )
         else:
-            logger.warning(f"[Document {document_id}] Unknown doc type received and no OTHERS fallback agent: '{doc_type}'")
+            logger.warning(f"[Document {document_id}] No extractor agent configuration found.")
             return {
                 "fields": {},
+                "raw_extracted": {},
                 "raw_ocr": "",
                 "confidence": 0.0,
-                "message": f"Unknown doc type: {doc_type}"
+                "message": "No extractor agent ID configured."
             }
 
     except Exception as e:

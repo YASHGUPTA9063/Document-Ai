@@ -8,8 +8,12 @@ with workflows.workflow.unsafe.imports_passed_through():
     from activities.validator import validator_activity
     from activities.reviewer import reviewer_activity
     from activities.output import output_activity
+    from activities.pre_validator import pre_validator_activity
+    from activities.fraud_checker import fraud_check_activity
     import db.operations as db
     from schemas.documents import DuplicateDecisionRequest, ReviewerDecisionRequest
+    from config import settings
+
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +41,7 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
     @workflows.workflow.entrypoint
     async def run(self, document_id: str, filename: str, file_path: str) -> dict:
         logger.info(f"Starting workflow for document {document_id}")
-        
+
         # Step 1 — Intake
         await update_status_activity(document_id, "processing")
         intake_result = await intake_activity(document_id, filename)
@@ -54,17 +58,59 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
             else:
                 await update_status_and_message_activity(document_id, "processing", "")
 
-        # Step 2 — Classify
+        # Step 2 — Pre-Validation
+        # Checks blur, brightness, skew, readability, watermark (warning), orientation.
+        # Skipped gracefully if PRE_VALIDATOR_AGENT_ID is not yet configured.
+        if settings.PRE_VALIDATOR_AGENT_ID:
+            await update_status_activity(document_id, "pre_validating")
+            pre_val = await pre_validator_activity(document_id, file_path)
+            if not pre_val.get("passed"):
+                reason = pre_val.get("rejection_reason") or "Document failed pre-validation quality check."
+                await update_status_and_message_activity(document_id, "rejected", reason)
+                return {"status": "rejected", "reason": reason, "pre_validation": pre_val}
+            logger.info(
+                f"[Document {document_id}] Pre-validation passed. "
+                f"Warnings: {pre_val.get('warnings', [])}"
+            )
+        else:
+            logger.warning(
+                f"[Document {document_id}] PRE_VALIDATOR_AGENT_ID not set — skipping pre-validation."
+            )
+
+        # Step 3 — Classify
         await update_status_activity(document_id, "classifying")
         classifier_result = await classifier_activity(document_id, file_path)
         doc_type = classifier_result["doc_type"]
         await update_doc_type_activity(document_id, doc_type)
 
-        # Step 3 — Extract
-        await update_status_activity(document_id, "extracting")
-        extractor_result = await extractor_activity(document_id, file_path, doc_type)
+        # Step 3.5 — Fraud Check (if KYC Document)
+        fraud_check_result = None
+        from activities.extractor import get_template_metadata
+        template_meta = get_template_metadata(doc_type)
+        is_kyc = template_meta.get("is_kyc", False) or doc_type.lower() in ("kyc", "kyc document", "identity document")
+        
+        if is_kyc:
+            await update_status_activity(document_id, "fraud_checking")
+            try:
+                fraud_check_result = await fraud_check_activity(document_id, file_path)
+                if not fraud_check_result.get("passed", False):
+                    reason = fraud_check_result.get("rejection_reason") or "Document failed fraud check verification."
+                    await update_status_and_message_activity(document_id, "rejected", reason)
+                    return {"status": "rejected", "reason": reason, "fraud_check": fraud_check_result}
+            except Exception as e:
+                logger.error(f"[Document {document_id}] Fraud check failed: {e}")
+                reason = f"Fraud check processing error: {str(e)}"
+                await update_status_and_message_activity(document_id, "rejected", reason)
+                return {"status": "rejected", "reason": reason}
 
-        # Step 4 — Validate
+
+        # Step 4 — Extract
+        await update_status_activity(document_id, "extracting")
+
+        extractor_result = await extractor_activity(document_id, file_path, doc_type)
+        raw_extracted = extractor_result.get("raw_extracted")
+
+        # Step 5 — Validate
         await update_status_activity(document_id, "validating")
         validator_result = await validator_activity(
             document_id=document_id, 
@@ -74,7 +120,7 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
             field_confidences=extractor_result.get("field_confidences")
         )
 
-        # Step 5 — Review
+        # Step 6 — Review
         await update_status_activity(document_id, "awaiting_review")
         reviewer_result = await reviewer_activity(
             document_id=document_id, 
@@ -97,15 +143,18 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
             await update_status_activity(document_id, "rejected")
             return {"status": "rejected", "reason": "reviewer_rejected"}
 
-        # Step 6 — Output
+        # Step 7 — Output
         output_result = await output_activity(
             document_id=document_id, 
             doc_type=doc_type, 
             validated_data=validator_result["validated_data"], 
             reviewer_result=final_reviewer_result, 
             confidence_score=validator_result["confidence_score"],
-            field_confidences=validator_result.get("field_confidences")
+            field_confidences=validator_result.get("field_confidences"),
+            fraud_check=fraud_check_result,
+            raw_extracted=raw_extracted
         )
         
         logger.info(f"Completed workflow for document {document_id}")
         return output_result
+

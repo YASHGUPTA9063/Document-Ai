@@ -13,7 +13,9 @@ async def output_activity(
     validated_data: dict, 
     reviewer_result: dict, 
     confidence_score: float,
-    field_confidences: dict = None
+    field_confidences: dict = None,
+    fraud_check: dict = None,
+    raw_extracted: dict = None
 ) -> dict:
     try:
         logger.info(f"[Document {document_id}] Starting output activity")
@@ -29,20 +31,29 @@ async def output_activity(
             result = await session.execute(select(ExtractedData).where(ExtractedData.document_id == document_id))
             extracted_record = result.scalar_one_or_none()
             
+            raw_payload = {
+                "raw_fields": raw_extracted or {},
+                "field_confidences": field_confidences or {}
+            }
+            
             if not extracted_record:
                 extracted_record = ExtractedData(
                     document_id=document_id,
-                    raw_extracted={"field_confidences": field_confidences or {}},
+                    raw_extracted=raw_payload,
                     validated_data=final_data,
                     confidence_score=confidence_score,
-                    reviewer_corrections=corrections
+                    reviewer_corrections=corrections,
+                    fraud_check=fraud_check
                 )
                 session.add(extracted_record)
             else:
                 extracted_record.validated_data = final_data
                 extracted_record.confidence_score = confidence_score
                 extracted_record.reviewer_corrections = corrections
-                extracted_record.raw_extracted = {"field_confidences": field_confidences or {}}
+                extracted_record.raw_extracted = raw_payload
+                if fraud_check:
+                    extracted_record.fraud_check = fraud_check
+
                 
             # Update Document
             doc_result = await session.execute(select(Document).where(Document.id == document_id))

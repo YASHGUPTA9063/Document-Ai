@@ -127,8 +127,9 @@ export function AppProvider({ children }) {
   const dismissToast = useCallback((id) => dispatch({ type: 'REMOVE_TOAST', payload: id }), []);
 
   // ─── Derived helpers ────────────────────────────
-  const pendingDocs = state.documents.filter((d) => ['pending','processing','classifying','extracting','validating'].includes(d.status));
+  const pendingDocs = state.documents.filter((d) => ['pending','pre_validating','processing','classifying','fraud_checking','extracting','validating'].includes(d.status));
   const reviewDocs  = state.documents.filter((d) => d.status === 'awaiting_review');
+
   const completedDocs = state.documents.filter((d) => d.status === 'completed');
 
   return (

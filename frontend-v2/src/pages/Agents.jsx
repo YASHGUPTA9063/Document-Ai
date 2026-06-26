@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   RefreshCw, ExternalLink, Cpu, Zap, AlertTriangle,
-  Upload, Bot, FileSearch, CheckCircle, FileText, UserCheck, GitBranch
+  Upload, Bot, FileSearch, CheckCircle, FileText, UserCheck, GitBranch, Shield
 } from 'lucide-react';
 import { getAgents } from '../api/client';
 
 const AGENT_ICON_MAP = {
   intake: Upload,
+  pre_validator: Shield,
   classifier: Bot,
   invoice_extractor: FileSearch,
   contract_extractor: FileSearch,
@@ -181,18 +182,23 @@ const StepArrow = () => (
 );
 
 function PipelineGraph({ agents }) {
-  const seqKeys  = ['intake', 'classifier', 'validator', 'reviewer', 'output'];
-  const seqNodes = seqKeys.map(k => agents.find(a => a.key === k)).filter(Boolean);
+  const intakeAgent = agents.find(a => a.key === 'intake');
+  const preValidatorAgent = agents.find(a => a.key === 'pre_validator');
+  const classifierAgent = agents.find(a => a.key === 'classifier');
+  const validatorAgent = agents.find(a => a.key === 'validator');
+  const reviewerAgent = agents.find(a => a.key === 'reviewer');
+  const outputAgent = agents.find(a => a.key === 'output');
   const extractors = agents.filter(a => a.key.includes('extractor'));
 
-  // Ordered pipeline: inject the extractor group at position index 2 (step 3)
+  // Ordered pipeline: 7 steps sequentially mapping intake, pre-validation, type classification, conditional extraction, data validation, review, and final output.
   const steps = [
-    { type: 'node', agent: seqNodes[0], step: 1 },
-    { type: 'node', agent: seqNodes[1], step: 2 },
-    { type: 'extractors',               step: 3 },
-    { type: 'node', agent: seqNodes[2], step: 4 },
-    { type: 'node', agent: seqNodes[3], step: 5 },
-    { type: 'node', agent: seqNodes[4], step: 6 },
+    { type: 'node', agent: intakeAgent, step: 1 },
+    { type: 'node', agent: preValidatorAgent, step: 2 },
+    { type: 'node', agent: classifierAgent, step: 3 },
+    { type: 'extractors',                     step: 4 },
+    { type: 'node', agent: validatorAgent, step: 5 },
+    { type: 'node', agent: reviewerAgent, step: 6 },
+    { type: 'node', agent: outputAgent, step: 7 },
   ];
 
   return (

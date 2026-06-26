@@ -20,7 +20,7 @@ function parseTableData(value, key) {
       return null;
     }
   }
-  
+
   if (Array.isArray(parsed)) {
     if (parsed.length === 0) {
       return parsed;
@@ -47,7 +47,7 @@ function parseArrayOfText(value) {
       return null;
     }
   }
-  
+
   if (Array.isArray(parsed)) {
     if (parsed.length === 0) {
       return parsed;
@@ -99,7 +99,7 @@ const getDefaultHeaders = (key) => {
   return ['description', 'quantity', 'unit_price', 'total'];
 };
 
-function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighThreshold = 90, confMedThreshold = 70, fieldHighlightThreshold = 95 }) {
+function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighThreshold = 90, confMedThreshold = 70, fieldHighlightThreshold = 95, rawVal }) {
   const [newInputVal, setNewInputVal] = useState('');
   // conf may be a nested structure for table/array fields — flatten to a single average number
   const resolvedConf = flattenConfidence(conf);
@@ -172,11 +172,11 @@ function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighT
             </div>
           )}
         </div>
-        
-        <div className="table-wrap" style={{ 
-          background: 'var(--surface-sunken)', 
-          border: '1px solid var(--border)', 
-          borderRadius: 'var(--radius-sm)', 
+
+        <div className="table-wrap" style={{
+          background: 'var(--surface-sunken)',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-sm)',
           overflowX: 'auto',
           marginTop: 4
         }}>
@@ -184,11 +184,11 @@ function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighT
             <thead>
               <tr style={{ background: 'var(--card-alt)' }}>
                 {headers.map(h => (
-                  <th key={h} style={{ 
-                    padding: '8px 12px', 
-                    fontSize: 11, 
-                    fontWeight: 700, 
-                    textAlign: 'left', 
+                  <th key={h} style={{
+                    padding: '8px 12px',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    textAlign: 'left',
                     borderBottom: '1px solid var(--border)',
                     textTransform: 'uppercase',
                     color: 'var(--muted)'
@@ -197,11 +197,11 @@ function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighT
                   </th>
                 ))}
                 {isEditing && (
-                  <th style={{ 
-                    padding: '8px 12px', 
-                    fontSize: 11, 
-                    fontWeight: 700, 
-                    textAlign: 'center', 
+                  <th style={{
+                    padding: '8px 12px',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    textAlign: 'center',
                     borderBottom: '1px solid var(--border)',
                     textTransform: 'uppercase',
                     color: 'var(--muted)',
@@ -232,10 +232,10 @@ function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighT
                               className="styled-input"
                               value={cellVal ?? ''}
                               onChange={(e) => handleCellChange(rIdx, h, e.target.value)}
-                              style={{ 
-                                width: '100%', 
-                                padding: '4px 8px', 
-                                fontSize: 12, 
+                              style={{
+                                width: '100%',
+                                padding: '4px 8px',
+                                fontSize: 12,
                                 background: 'var(--card-alt)',
                                 border: '1px solid var(--border)',
                                 borderRadius: 4
@@ -312,7 +312,7 @@ function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighT
             </div>
           )}
         </div>
-        
+
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
           {stringArray.length === 0 ? (
             <span style={{ color: 'var(--muted)', fontStyle: 'italic', fontSize: 12 }}>No items</span>
@@ -393,7 +393,7 @@ function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighT
   return (
     <div className="field-row" style={{ display: 'flex', alignItems: 'center', minHeight: 32 }}>
       <div className="field-key" style={{ width: '40%', flexShrink: 0 }}>{label}</div>
-      <div className="field-val" style={{ flexGrow: 1 }}>
+      <div className="field-val" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
         {isEditing ? (
           <input
             type="text"
@@ -404,30 +404,35 @@ function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighT
           />
         ) : (
           value == null ? <span style={{ color: 'var(--muted)' }}>—</span> :
-          (() => {
-            const renderedText = typeof value === 'object' ? 
-              <code style={{ fontSize: 11, background: 'transparent', color: 'inherit' }}>{JSON.stringify(value)}</code> : 
-              String(value);
-            
-            if (!isEditing && pct != null && pct < fieldHighlightThreshold) {
-              return (
-                <span style={{ 
-                  background: 'rgba(245, 158, 11, 0.12)', 
-                  color: 'var(--warn)', 
-                  padding: '3px 8px', 
-                  borderRadius: '4px',
-                  border: '1px solid rgba(245, 158, 11, 0.3)',
-                  fontWeight: 500,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6
-                }}>
-                  {renderedText}
-                </span>
-              );
-            }
-            return renderedText;
-          })()
+            (() => {
+              const renderedText = typeof value === 'object' ?
+                <code style={{ fontSize: 11, background: 'transparent', color: 'inherit' }}>{JSON.stringify(value)}</code> :
+                String(value);
+
+              if (!isEditing && pct != null && pct < fieldHighlightThreshold) {
+                return (
+                  <span style={{
+                    background: 'rgba(245, 158, 11, 0.12)',
+                    color: 'var(--warn)',
+                    padding: '3px 8px',
+                    borderRadius: '4px',
+                    border: '1px solid rgba(245, 158, 11, 0.3)',
+                    fontWeight: 500,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6
+                  }}>
+                    {renderedText}
+                  </span>
+                );
+              }
+              return renderedText;
+            })()
+        )}
+        {rawVal !== undefined && rawVal !== null && String(rawVal) !== String(value) && typeof rawVal !== 'object' && (
+          <span style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic', marginTop: 2 }}>
+            Original (OCR): "{String(rawVal)}"
+          </span>
         )}
       </div>
       {!isEditing && pct != null && (
@@ -925,7 +930,7 @@ function FaceVerdictPanel({ result, onReset }) {
   );
 }
 
-function renderFields(data, isEditing, editedData, onChange, confidences = {}, confidenceMode = 'word', confHighThreshold = 90, confMedThreshold = 70, fieldHighlightThreshold = 95, fieldThresholds = {}) {
+function renderFields(data, isEditing, editedData, onChange, confidences = {}, confidenceMode = 'word', confHighThreshold = 90, confMedThreshold = 70, fieldHighlightThreshold = 95, fieldThresholds = {}, rawFields = {}) {
   if (!data || typeof data !== 'object') return null;
   const groups = {};
   const renderSource = isEditing ? editedData : data;
@@ -933,10 +938,10 @@ function renderFields(data, isEditing, editedData, onChange, confidences = {}, c
     // Skip KYC image fields — they are rendered separately in the Identity Verification section
     if (KYC_IMAGE_KEYS.has(k)) return;
     const group = k.startsWith('vendor') ? 'Vendor' :
-                  k.startsWith('bill') || k.startsWith('line') ? 'Billing' :
-                  ['subtotal','tax','total_amount','currency'].includes(k) ? 'Financial' :
-                  ['due_date','invoice_date','invoice_number','payment_terms'].includes(k) ? 'Header' :
-                  'Other';
+      k.startsWith('bill') || k.startsWith('line') ? 'Billing' :
+        ['subtotal', 'tax', 'total_amount', 'currency'].includes(k) ? 'Financial' :
+          ['due_date', 'invoice_date', 'invoice_number', 'payment_terms'].includes(k) ? 'Header' :
+            'Other';
     if (!groups[group]) groups[group] = [];
     groups[group].push([k, v]);
   });
@@ -949,6 +954,7 @@ function renderFields(data, isEditing, editedData, onChange, confidences = {}, c
           label={k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
           fieldKey={k}
           value={v}
+          rawVal={rawFields?.[k]}
           isEditing={isEditing}
           onChange={onChange}
           conf={(confidenceMode === 'word' || confidenceMode === 'both') ? confidences[k] : null}
@@ -1240,8 +1246,8 @@ function KycImageCard({ label, icon: Icon, base64Data, detected, accentColor, ve
               ...(verificationResult.verdict === 'genuine'
                 ? { color: '#059669', background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)' }
                 : verificationResult.verdict === 'uncertain'
-                ? { color: '#d97706', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }
-                : { color: '#dc2626', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' })
+                  ? { color: '#d97706', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }
+                  : { color: '#dc2626', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' })
             }}>
               {verificationResult.verdict === 'genuine' ? <CheckCircle2 size={8} /> : verificationResult.verdict === 'uncertain' ? <AlertTriangle size={8} /> : <Shield size={8} />}
               {(verificationResult.verdict || 'unknown').toUpperCase()}
@@ -1375,7 +1381,7 @@ function DocumentViewer({ fileUrl, filename, ext }) {
 function getAverageWordConfidence(extracted) {
   const confidences = extracted?.raw_extracted?.field_confidences;
   if (!confidences || typeof confidences !== 'object') return 0;
-  
+
   const flatConfidences = [];
   const traverse = (obj) => {
     if (typeof obj === 'number') {
@@ -1387,7 +1393,7 @@ function getAverageWordConfidence(extracted) {
     }
   };
   traverse(confidences);
-  
+
   if (flatConfidences.length === 0) return 0;
   return flatConfidences.reduce((sum, val) => sum + val, 0) / flatConfidences.length;
 }
@@ -1422,8 +1428,8 @@ export function Extraction() {
 
   const displayConfidence = extracted
     ? (confidenceMode === 'page'
-        ? pageConf
-        : confidenceMode === 'word'
+      ? pageConf
+      : confidenceMode === 'word'
         ? wordConf
         : Math.min(wordConf, pageConf))
     : 0;
@@ -1499,7 +1505,7 @@ export function Extraction() {
     try {
       const result = await verifySignature(activeId, file, type);
       setResult(result);
-      toast(`${type === 'signature' ? 'Signature' : 'Photo'} verification complete: ${(result.verdict || 'unknown').toUpperCase()}`, 
+      toast(`${type === 'signature' ? 'Signature' : 'Photo'} verification complete: ${(result.verdict || 'unknown').toUpperCase()}`,
         result.verdict === 'genuine' ? 'success' : result.verdict === 'uncertain' ? 'warn' : 'error'
       );
     } catch (err) {
@@ -1805,64 +1811,64 @@ export function Extraction() {
                 extracted.validated_data.signature_image || extracted.validated_data.photo_image ||
                 extracted.validated_data.signature_detected !== undefined || extracted.validated_data.photo_detected !== undefined
               ) && (
-                <FieldGroup title="Identity Verification">
-                  <div style={{
-                    display: 'flex', alignItems: 'center', gap: 6,
-                    marginBottom: 10, padding: '6px 0',
-                  }}>
-                    <ShieldCheck size={14} style={{ color: 'var(--accent)' }} />
-                    <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)' }}>
-                      KYC Document — Signature & Photo Extraction
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                    <KycImageCard
-                      label="Signature"
-                      icon={PenTool}
-                      base64Data={extracted.validated_data.signature_image}
-                      detected={extracted.validated_data.signature_detected}
-                      accentColor="#7c3aed"
-                      verificationType="signature"
-                      documentId={activeId}
-                      verificationResult={sigResult}
-                      onVerify={handleVerify}
-                      isVerifying={sigVerifying}
-                    />
-                    <KycImageCard
-                      label="Photo"
-                      icon={UserCircle2}
-                      base64Data={extracted.validated_data.photo_image}
-                      detected={extracted.validated_data.photo_detected}
-                      accentColor="#3b82f6"
-                      verificationType="photo"
-                      documentId={activeId}
-                      verificationResult={photoResult}
-                      onVerify={handleVerify}
-                      isVerifying={photoVerifying}
-                    />
-                  </div>
+                  <FieldGroup title="Identity Verification">
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      marginBottom: 10, padding: '6px 0',
+                    }}>
+                      <ShieldCheck size={14} style={{ color: 'var(--accent)' }} />
+                      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)' }}>
+                        KYC Document — Signature & Photo Extraction
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                      <KycImageCard
+                        label="Signature"
+                        icon={PenTool}
+                        base64Data={extracted.validated_data.signature_image}
+                        detected={extracted.validated_data.signature_detected}
+                        accentColor="#7c3aed"
+                        verificationType="signature"
+                        documentId={activeId}
+                        verificationResult={sigResult}
+                        onVerify={handleVerify}
+                        isVerifying={sigVerifying}
+                      />
+                      <KycImageCard
+                        label="Photo"
+                        icon={UserCircle2}
+                        base64Data={extracted.validated_data.photo_image}
+                        detected={extracted.validated_data.photo_detected}
+                        accentColor="#3b82f6"
+                        verificationType="photo"
+                        documentId={activeId}
+                        verificationResult={photoResult}
+                        onVerify={handleVerify}
+                        isVerifying={photoVerifying}
+                      />
+                    </div>
 
-                  {/* Signature Verification Verdict Panel */}
-                  {sigResult && (
-                    <SignatureVerdictPanel
-                      result={sigResult}
-                      verificationType="signature"
-                      onReset={() => handleResetVerification('signature')}
-                    />
-                  )}
+                    {/* Signature Verification Verdict Panel */}
+                    {sigResult && (
+                      <SignatureVerdictPanel
+                        result={sigResult}
+                        verificationType="signature"
+                        onReset={() => handleResetVerification('signature')}
+                      />
+                    )}
 
-                  {/* Photo Verification Verdict Panel (Face multi-agent pipeline) */}
-                  {photoResult && (
-                    <FaceVerdictPanel
-                      result={photoResult}
-                      onReset={() => handleResetVerification('photo')}
-                    />
-                  )}
-                </FieldGroup>
-              )}
+                    {/* Photo Verification Verdict Panel (Face multi-agent pipeline) */}
+                    {photoResult && (
+                      <FaceVerdictPanel
+                        result={photoResult}
+                        onReset={() => handleResetVerification('photo')}
+                      />
+                    )}
+                  </FieldGroup>
+                )}
 
               {extracted.validated_data ? (
-                renderFields(extracted.validated_data, isEditing, editedData, handleFieldChange, extracted.raw_extracted?.field_confidences || {}, confidenceMode, confHighThreshold, confMedThreshold, fieldHighlightThreshold, fieldThresholds)
+                renderFields(extracted.validated_data, isEditing, editedData, handleFieldChange, extracted.raw_extracted?.field_confidences || {}, confidenceMode, confHighThreshold, confMedThreshold, fieldHighlightThreshold, fieldThresholds, extracted.raw_extracted?.raw_fields || {})
               ) : (
                 <div className="empty-state" style={{ padding: 24 }}>
                   <div className="empty-sub">No structured data extracted yet.</div>
