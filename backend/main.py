@@ -16,6 +16,7 @@ from config import settings
 from db.database import init_db, AsyncSessionLocal
 from db.models import Document, ExtractedData
 from utils.file_handler import save_file, delete_file
+from utils.norm_config import load_normalization_config, save_normalization_config
 from schemas.documents import (
     DocumentUploadResponse, 
     WorkflowStatusResponse, 
@@ -759,6 +760,15 @@ def save_templates_to_file(templates_data):
     os.makedirs(settings.STORAGE_DIR, exist_ok=True)
     with open(TEMPLATES_FILE, "w") as f:
         json.dump(templates_data, f, indent=2)
+
+@app.get("/settings/normalization")
+async def get_normalization_settings():
+    return load_normalization_config()
+
+@app.put("/settings/normalization")
+async def update_normalization_settings(config: dict):
+    save_normalization_config(config)
+    return {"success": True}
 
 @app.get("/templates")
 async def get_templates():

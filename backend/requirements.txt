@@ -1,6 +1,6 @@
 fastapi==0.119.1
 uvicorn[standard]==0.38.0
-mistralai==2.4.4
+mistralai>=2.5.0
 mistralai-workflows==3.4.0
 SQLAlchemy==2.0.41
 aiosqlite==0.22.1

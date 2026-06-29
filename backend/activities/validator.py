@@ -60,10 +60,16 @@ async def validator_activity(
                 f"Your response must be a JSON object with keys:\n"
                 f"- 'is_valid': boolean (true if all required fields are present and data types match)\n"
                 f"- 'validation_errors': list of strings (e.g. \"Field 'tax_id' is required but missing\")\n"
-                f"- 'validated_data': the updated validated JSON object."
+                f"- 'validated_data': the updated validated JSON object.\n\n"
+                f"IMPORTANT: Do not modify the casing, date formatting, number styles, or custom format rules present in 'Extracted Data'. "
+                f"Keep the values in 'validated_data' formatted exactly as they are in 'Extracted Data' (e.g. do not change UPPERCASE to Title Case or vice-versa, and do not change date formats)."
             )
         else:
-            prompt = f"Validate this extracted data: {json_data}"
+            prompt = (
+                f"Validate this extracted data: {json_data}\n\n"
+                f"IMPORTANT: Do not modify the casing, date formatting, number styles, or custom format rules present in the data. "
+                f"Keep the values in 'validated_data' formatted exactly as they are."
+            )
         
         response = client.agents.complete(
             agent_id=settings.VALIDATOR_AGENT_ID,
@@ -75,6 +81,7 @@ async def validator_activity(
         parsed = json.loads(content)
         
         validated_data = parsed.get("validated_data", prompt_data)
+        logger.info(f"[Document {document_id}] Validated fields from validator: {validated_data}")
         
         # Re-inject the massive base64 strings so they are saved to the database
         if sig_img is not None:

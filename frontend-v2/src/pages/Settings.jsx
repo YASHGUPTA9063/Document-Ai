@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useApp } from '../store/AppStore';
+import { getNormConfig, saveNormConfig } from '../api/client';
 import {
   Settings as SettingsIcon, SlidersHorizontal, BarChart3,
   CheckCircle2, Circle, ChevronRight, Zap, Eye, ShieldCheck,
@@ -12,6 +13,7 @@ import {
 const NAV = [
   { id: 'confidence',  label: 'Confidence Scores',  icon: BarChart3,        desc: 'Granularity & display mode' },
   { id: 'thresholds',  label: 'Thresholds',         icon: SlidersHorizontal, desc: 'Highlight & approval limits' },
+  { id: 'normalization', label: 'Normalization Format', icon: Palette,      desc: 'Date, number & name rules' },
 ];
 
 /* ─────────────────────────────────────────────────────────────
@@ -398,6 +400,338 @@ function ThresholdsSection({
 }
 
 /* ─────────────────────────────────────────────────────────────
+   NORMALIZATION FORMAT SECTION
+───────────────────────────────────────────────────────────── */
+function NormalizationSection({ toast }) {
+  const [config, setConfig] = useState({
+    date_format: 'YYYY-MM-DD',
+    number_format: 'float',
+    name_casing: 'Title Case',
+    name_sequence: 'Firstname Lastname',
+    custom_rules: '',
+  });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    async function load() {
+      try {
+        const data = await getNormConfig();
+        if (active) {
+          setConfig(data);
+          setLoading(false);
+        }
+      } catch (err) {
+        if (active) {
+          toast(err.message || 'Failed to load normalization settings', 'error');
+          setLoading(false);
+        }
+      }
+    }
+    load();
+    return () => { active = false; };
+  }, [toast]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await saveNormConfig(config);
+      toast('Normalization settings saved successfully ✓', 'success');
+    } catch (err) {
+      toast(err.message || 'Failed to save settings', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleReset = () => {
+    setConfig({
+      date_format: 'YYYY-MM-DD',
+      number_format: 'float',
+      name_casing: 'Title Case',
+      name_sequence: 'Firstname Lastname',
+      custom_rules: '',
+    });
+    toast('Form reset to default presets (remember to save) ✓', 'info');
+  };
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 300, color: 'var(--muted)' }}>
+        <div style={{ fontSize: 13, fontWeight: 500 }}>Loading settings from backend...</div>
+      </div>
+    );
+  }
+
+  // Build the live preview content dynamically based on current UI state
+  const datePreview = config.date_format === 'keep'
+    ? "Keep the date in its original raw string format as extracted."
+    : `Normalize to ${config.date_format} format (e.g. '25 June 2026' -> '${config.date_format === 'YYYY-MM-DD' ? '2026-06-25' : config.date_format === 'MM/DD/YYYY' ? '06/25/2026' : '25/06/2026'}'). If invalid or missing, keep empty.`;
+
+  const numPreview = config.number_format === 'float'
+    ? "Convert to float/integer numbers (e.g. '$1,250.50' -> 1250.5). Strip any currency symbols."
+    : config.number_format === 'integer'
+    ? "Convert to integer numbers (e.g. '$1,250.50' -> 1250). Strip decimals and currency symbols."
+    : "Keep numbers as strings (e.g. '$1,250.50' -> '$1,250.50').";
+
+  const casingPreview = config.name_casing === 'Title Case'
+    ? "Normalize spelling and standardize to Title Case."
+    : config.name_casing === 'UPPERCASE'
+    ? "Normalize spelling and convert to UPPERCASE."
+    : "Keep name/address casing exactly as it is written in the document.";
+
+  const seqPreview = config.name_sequence === 'Firstname Lastname'
+    ? "Format person names as 'Firstname Lastname' (e.g. 'John Doe')."
+    : config.name_sequence === 'Firstname Middlename Lastname'
+    ? "Format person names as 'Firstname Middlename Lastname' (e.g. 'John Albert Doe'). If no middle name exists, omit it."
+    : config.name_sequence === 'Lastname Firstname'
+    ? "Format person names as 'Lastname Firstname' (e.g. 'Doe John')."
+    : config.name_sequence === 'Lastname, Firstname Middlename'
+    ? "Format person names as 'Lastname, Firstname Middlename' (e.g. 'Doe, John Albert')."
+    : config.name_sequence === 'Title Firstname Lastname'
+    ? "Format person names as 'Title Firstname Lastname' (e.g. 'Mr. John Doe'). If no title is in the document, omit it."
+    : config.name_sequence === 'Title Firstname Middlename Lastname'
+    ? "Format person names as 'Title Firstname Middlename Lastname' (e.g. 'Mr. John Albert Doe'). If no title/middle name is in the document, omit them."
+    : "Keep the original order of names exactly as written in the document.";
+
+  const livePromptSnippet = 
+    `Your final response MUST be a JSON object containing EXACTLY these two keys:\n` +
+    `1. 'raw_extracted': A JSON object containing the raw field values exactly as returned by the OCR tool (without formatting/cleaning).\n` +
+    `2. 'normalized_extracted': A JSON object containing the normalized/cleaned field values. Apply standard formatting rules:\n` +
+    `   - Dates: ${datePreview}\n` +
+    `   - Amounts/Numbers: ${numPreview}\n` +
+    `   - Names & Addresses: ${casingPreview}\n` +
+    `   - Name Structure: ${seqPreview}\n` +
+    (config.custom_rules ? config.custom_rules.split('\n').map(l => `   ${l}`).join('\n') : '');
+
+  return (
+    <div>
+      <SectionHeader icon={Palette} label="Normalization Format Settings" desc="Control how extracted values are cleaned, formatted, and standardized" />
+
+      <InfoCallout>
+        These rules tell the general extractor agent how to format normalized fields. Changes are applied at runtime.
+      </InfoCallout>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+        
+        {/* Date Format Option */}
+        <div>
+          <label style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', display: 'block', marginBottom: 8 }}>
+            Date Field Format
+          </label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+            {[
+              { id: 'YYYY-MM-DD', label: 'ISO Format (YYYY-MM-DD)', desc: 'e.g. 2026-06-25' },
+              { id: 'MM/DD/YYYY', label: 'US Format (MM/DD/YYYY)', desc: 'e.g. 06/25/2026' },
+              { id: 'DD/MM/YYYY', label: 'EU Format (DD/MM/YYYY)', desc: 'e.g. 25/06/2026' },
+              { id: 'keep', label: 'Keep Raw Text', desc: 'As written in document' },
+            ].map(opt => (
+              <button
+                key={opt.id}
+                onClick={() => setConfig(prev => ({ ...prev, date_format: opt.id }))}
+                style={{
+                  all: 'unset', cursor: 'pointer', boxSizing: 'border-box',
+                  padding: '12px 14px', borderRadius: 8,
+                  border: config.date_format === opt.id ? '1.5px solid var(--accent)' : '1px solid var(--border)',
+                  background: config.date_format === opt.id ? 'color-mix(in srgb, var(--accent) 8%, var(--card-alt))' : 'var(--card-alt)',
+                  transition: 'all 0.15s ease',
+                  textAlign: 'left'
+                }}
+              >
+                <div style={{ fontSize: 12, fontWeight: 600, color: config.date_format === opt.id ? 'var(--accent)' : 'var(--text)' }}>
+                  {opt.label}
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>{opt.desc}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Number/Amount Option */}
+        <div>
+          <label style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', display: 'block', marginBottom: 8 }}>
+            Number/Amount Formatting
+          </label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+            {[
+              { id: 'float', label: 'Decimal (Float)', desc: '1250.50' },
+              { id: 'integer', label: 'Integer', desc: '1250' },
+              { id: 'string', label: 'Raw String', desc: '"$1,250.50"' },
+            ].map(opt => (
+              <button
+                key={opt.id}
+                onClick={() => setConfig(prev => ({ ...prev, number_format: opt.id }))}
+                style={{
+                  all: 'unset', cursor: 'pointer', boxSizing: 'border-box',
+                  padding: '12px 14px', borderRadius: 8,
+                  border: config.number_format === opt.id ? '1.5px solid var(--accent)' : '1px solid var(--border)',
+                  background: config.number_format === opt.id ? 'color-mix(in srgb, var(--accent) 8%, var(--card-alt))' : 'var(--card-alt)',
+                  transition: 'all 0.15s ease',
+                  textAlign: 'left'
+                }}
+              >
+                <div style={{ fontSize: 12, fontWeight: 600, color: config.number_format === opt.id ? 'var(--accent)' : 'var(--text)' }}>
+                  {opt.label}
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>{opt.desc}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Name Casing Option */}
+        <div>
+          <label style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', display: 'block', marginBottom: 8 }}>
+            Name & Address Casing
+          </label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+            {[
+              { id: 'Title Case', label: 'Title Case', desc: 'John Doe' },
+              { id: 'UPPERCASE', label: 'UPPERCASE', desc: 'JOHN DOE' },
+              { id: 'keep', label: 'Keep Raw', desc: 'As-is' },
+            ].map(opt => (
+              <button
+                key={opt.id}
+                onClick={() => setConfig(prev => ({ ...prev, name_casing: opt.id }))}
+                style={{
+                  all: 'unset', cursor: 'pointer', boxSizing: 'border-box',
+                  padding: '12px 14px', borderRadius: 8,
+                  border: config.name_casing === opt.id ? '1.5px solid var(--accent)' : '1px solid var(--border)',
+                  background: config.name_casing === opt.id ? 'color-mix(in srgb, var(--accent) 8%, var(--card-alt))' : 'var(--card-alt)',
+                  transition: 'all 0.15s ease',
+                  textAlign: 'left'
+                }}
+              >
+                <div style={{ fontSize: 12, fontWeight: 600, color: config.name_casing === opt.id ? 'var(--accent)' : 'var(--text)' }}>
+                  {opt.label}
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>{opt.desc}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Name Sequence/Structure Option */}
+        <div>
+          <label style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', display: 'block', marginBottom: 8 }}>
+            Name Formatting Structure
+          </label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+            {[
+              { id: 'Firstname Lastname', label: 'First Last', desc: 'e.g. John Doe' },
+              { id: 'Firstname Middlename Lastname', label: 'First Middle Last', desc: 'e.g. John Albert Doe' },
+              { id: 'Lastname Firstname', label: 'Last First', desc: 'e.g. Doe John' },
+              { id: 'Lastname, Firstname Middlename', label: 'Last, First Middle', desc: 'e.g. Doe, John Albert' },
+              { id: 'Title Firstname Lastname', label: 'Title First Last', desc: 'e.g. Mr. John Doe' },
+              { id: 'Title Firstname Middlename Lastname', label: 'Title First Middle Last', desc: 'e.g. Mr. John Albert Doe' },
+              { id: 'keep', label: 'Keep Raw Order', desc: 'Original sequence' },
+            ].map(opt => (
+              <button
+                key={opt.id}
+                onClick={() => setConfig(prev => ({ ...prev, name_sequence: opt.id }))}
+                style={{
+                  all: 'unset', cursor: 'pointer', boxSizing: 'border-box',
+                  padding: '12px 14px', borderRadius: 8,
+                  border: config.name_sequence === opt.id ? '1.5px solid var(--accent)' : '1px solid var(--border)',
+                  background: config.name_sequence === opt.id ? 'color-mix(in srgb, var(--accent) 8%, var(--card-alt))' : 'var(--card-alt)',
+                  transition: 'all 0.15s ease',
+                  textAlign: 'left'
+                }}
+              >
+                <div style={{ fontSize: 12, fontWeight: 600, color: config.name_sequence === opt.id ? 'var(--accent)' : 'var(--text)' }}>
+                  {opt.label}
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>{opt.desc}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Custom Normalization Rules Textarea */}
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <label style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
+              Custom Formatting Rules
+            </label>
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>Appended to extractor instructions</span>
+          </div>
+          <textarea
+            value={config.custom_rules}
+            onChange={(e) => setConfig(prev => ({ ...prev, custom_rules: e.target.value }))}
+            placeholder="- Phone numbers: standard format as +XX XXXXX XXXXX&#10;- Convert all country names to ISO 3166-1 alpha-3 code (e.g. 'United States' -> 'USA')"
+            style={{
+              width: '100%', height: 100, boxSizing: 'border-box',
+              background: 'var(--card-alt)', border: '1px solid var(--border)',
+              borderRadius: 8, padding: '12px 14px', color: 'var(--text)',
+              fontSize: 12.5, fontFamily: 'monospace', lineHeight: 1.5,
+              resize: 'vertical', outline: 'none',
+              transition: 'border-color 0.15s ease'
+            }}
+            onFocus={(e) => e.target.style.borderColor = 'var(--accent)'}
+            onBlur={(e) => e.target.style.borderColor = 'var(--border)'}
+          />
+        </div>
+
+        {/* Live Prompt Preview */}
+        <div>
+          <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', display: 'block', marginBottom: 8, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+            Live Prompt Preview
+          </label>
+          <div style={{
+            background: 'var(--surface)', border: '1px solid var(--border)',
+            borderRadius: 8, padding: 16, overflowX: 'auto',
+            fontFamily: 'monospace', fontSize: 11, color: 'var(--text-dim)',
+            lineHeight: 1.55, whiteSpace: 'pre-wrap'
+          }}>
+            {livePromptSnippet}
+          </div>
+        </div>
+
+        {/* Action Buttons */}
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 12, borderTop: '1px solid var(--border)', paddingTop: 20 }}>
+          <button
+            onClick={handleReset}
+            style={{
+              all: 'unset', cursor: 'pointer',
+              padding: '8px 16px', borderRadius: 8,
+              border: '1px solid var(--border)',
+              fontSize: 12.5, fontWeight: 600, color: 'var(--text-dim)',
+              transition: 'all 0.15s ease'
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--card-alt)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >
+            Reset Presets
+          </button>
+          
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            style={{
+              all: 'unset', cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '8px 18px', borderRadius: 8,
+              background: 'var(--accent)',
+              fontSize: 12.5, fontWeight: 600, color: 'white',
+              opacity: saving ? 0.7 : 1,
+              transition: 'all 0.15s ease',
+              boxShadow: '0 2px 6px rgba(79,110,247,0.2)'
+            }}
+            onMouseEnter={e => { if(!saving) e.currentTarget.style.background = 'color-mix(in srgb, var(--accent) 90%, black)'; }}
+            onMouseLeave={e => { if(!saving) e.currentTarget.style.background = 'var(--accent)'; }}
+          >
+            <Save size={14} />
+            {saving ? 'Saving...' : 'Save Configuration'}
+          </button>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
    MAIN SETTINGS COMPONENT
 ───────────────────────────────────────────────────────────── */
 export function Settings() {
@@ -549,6 +883,11 @@ export function Settings() {
               setConfHighThreshold={setConfHighThreshold}
               confMedThreshold={confMedThreshold}
               setConfMedThreshold={setConfMedThreshold}
+              toast={toast}
+            />
+          )}
+          {activeNav === 'normalization' && (
+            <NormalizationSection
               toast={toast}
             />
           )}

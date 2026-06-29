@@ -42,6 +42,15 @@ class DocumentSignatureAnnotation(BaseModel):
     additional_notes: Optional[str] = Field(None, description="Any other relevant notes.")
 
 
+class BboxAnnotation(BaseModel):
+    """Used for annotating bounding boxes inside the document."""
+    block_type: str = Field(
+        ...,
+        description="The type of block: 'photo' (face/passport photograph of the cardholder), 'signature' (handwritten signature), or 'other'."
+    )
+
+
+
 class KycImageBboxes(BaseModel):
     """
     Pixel-precise bounding boxes for BOTH signature and photo,
@@ -331,7 +340,113 @@ def extract_signature_and_photo(
         return result
 
     # ══════════════════════════════════════════════════════════════════════
-    # FAST PATH: Template-level manual coordinates (skip Pixtral entirely)
+    # PATH 1: Mistral OCR 4 Block & Image Annotation Extraction (First Path)
+    # ══════════════════════════════════════════════════════════════════════
+    logger.info(f"[Document {document_id}] KYC Path 1: Running Mistral OCR 4 Block Extraction...")
+    try:
+        ocr_response = client.ocr.process(
+            model="mistral-ocr-latest",
+            document={
+                "type": "document_url",
+                "document_url": resolved_url
+            },
+            include_blocks=True,
+            include_image_base64=True,
+            bbox_annotation_format=_schema(BboxAnnotation)
+        )
+        
+        for page in getattr(ocr_response, "pages", []) or []:
+            # Search blocks for signature
+            blocks = getattr(page, "blocks", []) or []
+            for b in blocks:
+                if getattr(b, "type", None) == "signature":
+                    sx1 = getattr(b, "top_left_x", None)
+                    sy1 = getattr(b, "top_left_y", None)
+                    sx2 = getattr(b, "bottom_right_x", None)
+                    sy2 = getattr(b, "bottom_right_y", None)
+                    if None not in (sx1, sy1, sx2, sy2):
+                        cropped_sig = _crop_region(img, sx1, sy1, sx2, sy2)
+                        if cropped_sig:
+                            result["has_signature"] = True
+                            result["signature_bbox"] = {"x1": sx1, "y1": sy1, "x2": sx2, "y2": sy2}
+                            sig_path = os.path.join(output_dir, "signature.png")
+                            cropped_sig.save(sig_path)
+                            result["signature_crop_path"] = os.path.abspath(sig_path)
+                            result["signature_base64"] = _image_to_base64(cropped_sig)
+                            result["confidence"] = "high"
+                            logger.info(f"[Document {document_id}] Path 1: Signature successfully extracted from signature block: ({sx1}, {sy1})->({sx2}, {sy2})")
+                            break
+            
+            # Search images for photo
+            images = getattr(page, "images", []) or []
+            for img_obj in images:
+                annotation = getattr(img_obj, "image_annotation", None)
+                is_photo = False
+                if annotation:
+                    if isinstance(annotation, str):
+                        try:
+                            ann_data = json.loads(annotation)
+                            if ann_data.get("block_type") == "photo":
+                                is_photo = True
+                        except Exception:
+                            pass
+                    elif isinstance(annotation, dict):
+                        if annotation.get("block_type") == "photo":
+                            is_photo = True
+                
+                if is_photo:
+                    px1 = getattr(img_obj, "top_left_x", None)
+                    py1 = getattr(img_obj, "top_left_y", None)
+                    px2 = getattr(img_obj, "bottom_right_x", None)
+                    py2 = getattr(img_obj, "bottom_right_y", None)
+                    if None not in (px1, py1, px2, py2):
+                        cropped_photo = _crop_region(img, px1, py1, px2, py2)
+                        if cropped_photo:
+                            result["has_photo"] = True
+                            result["photo_bbox"] = {"x1": px1, "y1": py1, "x2": px2, "y2": py2}
+                            photo_path = os.path.join(output_dir, "photo.png")
+                            cropped_photo.save(photo_path)
+                            result["photo_crop_path"] = os.path.abspath(photo_path)
+                            result["photo_base64"] = _image_to_base64(cropped_photo)
+                            logger.info(f"[Document {document_id}] Path 1: Photo successfully extracted from annotated image: ({px1}, {py1})->({px2}, {py2})")
+                            break
+
+        if result["has_signature"] and result["has_photo"]:
+            logger.info(f"[Document {document_id}] Path 1 succeeded. Returning result.")
+            return result
+        else:
+            logger.info(f"[Document {document_id}] Path 1 did not extract both signature and photo. Resetting result and falling back...")
+            # Reset result dict to clear any partial findings
+            result.update({
+                "has_signature": False,
+                "signature_crop_path": None,
+                "signature_base64": None,
+                "signature_bbox": None,
+                "has_photo": False,
+                "photo_crop_path": None,
+                "photo_base64": None,
+                "photo_bbox": None,
+                "confidence": "low",
+                "signer_name": None,
+            })
+            
+    except Exception as e:
+        logger.error(f"[Document {document_id}] Path 1 failed: {e}. Resetting result and falling back...")
+        result.update({
+            "has_signature": False,
+            "signature_crop_path": None,
+            "signature_base64": None,
+            "signature_bbox": None,
+            "has_photo": False,
+            "photo_crop_path": None,
+            "photo_base64": None,
+            "photo_bbox": None,
+            "confidence": "low",
+            "signer_name": None,
+        })
+
+    # ══════════════════════════════════════════════════════════════════════
+    # PATH 2: Template-level manual coordinates (skip Pixtral entirely)
     # ══════════════════════════════════════════════════════════════════════
     if kyc_boxes:
         logger.info(f"[Document {document_id}] Using MANUAL template coordinates for extraction (no API calls)")

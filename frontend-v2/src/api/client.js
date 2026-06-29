@@ -232,4 +232,24 @@ export async function verifySignature(documentId, referenceFile, verificationTyp
   return data;
 }
 
+/**
+ * Get normalization settings.
+ * @returns {Promise<object>}
+ */
+export async function getNormConfig() {
+  const { data } = await api.get('/settings/normalization');
+  return data;
+}
+
+/**
+ * Save normalization settings.
+ * @param {object} config
+ * @returns {Promise<object>}
+ */
+export async function saveNormConfig(config) {
+  const { data } = await api.put('/settings/normalization', config);
+  return data;
+}
+
 export default api;
+

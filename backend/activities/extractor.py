@@ -6,6 +6,7 @@ import mistralai.workflows as workflows
 from mistralai.client import Mistral
 from config import settings
 from utils.ocr import extract_with_ocr
+from utils.norm_config import build_normalization_rules_prompt
 import db.operations as db
 
 logger = logging.getLogger(__name__)
@@ -223,13 +224,12 @@ async def _run_extraction_with_agent(
             fields_desc.append(f"- '{f['key']}' ({f['type']}, {req_str}): {f.get('description', '')}")
         fields_instruction = "\n".join(fields_desc)
 
+    normalization_rules = build_normalization_rules_prompt()
     prompt_format = (
         "Your final response MUST be a JSON object containing EXACTLY these two keys:\n"
         "1. 'raw_extracted': A JSON object containing the raw field values exactly as returned by the OCR tool (without formatting/cleaning).\n"
         "2. 'normalized_extracted': A JSON object containing the normalized/cleaned field values. Apply standard formatting rules:\n"
-        "   - Dates: Normalize to YYYY-MM-DD format (e.g. '25 June 2026' -> '2026-06-25'). If invalid or missing, keep empty.\n"
-        "   - Amounts/Numbers: Convert to float/integer numbers (e.g. '$1,250.50' -> 1250.5).\n"
-        "   - Names & Addresses: Normalize spelling and standardize to Title Case.\n\n"
+        f"{normalization_rules}\n\n"
         f"Target fields to extract under both 'raw_extracted' and 'normalized_extracted':\n{fields_instruction}"
     )
 
@@ -407,6 +407,7 @@ async def _run_extraction_with_agent(
             if kyc_image_result.get("signer_name"):
                 f_dict["signer_name"] = kyc_image_result["signer_name"]
 
+    logger.info(f"[Document {document_id}] Normalized fields from extractor: {normalized_extracted}")
     return {
         "fields": normalized_extracted,
         "raw_extracted": raw_extracted,
