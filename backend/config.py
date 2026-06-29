@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     # Pre-Validation Agent
     PRE_VALIDATOR_AGENT_ID: str = Field(default="", description="Pre-Validation Vision Agent ID from Mistral Studio")
 
+    # Preprocessing Step (Step 2.5)
+    ENABLE_PREPROCESSING: bool = Field(default=False, description="Enable image preprocessing step (skew correction, brightness/CLAHE, noise removal, resolution normalization)")
+    ENABLE_PREPROCESSING_PDF: bool = Field(default=False, description="Also apply preprocessing to PDF files (rasterizes each page). Only effective when ENABLE_PREPROCESSING=true")
+
     # Signature Verification Agent IDs
     SIGNATURE_VISION_AGENT_ID: str = Field(..., description="Signature Vision Agent ID from Mistral Studio")
     SIGNATURE_JUDGE_AGENT_ID: str = Field(..., description="Signature Judge Agent ID from Mistral Studio")

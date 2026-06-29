@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { RefreshCw, Cpu, CheckCircle, ListTodo, FileText } from 'lucide-react';
+import { RefreshCw, Cpu, CheckCircle, ListTodo, FileText, AlertCircle } from 'lucide-react';
 import { useApp } from '../store/AppStore';
 import { useDocumentList } from '../hooks/useDocumentList';
 import { useDocumentPoller } from '../hooks/useDocumentPoller';
@@ -146,7 +146,21 @@ export function Processing() {
                       ? <span className="badge badge-cyan">{doc.doc_type}</span>
                       : <span style={{ color: 'var(--muted)', fontSize: 11 }}>—</span>}
                   </td>
-                  <td><StatusBadge status={doc.status} /></td>
+                  <td>
+                    <StatusBadge status={doc.status} />
+                    {doc.status === 'rejected' && doc.message && (
+                      <div style={{
+                        display: 'flex', alignItems: 'flex-start', gap: 5,
+                        marginTop: 4, padding: '4px 7px',
+                        background: 'rgba(239,68,68,0.08)',
+                        border: '1px solid rgba(239,68,68,0.2)',
+                        borderRadius: 5,
+                      }}>
+                        <AlertCircle size={11} style={{ color: 'var(--danger)', marginTop: 1, flexShrink: 0 }} />
+                        <span style={{ fontSize: 10, color: 'var(--danger)', lineHeight: 1.4 }}>{doc.message}</span>
+                      </div>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

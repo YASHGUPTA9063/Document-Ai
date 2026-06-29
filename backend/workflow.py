@@ -3,6 +3,7 @@ import mistralai.workflows as workflows
 from datetime import timedelta
 with workflows.workflow.unsafe.imports_passed_through():
     from activities.intake import intake_activity
+    from activities.preprocessor import preprocessor_activity
     from activities.classifier import classifier_activity
     from activities.extractor import extractor_activity
     from activities.validator import validator_activity
@@ -77,9 +78,25 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
                 f"[Document {document_id}] PRE_VALIDATOR_AGENT_ID not set — skipping pre-validation."
             )
 
+        # Step 2.5 — Preprocessing
+        # Applies skew correction, brightness/CLAHE, noise removal, resolution normalization.
+        # Gated by ENABLE_PREPROCESSING flag in .env. DOCX and (by default) PDFs are skipped.
+        clean_file_path = file_path  # default: pass original to downstream steps
+        if settings.ENABLE_PREPROCESSING:
+            await update_status_activity(document_id, "preprocessing")
+            preprocess_result = await preprocessor_activity(document_id, file_path)
+            clean_file_path = preprocess_result.get("preprocessed_path") or file_path
+            logger.info(
+                f"[Document {document_id}] Preprocessing complete. "
+                f"Steps applied: {preprocess_result.get('applied_steps', [])}. "
+                f"Skipped: {preprocess_result.get('skipped', False)}."
+            )
+        else:
+            logger.info(f"[Document {document_id}] ENABLE_PREPROCESSING=false — skipping preprocessing step.")
+
         # Step 3 — Classify
         await update_status_activity(document_id, "classifying")
-        classifier_result = await classifier_activity(document_id, file_path)
+        classifier_result = await classifier_activity(document_id, clean_file_path)
         doc_type = classifier_result["doc_type"]
         await update_doc_type_activity(document_id, doc_type)
 
@@ -92,7 +109,7 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
         if is_kyc:
             await update_status_activity(document_id, "fraud_checking")
             try:
-                fraud_check_result = await fraud_check_activity(document_id, file_path)
+                fraud_check_result = await fraud_check_activity(document_id, clean_file_path)
                 if not fraud_check_result.get("passed", False):
                     reason = fraud_check_result.get("rejection_reason") or "Document failed fraud check verification."
                     await update_status_and_message_activity(document_id, "rejected", reason)
@@ -107,7 +124,7 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
         # Step 4 — Extract
         await update_status_activity(document_id, "extracting")
 
-        extractor_result = await extractor_activity(document_id, file_path, doc_type)
+        extractor_result = await extractor_activity(document_id, clean_file_path, doc_type)
         raw_extracted = extractor_result.get("raw_extracted")
 
         # Step 5 — Validate

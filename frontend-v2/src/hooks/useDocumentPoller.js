@@ -33,7 +33,7 @@ export function useDocumentPoller(documentId) {
         if (prevStatus.current && prevStatus.current !== data.status) {
           if (data.status === 'completed') toast(`Document processed successfully!`, 'success');
           if (data.status === 'awaiting_review') toast(`Document needs human review.`, 'warn');
-          if (data.status === 'rejected') toast(`Document was rejected.`, 'error');
+          if (data.status === 'rejected') toast(`Document rejected: ${data.message || 'See document for reason.'}`, 'error');
           if (data.status === 'error') toast(`Processing error: ${data.message}`, 'error');
         }
         prevStatus.current = data.status;
