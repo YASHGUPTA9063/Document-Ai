@@ -37,6 +37,11 @@ async def update_doc_type_activity(document_id: str, doc_type: str) -> str:
     await db.update_doc_type(document_id, doc_type)
     return doc_type
 
+@workflows.activity()
+async def get_template_metadata_activity(doc_type: str) -> dict:
+    from activities.extractor import get_template_metadata
+    return get_template_metadata(doc_type)
+
 @workflows.workflow.define(name="document_processing_workflow")
 class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
 
@@ -103,8 +108,7 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
 
         # Step 3.5 — Fraud Check (if KYC Document)
         fraud_check_result = None
-        from activities.extractor import get_template_metadata
-        template_meta = get_template_metadata(doc_type)
+        template_meta = await get_template_metadata_activity(doc_type)
         is_kyc = template_meta.get("is_kyc", False) or doc_type.lower() in ("kyc", "kyc document", "identity document")
         
         if is_kyc:
@@ -151,7 +155,6 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
                 logger.error(f"[Document {document_id}] Automated verification failed: {e}")
 
         # Step 6 — Review
-        await update_status_activity(document_id, "awaiting_review")
         reviewer_result = await reviewer_activity(
             document_id=document_id, 
             validated_data=validator_result["validated_data"], 
@@ -162,6 +165,7 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
             final_reviewer_result = {"approved": True, "corrections": None}
         else:
             logger.info(f"[Document {document_id}] Pausing for human review. Score < 80%")
+            await update_status_activity(document_id, "awaiting_review")
             # Pause workflow using Mistral Workflow SDK Interactive Workflow primitives
             human_decision = await self.wait_for_input(ReviewerDecisionRequest, timeout=timedelta(hours=24))
             final_reviewer_result = {

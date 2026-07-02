@@ -11,10 +11,13 @@ export function useDocumentList() {
   const [error, setError] = useState(null);
 
   const refresh = useCallback(async (page = 1, limit = 100) => {
+    // Guard against React synthetic event objects passed via onClick={refresh}
+    const pageNum = typeof page === 'number' ? page : 1;
+    const limitNum = typeof limit === 'number' ? limit : 100;
     setLoading(true);
     setError(null);
     try {
-      const docs = await listDocuments(page, limit);
+      const docs = await listDocuments(pageNum, limitNum);
       setDocuments(docs);
     } catch (err) {
       setError(err.message);

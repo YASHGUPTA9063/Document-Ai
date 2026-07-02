@@ -73,7 +73,9 @@ export async function getStatus(documentId) {
  * @param {number} limit
  */
 export async function listDocuments(page = 1, limit = 50) {
-  const { data } = await api.get('/documents', { params: { page, limit } });
+  const pageNum = typeof page === 'number' ? page : 1;
+  const limitNum = typeof limit === 'number' ? limit : 50;
+  const { data } = await api.get('/documents', { params: { page: pageNum, limit: limitNum } });
   return data; // array
 }
 

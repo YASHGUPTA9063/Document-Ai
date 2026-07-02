@@ -152,9 +152,28 @@ async def output_activity(
             }
         ]
 
+        # Remove massive base64 images from the prompt to avoid overwhelming the LLM
+        prompt_validated_data = validated_data.copy() if validated_data else {}
+        prompt_validated_data.pop("signature_image", None)
+        prompt_validated_data.pop("photo_image", None)
+
+        prompt_raw_extracted = raw_extracted.copy() if raw_extracted else {}
+        prompt_raw_extracted.pop("signature_image", None)
+        prompt_raw_extracted.pop("photo_image", None)
+
         prompt = (
             f"You are the Output Agent. We need to save the final extraction results and mark document '{document_id}' as completed.\n"
-            f"Please call the `persist_final_extraction` tool with all provided validation and verification payloads.\n\n"
+            f"Please call the `persist_final_extraction` tool with the following payloads:\n\n"
+            f"- document_id: '{document_id}'\n"
+            f"- doc_type: '{doc_type}'\n"
+            f"- raw_extracted: {json.dumps(prompt_raw_extracted)}\n"
+            f"- validated_data: {json.dumps(prompt_validated_data)}\n"
+            f"- confidence_score: {confidence_score}\n"
+            f"- field_confidences: {json.dumps(field_confidences or {})}\n"
+            f"- fraud_check: {json.dumps(fraud_check or {})}\n"
+            f"- signature_verification: {json.dumps(signature_verification or {})}\n"
+            f"- photo_verification: {json.dumps(photo_verification or {})}\n"
+            f"- corrections: {json.dumps(corrections or {})}\n\n"
             f"Output a JSON object matching exactly this schema:\n"
             f"{{\n"
             f"  \"success\": bool,\n"
@@ -211,8 +230,16 @@ async def output_activity(
                     # Since the tool parameters might not include signature/photo verification if they were skipped,
                     # we use the arguments passed to the activity as fallback defaults.
                     t_doc_type = args.get("doc_type", doc_type)
-                    t_raw_extracted = args.get("raw_extracted", raw_extracted)
-                    t_validated_data = args.get("validated_data", validated_data)
+
+                    # Merge validated_data and raw_extracted to preserve any fields (like base64 images) that were popped
+                    t_validated_data = validated_data.copy() if validated_data else {}
+                    if "validated_data" in args and isinstance(args["validated_data"], dict):
+                        t_validated_data.update(args["validated_data"])
+
+                    t_raw_extracted = raw_extracted.copy() if raw_extracted else {}
+                    if "raw_extracted" in args and isinstance(args["raw_extracted"], dict):
+                        t_raw_extracted.update(args["raw_extracted"])
+
                     t_confidence_score = args.get("confidence_score", confidence_score)
                     t_field_confidences = args.get("field_confidences", field_confidences)
                     t_fraud_check = args.get("fraud_check", fraud_check)
