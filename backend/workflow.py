@@ -11,6 +11,7 @@ with workflows.workflow.unsafe.imports_passed_through():
     from activities.output import output_activity
     from activities.pre_validator import pre_validator_activity
     from activities.fraud_checker import fraud_check_activity
+    from activities.auto_verifier import auto_verify_activity
     import db.operations as db
     from schemas.documents import DuplicateDecisionRequest, ReviewerDecisionRequest
     from config import settings
@@ -137,6 +138,18 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
             field_confidences=extractor_result.get("field_confidences")
         )
 
+        # Step 5.5 — Automated Verification (KYC documents only)
+        auto_verify_result = None
+        if is_kyc:
+            await update_status_activity(document_id, "auto_verifying")
+            try:
+                auto_verify_result = await auto_verify_activity(
+                    document_id=document_id, 
+                    validated_data=validator_result["validated_data"]
+                )
+            except Exception as e:
+                logger.error(f"[Document {document_id}] Automated verification failed: {e}")
+
         # Step 6 — Review
         await update_status_activity(document_id, "awaiting_review")
         reviewer_result = await reviewer_activity(
@@ -157,8 +170,9 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
             }
 
         if not final_reviewer_result.get("approved"):
-            await update_status_activity(document_id, "rejected")
-            return {"status": "rejected", "reason": "reviewer_rejected"}
+            rejection_reason = human_decision.rejection_reason or "Rejected by human reviewer."
+            await update_status_and_message_activity(document_id, "rejected", rejection_reason)
+            return {"status": "rejected", "reason": rejection_reason}
 
         # Step 7 — Output
         output_result = await output_activity(
@@ -169,7 +183,9 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
             confidence_score=validator_result["confidence_score"],
             field_confidences=validator_result.get("field_confidences"),
             fraud_check=fraud_check_result,
-            raw_extracted=raw_extracted
+            raw_extracted=raw_extracted,
+            signature_verification=auto_verify_result.get("signature") if auto_verify_result else None,
+            photo_verification=auto_verify_result.get("photo") if auto_verify_result else None
         )
         
         logger.info(f"Completed workflow for document {document_id}")

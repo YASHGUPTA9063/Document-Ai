@@ -317,6 +317,7 @@ function ReviewCard({ doc, onAction }) {
   const [extracted, setExtracted] = useState(null);
   const [showEdit, setShowEdit] = useState(false);
   const [showRejectConfirm, setShowRejectConfirm] = useState(false);
+  const [rejectionReason, setRejectionReason] = useState('');
   const [corrections, setCorrections] = useState({});
   const [loading, setLoading] = useState(false);
   const { toast } = useApp();
@@ -330,10 +331,10 @@ function ReviewCard({ doc, onAction }) {
   const score = extracted?.confidence_score;
   const scoreColor = score == null ? 'var(--muted)' : score >= 0.8 ? 'var(--success)' : 'var(--warn)';
 
-  const handle = async (approved, corr = null) => {
+  const handle = async (approved, corr = null, reason = null) => {
     setLoading(true);
     try {
-      await resumeReview(doc.workflow_run_id, approved, corr);
+      await resumeReview(doc.workflow_run_id, approved, corr, reason);
       onAction(doc.id, approved ? 'approved' : 'rejected');
     } catch (err) {
       toast('Error: ' + err.message, 'error');
@@ -341,6 +342,7 @@ function ReviewCard({ doc, onAction }) {
       setLoading(false);
       setShowEdit(false);
       setShowRejectConfirm(false);
+      setRejectionReason('');
     }
   };
 
@@ -353,6 +355,7 @@ function ReviewCard({ doc, onAction }) {
       toast('Error: ' + err.message, 'error');
     } finally {
       setLoading(false);
+      setRejectionReason('');
     }
   };
 
@@ -361,6 +364,14 @@ function ReviewCard({ doc, onAction }) {
   const handleSaveAndApprove = () => {
     // Pass corrections only if any fields were changed
     handle(true, Object.keys(corrections).length > 0 ? corrections : null);
+  };
+
+  const handleConfirmReject = () => {
+    if (isDuplicateWait) {
+      handleDuplicate(false);
+    } else {
+      handle(false, null, rejectionReason.trim() || null);
+    }
   };
 
   return (
@@ -451,13 +462,13 @@ function ReviewCard({ doc, onAction }) {
         <Modal
           title="Reject Document?"
           subtitle={`This will stop processing for "${doc.filename}". This cannot be undone.`}
-          onClose={() => setShowRejectConfirm(false)}
+          onClose={() => { setShowRejectConfirm(false); setRejectionReason(''); }}
           footer={
             <>
-              <button className="btn btn-ghost" onClick={() => setShowRejectConfirm(false)}>Cancel</button>
+              <button className="btn btn-ghost" onClick={() => { setShowRejectConfirm(false); setRejectionReason(''); }}>Cancel</button>
               <button
                 className="btn btn-danger"
-                onClick={() => isDuplicateWait ? handleDuplicate(false) : handle(false)}
+                onClick={handleConfirmReject}
                 disabled={loading}
               >
                 <XCircle size={14} /> Confirm Reject
@@ -470,10 +481,41 @@ function ReviewCard({ doc, onAction }) {
             padding: '12px 14px',
             background: 'var(--danger-dim)', border: '1px solid var(--danger-border)',
             borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-md)',
+            marginBottom: 12,
           }}>
             <AlertTriangle size={16} style={{ color: 'var(--danger)', flexShrink: 0, marginTop: 1 }} />
             <span style={{ color: 'var(--danger)' }}>Rejecting stops the workflow and marks this document as failed.</span>
           </div>
+          {!isDuplicateWait && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                Rejection Reason <span style={{ color: 'var(--muted)', fontWeight: 400, textTransform: 'none' }}>(optional)</span>
+              </label>
+              <textarea
+                id="rejection-reason-input"
+                rows={3}
+                placeholder="e.g. Poor document quality, missing fields, suspected fraud…"
+                value={rejectionReason}
+                onChange={(e) => setRejectionReason(e.target.value)}
+                style={{
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  padding: '8px 10px',
+                  fontSize: 12,
+                  background: 'var(--card-alt)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  color: 'var(--text)',
+                  resize: 'vertical',
+                  lineHeight: 1.5,
+                  fontFamily: 'inherit',
+                  outline: 'none',
+                }}
+                onFocus={(e) => { e.target.style.borderColor = 'var(--danger)'; e.target.style.boxShadow = '0 0 0 3px var(--danger-dim)'; }}
+                onBlur={(e) => { e.target.style.borderColor = 'var(--border)'; e.target.style.boxShadow = 'none'; }}
+              />
+            </div>
+          )}
         </Modal>
       )}
 

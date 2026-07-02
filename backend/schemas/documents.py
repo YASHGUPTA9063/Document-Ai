@@ -23,6 +23,7 @@ class DuplicateDecisionRequest(BaseModel):
 class ReviewerDecisionRequest(BaseModel):
     approved: bool
     corrections: Optional[Dict[str, Any]] = None
+    rejection_reason: Optional[str] = None
 
 class UpdateExtractedDataRequest(BaseModel):
     validated_data: Dict[str, Any]

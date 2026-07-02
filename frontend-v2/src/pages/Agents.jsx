@@ -8,14 +8,18 @@ import { getAgents } from '../api/client';
 const AGENT_ICON_MAP = {
   intake: Upload,
   pre_validator: Shield,
+  preprocessing: Cpu,
   classifier: Bot,
+  extractor: FileSearch,
   invoice_extractor: FileSearch,
   contract_extractor: FileSearch,
   kyc_extractor: FileSearch,
   medical_extractor: FileSearch,
   bank_extractor: FileSearch,
   others_extractor: FileSearch,
+  fraud_checker: Shield,
   validator: CheckCircle,
+  auto_verifier: UserCheck,
   reviewer: UserCheck,
   output: FileText,
 };
@@ -161,11 +165,24 @@ function AgentCard({ agent, index }) {
         </div>
       )}
 
-      {/* Tools */}
-      <div className="agent-tools">
-        {(agent.tools || []).map((t) => (
-          <span key={t} className="agent-tool">{t}</span>
-        ))}
+      {/* Tools / Internal Functions */}
+      <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+        <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 4 }}>
+          <Cpu size={10} style={{ color: agent.border }} /> Running Functions
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {(agent.tools || []).map((t) => (
+            <div key={t} style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              background: 'var(--card-alt)', border: '1px solid var(--border)',
+              borderRadius: 6, padding: '4px 8px', fontSize: 11, fontFamily: 'monospace',
+              color: 'var(--text-dim)', wordBreak: 'break-all'
+            }}>
+              <span style={{ color: 'var(--accent)', fontWeight: 600 }}>λ</span>
+              <span>{t.includes('(') ? t : `${t}()`}</span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -184,27 +201,40 @@ const StepArrow = () => (
 function PipelineGraph({ agents }) {
   const intakeAgent = agents.find(a => a.key === 'intake');
   const preValidatorAgent = agents.find(a => a.key === 'pre_validator');
+  const preprocessingAgent = agents.find(a => a.key === 'preprocessing');
   const classifierAgent = agents.find(a => a.key === 'classifier');
+  const fraudCheckerAgent = agents.find(a => a.key === 'fraud_checker');
   const validatorAgent = agents.find(a => a.key === 'validator');
+  const autoVerifierAgent = agents.find(a => a.key === 'auto_verifier');
   const reviewerAgent = agents.find(a => a.key === 'reviewer');
   const outputAgent = agents.find(a => a.key === 'output');
   const extractors = agents.filter(a => a.key.includes('extractor'));
 
-  // Ordered pipeline: 7 steps sequentially mapping intake, pre-validation, type classification, conditional extraction, data validation, review, and final output.
+  // Ordered pipeline: 10 steps sequentially mapping the backend-v4 architecture.
   const steps = [
     { type: 'node', agent: intakeAgent, step: 1 },
     { type: 'node', agent: preValidatorAgent, step: 2 },
+    { type: 'node', agent: preprocessingAgent, step: 2.5, conditional: true, label: "Enabled in config" },
     { type: 'node', agent: classifierAgent, step: 3 },
+    { type: 'node', agent: fraudCheckerAgent, step: 3.5, conditional: true, label: "KYC Only" },
     { type: 'extractors',                     step: 4 },
     { type: 'node', agent: validatorAgent, step: 5 },
+    { type: 'node', agent: autoVerifierAgent, step: 5.5, conditional: true, label: "KYC Only" },
     { type: 'node', agent: reviewerAgent, step: 6 },
     { type: 'node', agent: outputAgent, step: 7 },
   ];
 
+  // Filter steps to only include those where the agent data exists in backend response (robust fallback)
+  const activeSteps = steps.filter(s => {
+    if (s.type === 'extractors') return extractors.length > 0;
+    if (s.type === 'node') return !!s.agent;
+    return false;
+  });
+
   return (
     <div style={{ padding: '20px 28px 28px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-      {steps.map((s, i) => {
-        const isLast = i === steps.length - 1;
+      {activeSteps.map((s, i) => {
+        const isLast = i === activeSteps.length - 1;
 
         const StepBadge = ({ n }) => (
           <span style={{
@@ -240,6 +270,13 @@ function PipelineGraph({ agents }) {
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                  {s.conditional && (
+                    <span style={{
+                      fontSize: 9, fontWeight: 600, color: 'var(--muted)',
+                      background: 'var(--surface)', border: '1px solid var(--border)',
+                      borderRadius: 4, padding: '2px 6px', whiteSpace: 'nowrap',
+                    }}>{s.label}</span>
+                  )}
                   {s.agent.key === 'reviewer' && (
                     <span style={{
                       fontSize: 10, fontWeight: 600, color: 'var(--warn)',

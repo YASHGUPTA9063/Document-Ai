@@ -1,11 +1,46 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Trash2, RefreshCw, ChevronLeft, ChevronRight, Folder, FileText, AlertCircle } from 'lucide-react';
+import { Trash2, RefreshCw, ChevronLeft, ChevronRight, Folder, FileText, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { deleteDocument, listDocuments } from '../api/client';
 import { useApp } from '../store/AppStore';
 import { StatusBadge } from '../components/ui/StatusBadge';
 
-const STATUS_FILTERS = ['all', 'pending', 'processing', 'awaiting_review', 'completed', 'rejected', 'error'];
+const STATUS_FILTERS = ['all', 'pending', 'processing', 'awaiting_review', 'completed', 'rejected', 'failed', 'error'];
+
+/** Renders a rejection/failure reason with expand/collapse if the text is long */
+function ExpandableReason({ reason }) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = reason.length > 80;
+  return (
+    <div style={{
+      marginTop: 5, padding: '5px 8px',
+      background: 'var(--danger-dim, rgba(239,68,68,0.08))',
+      border: '1px solid var(--danger-border, rgba(239,68,68,0.2))',
+      borderRadius: 6, maxWidth: 340,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 5 }}>
+        <AlertCircle size={12} style={{ color: 'var(--danger)', marginTop: 2, flexShrink: 0 }} />
+        <span style={{ fontSize: 11, color: 'var(--danger)', lineHeight: 1.4, flex: 1 }}>
+          {isLong && !expanded ? reason.slice(0, 80) + '…' : reason}
+        </span>
+      </div>
+      {isLong && (
+        <button
+          onClick={() => setExpanded((e) => !e)}
+          style={{
+            marginTop: 4, marginLeft: 17,
+            background: 'none', border: 'none', cursor: 'pointer',
+            color: 'var(--danger)', fontSize: 10, display: 'flex', alignItems: 'center', gap: 2,
+            opacity: 0.75, padding: 0,
+          }}
+        >
+          {expanded ? <><ChevronUp size={10} /> Show less</> : <><ChevronDown size={10} /> Show more</>}
+        </button>
+      )}
+    </div>
+  );
+}
+
 
 export function Documents() {
   const { documents, setDocuments, removeDocument, toast } = useApp();
@@ -120,20 +155,13 @@ export function Documents() {
                         ? <span className="badge badge-cyan">{doc.doc_type}</span>
                         : <span style={{ color: 'var(--muted)', fontSize: 11 }}>—</span>}
                     </td>
-                    <td>
-                      <StatusBadge status={doc.status} />
-                      {doc.status === 'rejected' && doc.message && (
-                        <div style={{
-                          display: 'flex', alignItems: 'flex-start', gap: 5,
-                          marginTop: 5, padding: '5px 8px',
-                          background: 'var(--danger-dim, rgba(239,68,68,0.08))',
-                          border: '1px solid var(--danger-border, rgba(239,68,68,0.2))',
-                          borderRadius: 6, maxWidth: 340,
-                        }}>
-                          <AlertCircle size={12} style={{ color: 'var(--danger)', marginTop: 1, flexShrink: 0 }} />
-                          <span style={{ fontSize: 11, color: 'var(--danger)', lineHeight: 1.4 }}>{doc.message}</span>
-                        </div>
-                      )}
+                    <td style={{ whiteSpace: 'normal', overflow: 'visible' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+                        <StatusBadge status={doc.status} />
+                        {['rejected', 'failed', 'error'].includes(doc.status) && doc.message && (
+                          <ExpandableReason reason={doc.message} />
+                        )}
+                      </div>
                     </td>
                     <td>
                       <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--muted)' }}>

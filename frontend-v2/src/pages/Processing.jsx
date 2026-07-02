@@ -1,11 +1,46 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { RefreshCw, Cpu, CheckCircle, ListTodo, FileText, AlertCircle } from 'lucide-react';
+import { RefreshCw, Cpu, CheckCircle, ListTodo, FileText, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { useApp } from '../store/AppStore';
 import { useDocumentList } from '../hooks/useDocumentList';
 import { useDocumentPoller } from '../hooks/useDocumentPoller';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { PipelineSteps } from '../components/ui/PipelineSteps';
+
+/** Renders a rejection/failure reason with expand/collapse if the text is long */
+function ExpandableReason({ reason }) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = reason.length > 80;
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column',
+      marginTop: 4, padding: '4px 7px',
+      background: 'rgba(239,68,68,0.08)',
+      border: '1px solid rgba(239,68,68,0.2)',
+      borderRadius: 5,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 5 }}>
+        <AlertCircle size={11} style={{ color: 'var(--danger)', marginTop: 1, flexShrink: 0 }} />
+        <span style={{ fontSize: 10, color: 'var(--danger)', lineHeight: 1.4, flex: 1 }}>
+          {isLong && !expanded ? reason.slice(0, 80) + '…' : reason}
+        </span>
+      </div>
+      {isLong && (
+        <button
+          onClick={() => setExpanded((e) => !e)}
+          style={{
+            marginTop: 3, marginLeft: 16,
+            background: 'none', border: 'none', cursor: 'pointer',
+            color: 'var(--danger)', fontSize: 9, display: 'flex', alignItems: 'center', gap: 2,
+            opacity: 0.75, padding: 0,
+          }}
+        >
+          {expanded ? <><ChevronUp size={9} /> Show less</> : <><ChevronDown size={9} /> Show more</>}
+        </button>
+      )}
+    </div>
+  );
+}
 
 // Renders one poller per active doc
 function PollersRenderer({ ids }) {
@@ -146,20 +181,13 @@ export function Processing() {
                       ? <span className="badge badge-cyan">{doc.doc_type}</span>
                       : <span style={{ color: 'var(--muted)', fontSize: 11 }}>—</span>}
                   </td>
-                  <td>
-                    <StatusBadge status={doc.status} />
-                    {doc.status === 'rejected' && doc.message && (
-                      <div style={{
-                        display: 'flex', alignItems: 'flex-start', gap: 5,
-                        marginTop: 4, padding: '4px 7px',
-                        background: 'rgba(239,68,68,0.08)',
-                        border: '1px solid rgba(239,68,68,0.2)',
-                        borderRadius: 5,
-                      }}>
-                        <AlertCircle size={11} style={{ color: 'var(--danger)', marginTop: 1, flexShrink: 0 }} />
-                        <span style={{ fontSize: 10, color: 'var(--danger)', lineHeight: 1.4 }}>{doc.message}</span>
-                      </div>
-                    )}
+                  <td style={{ whiteSpace: 'normal', overflow: 'visible' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+                      <StatusBadge status={doc.status} />
+                      {['rejected', 'failed', 'error'].includes(doc.status) && doc.message && (
+                        <ExpandableReason reason={doc.message} />
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

@@ -390,6 +390,8 @@ function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighT
     );
   }
 
+  const hasRawDiff = rawVal !== undefined && rawVal !== null && String(rawVal) !== String(value) && typeof rawVal !== 'object';
+
   return (
     <div className="field-row" style={{ display: 'flex', alignItems: 'center', minHeight: 32 }}>
       <div className="field-key" style={{ width: '40%', flexShrink: 0 }}>{label}</div>
@@ -403,11 +405,12 @@ function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighT
             style={{ width: '100%', padding: '4px 8px', fontSize: 13, background: 'var(--card-alt)' }}
           />
         ) : (
-          value == null ? <span style={{ color: 'var(--muted)' }}>—</span> :
+          (value == null && !hasRawDiff) ? <span style={{ color: 'var(--muted)' }}>—</span> :
             (() => {
-              const renderedText = typeof value === 'object' ?
-                <code style={{ fontSize: 11, background: 'transparent', color: 'inherit' }}>{JSON.stringify(value)}</code> :
-                String(value);
+              const displayVal = hasRawDiff ? rawVal : value;
+              const renderedText = typeof displayVal === 'object' ?
+                <code style={{ fontSize: 11, background: 'transparent', color: 'inherit' }}>{JSON.stringify(displayVal)}</code> :
+                String(displayVal);
 
               if (!isEditing && pct != null && pct < fieldHighlightThreshold) {
                 return (
@@ -429,9 +432,9 @@ function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighT
               return renderedText;
             })()
         )}
-        {rawVal !== undefined && rawVal !== null && String(rawVal) !== String(value) && typeof rawVal !== 'object' && (
+        {hasRawDiff && (
           <span style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic', marginTop: 2 }}>
-            Original (OCR): "{String(rawVal)}"
+            {isEditing ? `Original (OCR): "${String(rawVal)}"` : `normalised: "${String(value)}"`}
           </span>
         )}
       </div>
@@ -1451,9 +1454,12 @@ export function Extraction() {
         if (data?.validated_data) {
           setEditedData(data.validated_data);
         }
-        // Load persisted verification results
-        setSigResult(data?.signature_verification || null);
-        setPhotoResult(data?.photo_verification || null);
+        // Load persisted verification results — only show if they contain a valid verdict
+        const sigData = data?.signature_verification;
+        setSigResult(sigData && sigData.verdict ? sigData : null);
+        
+        const photoData = data?.photo_verification;
+        setPhotoResult(photoData && photoData.verdict ? photoData : null);
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoadingEx(false));

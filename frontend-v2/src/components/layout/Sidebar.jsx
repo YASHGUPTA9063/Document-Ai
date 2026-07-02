@@ -148,7 +148,7 @@ export function Sidebar({ mobileOpen, onMobileClose }) {
             <div className="pulse-dot" />
             <div className="agent-status-text">
               <div style={{ fontSize: 'var(--text-md)', color: 'var(--text)', fontWeight: 600 }}>
-                6 Agents Active
+                10 Agents Active
               </div>
               <div style={{ fontSize: 'var(--text-xs)', color: 'var(--muted)', marginTop: 1 }}>
                 All systems nominal

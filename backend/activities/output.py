@@ -15,7 +15,9 @@ async def output_activity(
     confidence_score: float,
     field_confidences: dict = None,
     fraud_check: dict = None,
-    raw_extracted: dict = None
+    raw_extracted: dict = None,
+    signature_verification: dict = None,
+    photo_verification: dict = None
 ) -> dict:
     try:
         logger.info(f"[Document {document_id}] Starting output activity")
@@ -43,7 +45,9 @@ async def output_activity(
                     validated_data=final_data,
                     confidence_score=confidence_score,
                     reviewer_corrections=corrections,
-                    fraud_check=fraud_check
+                    fraud_check=fraud_check,
+                    signature_verification=signature_verification,
+                    photo_verification=photo_verification
                 )
                 session.add(extracted_record)
             else:
@@ -53,6 +57,10 @@ async def output_activity(
                 extracted_record.raw_extracted = raw_payload
                 if fraud_check:
                     extracted_record.fraud_check = fraud_check
+                if signature_verification:
+                    extracted_record.signature_verification = signature_verification
+                if photo_verification:
+                    extracted_record.photo_verification = photo_verification
 
                 
             # Update Document

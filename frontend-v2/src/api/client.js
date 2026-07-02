@@ -111,11 +111,13 @@ export async function resumeDuplicate(workflowRunId, override) {
  * @param {string} workflowRunId
  * @param {boolean} approved
  * @param {object|null} corrections
+ * @param {string|null} rejectionReason
  */
-export async function resumeReview(workflowRunId, approved, corrections = null) {
+export async function resumeReview(workflowRunId, approved, corrections = null, rejectionReason = null) {
   const { data } = await api.post(`/workflow/${workflowRunId}/resume/review`, {
     approved,
     corrections,
+    rejection_reason: rejectionReason,
   });
   return data;
 }

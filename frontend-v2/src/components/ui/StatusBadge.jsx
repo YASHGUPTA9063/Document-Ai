@@ -13,8 +13,10 @@ const STATUS_MAP = {
 
   validating:       { label: 'Validating',       cls: 'badge-blue',   icon: CheckCircle },
   awaiting_review:  { label: 'Needs Review',     cls: 'badge-yellow', icon: AlertTriangle },
+  duplicate:        { label: 'Duplicate',        cls: 'badge-yellow', icon: AlertTriangle },
   completed:        { label: 'Completed',        cls: 'badge-green',  icon: Check },
   rejected:         { label: 'Rejected',         cls: 'badge-red',    icon: X },
+  failed:           { label: 'Failed',           cls: 'badge-red',    icon: AlertCircle },
   error:            { label: 'Error',            cls: 'badge-red',    icon: AlertCircle },
   deleted:          { label: 'Deleted',          cls: 'badge-gray',   icon: null },
 };

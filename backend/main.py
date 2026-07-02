@@ -14,7 +14,7 @@ from sqlalchemy import delete
 
 from config import settings
 from db.database import init_db, AsyncSessionLocal
-from db.models import Document, ExtractedData
+from db.models import Document, ExtractedData, CustomerReference
 from utils.file_handler import save_file, delete_file
 from utils.norm_config import load_normalization_config, save_normalization_config
 from schemas.documents import (
@@ -87,7 +87,10 @@ ALLOWED_TYPES = {
 }
 
 @app.post("/upload", response_model=DocumentUploadResponse)
-async def upload_document(file: UploadFile = File(...)):
+async def upload_document(
+    file: UploadFile = File(...),
+    customer_id: str = Query(None, description="Optional customer ID to associate with the document")
+):
     if file.content_type not in ALLOWED_TYPES:
         raise HTTPException(status_code=400, detail="Unsupported file type")
         
@@ -99,7 +102,8 @@ async def upload_document(file: UploadFile = File(...)):
             filename=file.filename,
             file_path=file_path,
             file_hash=file_hash,
-            status="pending"
+            status="pending",
+            customer_id=customer_id
         )
         session.add(doc)
         await session.commit()
@@ -131,7 +135,10 @@ async def upload_document(file: UploadFile = File(...)):
         )
 
 @app.post("/upload/batch")
-async def upload_documents_batch(files: List[UploadFile] = File(...)):
+async def upload_documents_batch(
+    files: List[UploadFile] = File(...),
+    customer_id: str = Query(None, description="Optional customer ID to associate with all documents in batch")
+):
     """
     Batch upload endpoint — accepts multiple files in a single multipart request.
     Each file gets its own DB record and Mistral workflow run.
@@ -166,7 +173,8 @@ async def upload_documents_batch(files: List[UploadFile] = File(...)):
                     filename=file.filename,
                     file_path=file_path,
                     file_hash=file_hash,
-                    status="pending"
+                    status="pending",
+                    customer_id=customer_id
                 )
                 session.add(doc)
                 await session.commit()
@@ -1073,3 +1081,41 @@ async def verify_signature(
         # Cleanup temp files
         import shutil
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+from pydantic import BaseModel
+
+class CustomerReferenceCreate(BaseModel):
+    customer_id: str
+    full_name: str | None = None
+    national_id: str | None = None
+    reference_signature: str | None = None  # Base64 encoded signature image
+    reference_photo: str | None = None      # Base64 encoded photo image
+
+@app.post("/customers/references")
+async def register_customer_reference(ref: CustomerReferenceCreate):
+    async with AsyncSessionLocal() as session:
+        # Check if already exists
+        existing = await session.execute(
+            select(CustomerReference).where(CustomerReference.customer_id == ref.customer_id)
+        )
+        existing_ref = existing.scalar_one_or_none()
+        if existing_ref:
+            existing_ref.full_name = ref.full_name
+            existing_ref.national_id = ref.national_id
+            existing_ref.reference_signature = ref.reference_signature
+            existing_ref.reference_photo = ref.reference_photo
+            await session.commit()
+            return {"status": "updated", "customer_id": ref.customer_id}
+        else:
+            new_ref = CustomerReference(
+                customer_id=ref.customer_id,
+                full_name=ref.full_name,
+                national_id=ref.national_id,
+                reference_signature=ref.reference_signature,
+                reference_photo=ref.reference_photo
+            )
+            session.add(new_ref)
+            await session.commit()
+            return {"status": "created", "customer_id": ref.customer_id}
+

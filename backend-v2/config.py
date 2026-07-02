@@ -1,0 +1,66 @@
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, ValidationError
+
+class Settings(BaseSettings):
+    MISTRAL_API_KEY: str = Field(..., description="Mistral API Key")
+    STORAGE_DIR: str = Field("./storage", description="Directory for file storage")
+    DATABASE_URL: str = Field("sqlite+aiosqlite:///./doc_workflow.db", description="Database URL")
+    APP_HOST: str = Field("0.0.0.0", description="FastAPI host")
+    APP_PORT: int = Field(8000, description="FastAPI port")
+    DEBUG: bool = Field(True, description="Enable debug mode")
+
+    # Agent IDs
+    CLASSIFIER_AGENT_ID: str = Field(..., description="Classifier Agent ID from Mistral Studio")
+    INVOICE_EXTRACTOR_AGENT_ID: str = Field(..., description="Invoice Extractor Agent ID from Mistral Studio")
+    CONTRACT_EXTRACTOR_AGENT_ID: str = Field(..., description="Contract Extractor Agent ID from Mistral Studio")
+    KYC_EXTRACTOR_AGENT_ID: str = Field(..., description="KYC Extractor Agent ID from Mistral Studio")
+    MEDICAL_EXTRACTOR_AGENT_ID: str = Field(..., description="Medical Record Extractor Agent ID from Mistral Studio")
+    BANK_EXTRACTOR_AGENT_ID: str = Field(..., description="Bank Statement Extractor Agent ID from Mistral Studio")
+    GENERAL_EXTRACTOR_AGENT_ID: str = Field(default="", description="General Extractor Agent ID from Mistral Studio")
+    VALIDATOR_AGENT_ID: str = Field(..., description="Validator Agent ID from Mistral Studio")
+    REVIEWER_AGENT_ID: str = Field(..., description="Reviewer Agent ID from Mistral Studio")
+    OUTPUT_AGENT_ID: str = Field(default="", description="Output Agent ID from Mistral Studio")
+
+    # Pre-Validation Agent
+    PRE_VALIDATOR_AGENT_ID: str = Field(default="", description="Pre-Validation Vision Agent ID from Mistral Studio")
+
+    # Intake Agent
+    INTAKE_AGENT_ID: str = Field(default="", description="Intake Agent ID from Mistral Studio")
+
+    # Fraud Examiner Agent
+    FRAUD_AGENT_ID: str = Field(default="", description="Fraud Examiner Agent ID from Mistral Studio")
+
+    # Preprocessing Step (Step 2.5)
+    ENABLE_PREPROCESSING: bool = Field(default=False, description="Enable image preprocessing step (skew correction, brightness/CLAHE, noise removal, resolution normalization)")
+    ENABLE_PREPROCESSING_PDF: bool = Field(default=False, description="Also apply preprocessing to PDF files (rasterizes each page). Only effective when ENABLE_PREPROCESSING=true")
+    PREPROCESSING_AGENT_ID: str = Field(default="", description="Preprocessing Agent ID from Mistral Studio")
+
+    # Auto-Verifier Agent
+    AUTO_VERIFIER_AGENT_ID: str = Field(default="", description="Auto-Verifier Agent ID from Mistral Studio")
+
+    # Signature Verification Agent IDs
+    SIGNATURE_VISION_AGENT_ID: str = Field(..., description="Signature Vision Agent ID from Mistral Studio")
+    SIGNATURE_JUDGE_AGENT_ID: str = Field(..., description="Signature Judge Agent ID from Mistral Studio")
+
+    # Face Verification Agent IDs (optional — run create_face_agents.py to generate)
+    FACE_MORPHOLOGY1_AGENT_ID: str = Field(default="", description="Face Morphology Part 1 Agent ID (Geometry/Eyes/Nose)")
+    FACE_MORPHOLOGY2_AGENT_ID: str = Field(default="", description="Face Morphology Part 2 Agent ID (Mouth/Ears/Secondary)")
+    FACE_AGE_AGENT_ID: str = Field(default="", description="Face Age Variation Agent ID")
+    FACE_JUDGE_AGENT_ID: str = Field(default="", description="Face Judge Agent ID")
+
+    # Google Document AI settings
+    GOOGLE_APPLICATION_CREDENTIALS: str = Field(default="", description="Path to Google Cloud service account JSON key file")
+    DOCUMENTAI_PROJECT_ID: str = Field(default="458272416814", description="Google Cloud Project ID")
+    DOCUMENTAI_LOCATION: str = Field(default="us", description="Document AI processor location (us or eu)")
+    DOCUMENTAI_PROCESSOR_ID: str = Field(default="ae6356d350bf69a6", description="Document AI Identity document proofing processor ID")
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+
+try:
+    settings = Settings()
+except ValidationError as e:
+    print("Startup Error: Missing required environment variables. Ensure all Agent IDs and MISTRAL_API_KEY are provided in .env.")
+    print(e)
+    import sys
+    sys.exit(1)
