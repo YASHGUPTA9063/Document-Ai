@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Copy, Download, ChevronDown, ChevronRight, Maximize2, ExternalLink, FileText, FileSearch, CheckCircle2, AlertTriangle, Edit2, Check, X, Trash2, Plus, ShieldCheck, UserCircle2, PenTool, ZoomIn, Upload, RotateCcw, Shield, Eye, Fingerprint, Users } from 'lucide-react';
-import { getExtractedData, getDocumentFileUrl, updateExtractedData, getTemplates, verifySignature } from '../api/client';
+import { getExtractedData, getDocumentFileUrl, updateExtractedData, getTemplates, verifySignature, getOcrBlocks } from '../api/client';
 import { useApp } from '../store/AppStore';
 import { useDocumentList } from '../hooks/useDocumentList';
 
@@ -99,7 +99,7 @@ const getDefaultHeaders = (key) => {
   return ['description', 'quantity', 'unit_price', 'total'];
 };
 
-function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighThreshold = 90, confMedThreshold = 70, fieldHighlightThreshold = 95, rawVal }) {
+function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighThreshold = 90, confMedThreshold = 70, fieldHighlightThreshold = 95, rawVal, onFieldHover }) {
   const [newInputVal, setNewInputVal] = useState('');
   // conf may be a nested structure for table/array fields — flatten to a single average number
   const resolvedConf = flattenConfidence(conf);
@@ -162,7 +162,12 @@ function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighT
     };
 
     return (
-      <div className="field-row-table-container" style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
+      <div
+        className="field-row-table-container"
+        style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '12px 0', borderBottom: '1px solid var(--border)', cursor: onFieldHover ? 'crosshair' : 'default' }}
+        onMouseEnter={() => onFieldHover?.(fieldKey)}
+        onMouseLeave={() => onFieldHover?.(null)}
+      >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div className="field-key" style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-dim)' }}>{label}</div>
           {!isEditing && pct != null && (
@@ -302,7 +307,12 @@ function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighT
     };
 
     return (
-      <div className="field-row-array-container" style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
+      <div
+        className="field-row-array-container"
+        style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '12px 0', borderBottom: '1px solid var(--border)', cursor: onFieldHover ? 'crosshair' : 'default' }}
+        onMouseEnter={() => onFieldHover?.(fieldKey)}
+        onMouseLeave={() => onFieldHover?.(null)}
+      >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div className="field-key" style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-dim)' }}>{label}</div>
           {!isEditing && pct != null && (
@@ -393,7 +403,12 @@ function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighT
   const hasRawDiff = rawVal !== undefined && rawVal !== null && String(rawVal) !== String(value) && typeof rawVal !== 'object';
 
   return (
-    <div className="field-row" style={{ display: 'flex', alignItems: 'center', minHeight: 32 }}>
+    <div
+      className="field-row"
+      style={{ display: 'flex', alignItems: 'center', minHeight: 32, cursor: onFieldHover ? 'crosshair' : 'default' }}
+      onMouseEnter={() => onFieldHover?.(fieldKey)}
+      onMouseLeave={() => onFieldHover?.(null)}
+    >
       <div className="field-key" style={{ width: '40%', flexShrink: 0 }}>{label}</div>
       <div className="field-val" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
         {isEditing ? (
@@ -933,7 +948,7 @@ function FaceVerdictPanel({ result, onReset }) {
   );
 }
 
-function renderFields(data, isEditing, editedData, onChange, confidences = {}, confidenceMode = 'word', confHighThreshold = 90, confMedThreshold = 70, fieldHighlightThreshold = 95, fieldThresholds = {}, rawFields = {}) {
+function renderFields(data, isEditing, editedData, onChange, confidences = {}, confidenceMode = 'word', confHighThreshold = 90, confMedThreshold = 70, fieldHighlightThreshold = 95, fieldThresholds = {}, rawFields = {}, onFieldHover = null) {
   if (!data || typeof data !== 'object') return null;
   const groups = {};
   const renderSource = isEditing ? editedData : data;
@@ -964,6 +979,7 @@ function renderFields(data, isEditing, editedData, onChange, confidences = {}, c
           confHighThreshold={confHighThreshold}
           confMedThreshold={confMedThreshold}
           fieldHighlightThreshold={fieldThresholds[k] ?? fieldHighlightThreshold}
+          onFieldHover={onFieldHover}
         />
       ))}
     </FieldGroup>
@@ -1315,7 +1331,126 @@ function KycImageCard({ label, icon: Icon, base64Data, detected, accentColor, ve
 }
 
 /** Inline document viewer — PDF / image / fallback */
-function DocumentViewer({ fileUrl, filename, ext }) {
+function DocumentViewer({ fileUrl, filename, ext, ocrBlocks = [], highlightFieldKey = null, extractedData = null, rawFields = null }) {
+  // ── All hooks must be at the top — no exceptions (Rules of Hooks) ──
+  const imgRef    = useRef(null);
+  const canvasRef = useRef(null);
+
+  // Strip markdown formatting from block content before substring matching
+  const stripMarkdown = (text) =>
+    (text || '').replace(/\*\*/g, '').replace(/[_*#\[\]()!`]/g, '').toLowerCase().trim();
+
+  // Helper to extract primitive match strings (needles) for any value type (string, number, boolean, array, table)
+  const getValueNeedles = (val, rawVal, key) => {
+    const needles = new Set();
+    const addPrimitive = (v) => {
+      if (v === null || v === undefined || v === '') return;
+      if (typeof v === 'boolean') {
+        // Boolean fields won't literally say "true" or "false" on document. Match keyword instead.
+        const kLower = key.toLowerCase();
+        if (kLower.includes('signature') || kLower.includes('sign')) {
+          needles.add('signature');
+          needles.add('sign');
+        } else if (kLower.includes('photo') || kLower.includes('picture')) {
+          needles.add('photo');
+          needles.add('photograph');
+        }
+        return;
+      }
+      const str = String(v).trim();
+      if (str.length >= 2) {
+        needles.add(str.toLowerCase());
+        // Handle common date formatting variations: YYYY-MM-DD -> DD/MM/YYYY
+        const dateMatch = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (dateMatch) {
+          const [_, y, m, d] = dateMatch;
+          needles.add(`${d}/${m}/${y}`);
+          needles.add(`${d}-${m}-${y}`);
+          needles.add(`${d}.${m}.${y}`);
+        }
+      }
+    };
+
+    const processValue = (value) => {
+      if (Array.isArray(value)) {
+        value.forEach(item => {
+          if (item && typeof item === 'object') {
+            Object.values(item).forEach(addPrimitive);
+          } else {
+            addPrimitive(item);
+          }
+        });
+      } else if (value && typeof value === 'object') {
+        Object.values(value).forEach(addPrimitive);
+      } else {
+        addPrimitive(value);
+      }
+    };
+
+    // 1. Process rawVal first (matches OCR blocks exactly)
+    if (rawVal !== undefined && rawVal !== null) {
+      processValue(rawVal);
+    }
+    // 2. Fallback / add normalized value primitives
+    if (val !== undefined && val !== null) {
+      processValue(val);
+    }
+
+    return Array.from(needles);
+  };
+
+  // Find blocks whose stripped content contains any of the value needles.
+  // Guards inside handle the fileUrl/data-not-ready cases — safe to run unconditionally.
+  const matchingBlocks = useMemo(() => {
+    if (!fileUrl || !highlightFieldKey || !ocrBlocks.length) return [];
+    const val = extractedData?.[highlightFieldKey];
+    const rawVal = rawFields?.[highlightFieldKey];
+    const needles = getValueNeedles(val, rawVal, highlightFieldKey);
+    if (!needles.length) return [];
+    return ocrBlocks.filter(b => b.type !== 'image' && needles.some(needle => stripMarkdown(b.content).includes(needle)));
+  }, [fileUrl, highlightFieldKey, extractedData, rawFields, ocrBlocks]);
+
+  // Sync canvas dimensions to match the rendered <img>
+  const syncCanvas = () => {
+    const img    = imgRef.current;
+    const canvas = canvasRef.current;
+    if (!img || !canvas) return;
+    canvas.width  = img.clientWidth;
+    canvas.height = img.clientHeight;
+  };
+
+  // Draw highlight rectangles whenever matching blocks change.
+  // Guards inside handle the refs-not-ready / no-matches cases safely.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const img    = imgRef.current;
+    if (!canvas || !img) return;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!matchingBlocks.length) return;
+
+    // Scale: OCR pixel space → rendered img size
+    const pageW  = matchingBlocks[0]?.page_width  || img.naturalWidth  || img.clientWidth  || 1;
+    const pageH  = matchingBlocks[0]?.page_height || img.naturalHeight || img.clientHeight || 1;
+    const scaleX = img.clientWidth  / pageW;
+    const scaleY = img.clientHeight / pageH;
+
+    matchingBlocks.forEach(block => {
+      const x = block.top_left_x     * scaleX;
+      const y = block.top_left_y     * scaleY;
+      const w = (block.bottom_right_x - block.top_left_x) * scaleX;
+      const h = (block.bottom_right_y - block.top_left_y) * scaleY;
+      // Filled highlight
+      ctx.fillStyle = 'rgba(99, 179, 237, 0.25)';
+      ctx.fillRect(x, y, w, h);
+      // Crisp border
+      ctx.strokeStyle = 'rgba(66, 153, 225, 0.9)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x, y, w, h);
+    });
+  }, [matchingBlocks]);
+
+  // ── Early return AFTER all hooks ──
   if (!fileUrl) return null;
 
   if (ext === 'pdf') {
@@ -1347,14 +1482,32 @@ function DocumentViewer({ fileUrl, filename, ext }) {
   if (['png', 'jpg', 'jpeg', 'webp'].includes(ext)) {
     return (
       <div style={{
-        width: '100%', height: '100%',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: 'var(--surface)', padding: 16,
+        position: 'relative',
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'var(--surface)',
+        padding: 16,
       }}>
         <img
+          ref={imgRef}
           src={fileUrl}
           alt={filename}
-          style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 6 }}
+          onLoad={syncCanvas}
+          style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 6, display: 'block' }}
+        />
+        {/* Canvas overlay for citation bbox highlights — sits on top of img, pointer-events:none so it doesn't block interaction */}
+        <canvas
+          ref={canvasRef}
+          style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            pointerEvents: 'none',
+          }}
         />
       </div>
     );
@@ -1380,6 +1533,7 @@ function DocumentViewer({ fileUrl, filename, ext }) {
     </div>
   );
 }
+
 
 function getAverageWordConfidence(extracted) {
   const confidences = extracted?.raw_extracted?.field_confidences;
@@ -1417,6 +1571,9 @@ export function Extraction() {
   const [sigResult, setSigResult] = useState(null);
   const [photoVerifying, setPhotoVerifying] = useState(false);
   const [photoResult, setPhotoResult] = useState(null);
+  // Field citation highlighting state
+  const [ocrBlocks, setOcrBlocks] = useState([]);
+  const [hoveredField, setHoveredField] = useState(null);
   const { toast } = useApp();
   const navigate = useNavigate();
 
@@ -1448,6 +1605,7 @@ export function Extraction() {
   useEffect(() => {
     if (!activeId) return;
     setLoadingEx(true); setError(null); setExtracted(null); setIsEditing(false); setEditedData({});
+    setOcrBlocks([]); setHoveredField(null); // reset citation state on doc switch
     getExtractedData(activeId)
       .then((data) => {
         setExtracted(data);
@@ -1463,6 +1621,10 @@ export function Extraction() {
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoadingEx(false));
+    // Fetch OCR blocks for field citation highlighting (non-fatal)
+    getOcrBlocks(activeId)
+      .then(d => setOcrBlocks(d.available ? d.blocks : []))
+      .catch(() => setOcrBlocks([]));
   }, [activeId]);
 
   const copyJSON = () => {
@@ -1619,7 +1781,15 @@ export function Extraction() {
           </div>
           {/* Full viewer body */}
           <div style={{ flex: 1, overflow: 'hidden' }}>
-            <DocumentViewer fileUrl={fileUrl} filename={activeDoc?.filename ?? ''} ext={ext} />
+            <DocumentViewer
+              fileUrl={fileUrl}
+              filename={activeDoc?.filename ?? ''}
+              ext={ext}
+              ocrBlocks={ocrBlocks}
+              highlightFieldKey={hoveredField}
+              extractedData={extracted?.validated_data}
+              rawFields={extracted?.raw_extracted?.raw_fields}
+            />
           </div>
         </div>
       )}
@@ -1676,7 +1846,15 @@ export function Extraction() {
 
           {/* Embedded viewer */}
           <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-            <DocumentViewer fileUrl={fileUrl} filename={activeDoc?.filename ?? ''} ext={ext} />
+            <DocumentViewer
+              fileUrl={fileUrl}
+              filename={activeDoc?.filename ?? ''}
+              ext={ext}
+              ocrBlocks={ocrBlocks}
+              highlightFieldKey={hoveredField}
+              extractedData={extracted?.validated_data}
+              rawFields={extracted?.raw_extracted?.raw_fields}
+            />
           </div>
 
           {/* Confidence banner pinned to bottom */}
@@ -1874,7 +2052,7 @@ export function Extraction() {
                 )}
 
               {extracted.validated_data ? (
-                renderFields(extracted.validated_data, isEditing, editedData, handleFieldChange, extracted.raw_extracted?.field_confidences || {}, confidenceMode, confHighThreshold, confMedThreshold, fieldHighlightThreshold, fieldThresholds, extracted.raw_extracted?.raw_fields || {})
+                renderFields(extracted.validated_data, isEditing, editedData, handleFieldChange, extracted.raw_extracted?.field_confidences || {}, confidenceMode, confHighThreshold, confMedThreshold, fieldHighlightThreshold, fieldThresholds, extracted.raw_extracted?.raw_fields || {}, ocrBlocks.length ? setHoveredField : null)
               ) : (
                 <div className="empty-state" style={{ padding: 24 }}>
                   <div className="empty-sub">No structured data extracted yet.</div>

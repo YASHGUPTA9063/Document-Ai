@@ -25,14 +25,8 @@ def _extract_text(content) -> str:
         return "".join(parts)
     return str(content) if content is not None else ""
 
-# MIME type map by extension
-MIME_MAP = {
-    ".pdf":  "application/pdf",
-    ".jpg":  "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".png":  "image/png",
-    ".webp": "image/webp",
-}
+from tools.pre_validator import PRE_VALIDATOR_TOOLS, get_file_metadata
+
 
 # DOCX files have no visual representation — auto-pass with a note
 DOCX_AUTO_PASS = {
@@ -87,26 +81,8 @@ async def pre_validator_activity(document_id: str, file_path: str) -> dict:
         if not settings.PRE_VALIDATOR_AGENT_ID:
             raise ValueError("PRE_VALIDATOR_AGENT_ID is not configured in settings/environment.")
 
-        # Define quality validation tool schema
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "get_file_metadata",
-                    "description": "Checks the file extension, MIME type, and determines if visual representation is required.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "file_path": {
-                                "type": "string",
-                                "description": "The file path of the document."
-                            }
-                        },
-                        "required": ["file_path"]
-                    }
-                }
-            }
-        ]
+        # Use imported tools schema
+        tools = PRE_VALIDATOR_TOOLS
 
         user_prompt = (
             f"Please run the document quality checks for the file at path '{file_path}'. "
@@ -157,17 +133,8 @@ async def pre_validator_activity(document_id: str, file_path: str) -> dict:
                     args = json.loads(tool_call.function.arguments)
                     target_file_path = args.get("file_path", file_path)
 
-                    ext = os.path.splitext(target_file_path.lower())[1]
-                    mime_type = MIME_MAP.get(ext)
-                    is_docx = (ext == ".docx")
-
-                    tool_output = {
-                        "extension": ext,
-                        "mime_type": mime_type,
-                        "is_docx": is_docx,
-                        "is_visual": not is_docx and bool(mime_type)
-                    }
-
+                    tool_output = get_file_metadata(target_file_path)
+                    mime_type = tool_output["mime_type"]
                     is_visual = tool_output["is_visual"]
 
                     messages.append({

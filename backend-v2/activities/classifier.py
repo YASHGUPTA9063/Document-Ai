@@ -4,7 +4,7 @@ import logging
 import mistralai.workflows as workflows
 from mistralai.client import Mistral
 from config import settings
-from utils.ocr import extract_with_ocr
+from tools.classifier import CLASSIFIER_TOOLS, get_supported_doc_types, get_document_text
 import db.operations as db
 
 logger = logging.getLogger(__name__)
@@ -25,22 +25,7 @@ def _extract_text(content) -> str:
         return "".join(parts)
     return str(content) if content is not None else ""
 
-def get_supported_doc_types() -> dict:
-    # Strictly load document types from user-configured templates only
-    types_map = {}
-    templates_path = os.path.join(settings.STORAGE_DIR, "templates.json")
-    if os.path.exists(templates_path):
-        try:
-            with open(templates_path, "r") as f:
-                templates = json.load(f)
-                for key in templates.keys():
-                    normalized_key = key.lower().replace(" ", "_")
-                    # e.g., "purchase_order" -> "Purchase Order"
-                    display_name = " ".join(word.capitalize() for word in normalized_key.split("_"))
-                    types_map[normalized_key] = display_name
-        except Exception as e:
-            logger.error(f"Failed to read templates in classifier: {e}")
-    return types_map
+
 
 
 @workflows.activity()
@@ -51,37 +36,8 @@ async def classifier_activity(document_id: str, file_path: str) -> dict:
         if not settings.CLASSIFIER_AGENT_ID:
             raise ValueError("CLASSIFIER_AGENT_ID is not configured in settings/environment.")
 
-        # Define tools schema for Classifier Agent
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "get_supported_document_types",
-                    "description": "Gets the list of currently supported document templates and types in the system.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {}
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "get_document_text",
-                    "description": "Extracts the raw text content of the document using OCR. For PDFs, it restricts OCR to the first two pages.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "file_path": {
-                                "type": "string",
-                                "description": "The file path of the document to run OCR on."
-                            }
-                        },
-                        "required": ["file_path"]
-                    }
-                }
-            }
-        ]
+        # Use imported tools schema
+        tools = CLASSIFIER_TOOLS
 
         prompt = (
             f"You are the Classifier Agent. We need to classify the document at path '{file_path}' "
@@ -141,22 +97,7 @@ async def classifier_activity(document_id: str, file_path: str) -> dict:
 
                     logger.info(f"[Document {document_id}] Executing get_document_text tool for file: {t_file_path}")
 
-                    _, ext = os.path.splitext(t_file_path.lower())
-                    pages = None
-                    if ext == ".pdf":
-                        try:
-                            import pypdf
-                            reader = pypdf.PdfReader(t_file_path)
-                            total_pages = len(reader.pages)
-                            if total_pages >= 2:
-                                pages = [0, 1]
-                                logger.info(f"[Document {document_id}] Restricting classification OCR to pages 1 and 2.")
-                        except Exception as e:
-                            logger.error(f"[Document {document_id}] Failed to count PDF pages: {e}")
-                            pages = [0, 1]
-
-                    ocr_result = extract_with_ocr(t_file_path, "unknown", pages=pages)
-                    raw_text = ocr_result.get("raw_text", "")
+                    raw_text = get_document_text(t_file_path, document_id)
 
                     messages.append({
                         "role": "tool",

@@ -152,6 +152,17 @@ export function getDocumentFileUrl(documentId) {
 }
 
 /**
+ * Get OCR bounding box blocks for field citation highlighting.
+ * Only available for image documents (PNG/JPEG/WEBP) processed after this feature was added.
+ * @param {string} documentId
+ * @returns {Promise<{ blocks: Array, available: boolean }>}
+ */
+export async function getOcrBlocks(documentId) {
+  const { data } = await api.get(`/documents/${documentId}/ocr-blocks`);
+  return data;
+}
+
+/**
  * Get templates from backend
  * @returns {Promise<object>}
  */

@@ -652,6 +652,27 @@ async def get_document_file(document_id: str):
         }
         return FileResponse(doc.file_path, media_type=mime_type, headers=headers)
 
+@app.get("/documents/{document_id}/ocr-blocks")
+async def get_ocr_blocks(document_id: str):
+    """
+    Return saved OCR bounding box blocks for field citation highlighting.
+    Only available for image documents (PNG/JPEG/WEBP) processed after this feature was added.
+    Returns { blocks: [...], available: false } gracefully for PDFs, DOCX, or older documents.
+    """
+    blocks_path = os.path.join(
+        settings.STORAGE_DIR, "ocr_blocks", f"{document_id}_blocks.json"
+    )
+    if not os.path.exists(blocks_path):
+        return {"blocks": [], "available": False}
+    try:
+        with open(blocks_path, "r") as f:
+            blocks = json.load(f)
+        return {"blocks": blocks, "available": True}
+    except Exception as e:
+        logger.warning(f"Failed to read OCR blocks for document {document_id}: {e}")
+        return {"blocks": [], "available": False}
+
+
 @app.delete("/documents/{document_id}")
 async def delete_document(document_id: str):
     async with AsyncSessionLocal() as session:

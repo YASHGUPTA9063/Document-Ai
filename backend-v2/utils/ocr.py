@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 from mistralai.client import Mistral
 from config import settings
@@ -19,7 +20,8 @@ def extract_with_ocr(
     """
     Extract text using Mistral OCR or python-docx for DOCX files.
     Supports structured document annotation via document_annotation_format/prompt.
-    Returns: {"raw_text": str, "confidence": float, "pages": list, "document_annotation": dict, ...}
+    Returns: {"raw_text": str, "confidence": float, "pages": list, "document_annotation": dict, "blocks": list, ...}
+    blocks: list of {page, content, type, top_left_x, top_left_y, bottom_right_x, bottom_right_y, page_width, page_height}
     """
     _, ext = os.path.splitext(file_path.lower())
 
@@ -33,7 +35,8 @@ def extract_with_ocr(
             "raw_text": "\n".join(full_text),
             "confidence": 1.0, # 100% confidence for direct text extraction
             "pages": [{"markdown": "\n".join(full_text)}],
-            "document_annotation": None
+            "document_annotation": None,
+            "blocks": []  # DOCX has no spatial layout, citation not supported
         }
 
     # Determine mime type for base64 data URL
@@ -70,7 +73,10 @@ def extract_with_ocr(
             "type": "document_url",
             "document_url": document_url
         },
-        "confidence_scores_granularity": "word"
+        "confidence_scores_granularity": "word",
+        # include_blocks returns paragraph-level bounding boxes for citation highlighting.
+        # Only effective for image/PDF files — DOCX is handled above before this point.
+        "include_blocks": True
     }
     
     if actual_pages is not None:
@@ -89,12 +95,14 @@ def extract_with_ocr(
     total_confidence = 0.0
     valid_pages_count = 0
     all_word_confidences = []
+    all_blocks = []  # bounding box blocks for citation highlighting
 
     for page in ocr_response.pages:
+        page_index = getattr(page, "index", 0)
         raw_text += page.markdown + "\n\n"
         pages_list.append({
             "markdown": page.markdown,
-            "index": getattr(page, "index", 0)
+            "index": page_index
         })
         # Extract confidence score if available
         if hasattr(page, "confidence_scores") and page.confidence_scores:
@@ -108,6 +116,33 @@ def extract_with_ocr(
                         "confidence": w.confidence,
                         "start_index": w.start_index
                     })
+        # Extract bounding box blocks for citation highlighting
+        # Confirmed field names from live API: top_left_x/y, bottom_right_x/y, content, type
+        dims = getattr(page, "dimensions", None)
+        page_w = getattr(dims, "width", None)
+        page_h = getattr(dims, "height", None)
+        for block in getattr(page, "blocks", []) or []:
+            b_type = getattr(block, "type", "text")
+            if b_type == "image":
+                continue  # skip image placeholder blocks — they have no readable text
+            top_left_x     = getattr(block, "top_left_x", None)
+            top_left_y     = getattr(block, "top_left_y", None)
+            bottom_right_x = getattr(block, "bottom_right_x", None)
+            bottom_right_y = getattr(block, "bottom_right_y", None)
+            content        = getattr(block, "content", "") or ""
+            if top_left_x is None or bottom_right_x is None:
+                continue  # block has no spatial data, skip
+            all_blocks.append({
+                "page":           page_index,
+                "content":        content,
+                "type":           b_type,
+                "top_left_x":     top_left_x,
+                "top_left_y":     top_left_y,
+                "bottom_right_x": bottom_right_x,
+                "bottom_right_y": bottom_right_y,
+                "page_width":     page_w,
+                "page_height":    page_h,
+            })
     
     avg_confidence = (total_confidence / valid_pages_count) if valid_pages_count > 0 else 0.0
     
@@ -132,5 +167,6 @@ def extract_with_ocr(
         "confidence": avg_confidence,
         "pages": pages_list,
         "word_confidence_scores": all_word_confidences,
-        "document_annotation": document_annotation
+        "document_annotation": document_annotation,
+        "blocks": all_blocks,  # bounding box blocks for field citation highlighting
     }

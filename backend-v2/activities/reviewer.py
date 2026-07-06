@@ -4,6 +4,7 @@ import mistralai.workflows as workflows
 from mistralai.client import Mistral
 from config import settings
 import db.operations as db
+from tools.reviewer import REVIEWER_TOOLS, get_review_context
 
 logger = logging.getLogger(__name__)
 client = Mistral(api_key=settings.MISTRAL_API_KEY)
@@ -39,20 +40,8 @@ async def reviewer_activity(document_id: str, validated_data: dict, confidence_s
         prompt_data.pop("signature_image", None)
         prompt_data.pop("photo_image", None)
 
-        # Define context gathering tool for Reviewer Agent
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "get_review_context",
-                    "description": "Fetches the current confidence score and clean validated data payload for human-in-the-loop review evaluation.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {}
-                    }
-                }
-            }
-        ]
+        # Use imported tools schema
+        tools = REVIEWER_TOOLS
 
         prompt = (
             f"You are the Reviewer Agent. We need to evaluate document '{document_id}' to see if it requires human review.\n"
@@ -103,10 +92,7 @@ async def reviewer_activity(document_id: str, validated_data: dict, confidence_s
                 if tool_call.function.name == "get_review_context":
                     logger.info(f"[Document {document_id}] Executing get_review_context tool")
                     
-                    tool_output = {
-                        "confidence_score": confidence_score,
-                        "validated_data": prompt_data
-                    }
+                    tool_output = get_review_context(confidence_score, prompt_data)
 
                     messages.append({
                         "role": "tool",

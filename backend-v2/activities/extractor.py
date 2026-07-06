@@ -5,9 +5,14 @@ import re
 import mistralai.workflows as workflows
 from mistralai.client import Mistral
 from config import settings
-from utils.ocr import extract_with_ocr
 from utils.norm_config import build_normalization_rules_prompt
 import db.operations as db
+
+from tools.extractor import (
+    EXTRACTOR_TOOLS,
+    extract_text_from_document,
+    crop_kyc_images
+)
 
 logger = logging.getLogger(__name__)
 client = Mistral(api_key=settings.MISTRAL_API_KEY)
@@ -27,43 +32,6 @@ def _extract_text(content) -> str:
                 parts.append(chunk["text"])
         return "".join(parts)
     return str(content) if content is not None else ""
-
-
-def _load_template_raw(doc_type: str):
-    """Load the raw template entry (could be a list or {fields, is_kyc} dict)."""
-    normalized = doc_type.lower().replace(" ", "_")
-    templates_path = os.path.join(settings.STORAGE_DIR, "templates.json")
-    if os.path.exists(templates_path):
-        try:
-            with open(templates_path, "r") as f:
-                templates = json.load(f)
-                return templates.get(normalized)
-        except Exception as e:
-            logger.error(f"Failed to read templates from {templates_path}: {e}")
-    return None
-
-
-def get_template_fields(doc_type: str) -> list:
-    """Get the fields list, handling both old (list) and new ({fields, is_kyc}) formats."""
-    raw = _load_template_raw(doc_type)
-    if raw is None:
-        return None
-    if isinstance(raw, dict):
-        return raw.get("fields", [])
-    return raw  # old format: bare list
-
-
-def get_template_metadata(doc_type: str) -> dict:
-    """Get template metadata including is_kyc flag and kyc_boxes."""
-    raw = _load_template_raw(doc_type)
-    if raw is None:
-        return {}
-    if isinstance(raw, dict):
-        return {
-            "is_kyc": raw.get("is_kyc", False),
-            "kyc_boxes": raw.get("kyc_boxes", None)
-        }
-    return {"is_kyc": False, "kyc_boxes": None}  # old format has no KYC flag
 
 
 def _calculate_field_confidence(field_value, word_confidence_scores: list) -> float:
@@ -112,85 +80,7 @@ def _compute_confidences_recursive(data, word_confidence_scores):
         return _calculate_field_confidence(data, word_confidence_scores)
 
 
-def build_json_schema_from_fields(fields_list: list) -> dict:
-    properties = {}
-    required = []
-    
-    if not fields_list:
-        return {
-            "type": "json_schema",
-            "json_schema": {
-                "name": "generic_document_extraction",
-                "strict": True,
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "document_title": {"type": "string", "description": "Title or main heading of the document"},
-                        "document_date": {"type": "string", "description": "Date associated with the document"},
-                        "summary": {"type": "string", "description": "Brief summary of the document contents"},
-                        "full_ocr_text": {"type": "string", "description": "The complete raw OCR text content of the document"}
-                    },
-                    "required": ["document_title", "summary", "full_ocr_text"]
-                }
-            }
-        }
 
-    for f in fields_list:
-        key = f["key"]
-        f_type = f.get("type", "Text").lower()
-        desc = f.get("description", "")
-        
-        if "array" in f_type or f_type == "list":
-            properties[key] = {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "description": {"type": "string", "description": "Item description or label"},
-                        "quantity": {"type": "string", "description": "Quantity or count of items"},
-                        "unit_price": {"type": "string", "description": "Price per unit"},
-                        "amount": {"type": "string", "description": "Total amount for the item line"}
-                    }
-                },
-                "description": desc
-            }
-        else:
-            properties[key] = {
-                "type": "string",
-                "description": desc
-            }
-            
-        if f.get("required"):
-            required.append(key)
-            
-    return {
-        "type": "json_schema",
-        "json_schema": {
-            "name": "document_fields_schema",
-            "strict": True,
-            "schema": {
-                "type": "object",
-                "properties": properties,
-                "required": required
-            }
-        }
-    }
-
-
-def build_ocr_prompt_from_fields(fields_list: list) -> str:
-    if not fields_list:
-        return "Extract structured data: document_title, document_date, summary, and copy the full OCR text into the full_ocr_text field."
-    
-    desc_lines = []
-    for f in fields_list:
-        req_str = "Required" if f.get("required") else "Optional"
-        desc_lines.append(f"- '{f['key']}' ({f.get('type', 'Text')}, {req_str}): {f.get('description', '')}")
-        
-    fields_instruction = "\n".join(desc_lines)
-    return (
-        f"Extract key fields from the document following this schema:\n{fields_instruction}\n\n"
-        f"Return the exact text as written in the document without normalization or cleaning."
-    )
 
 
 @workflows.activity()
@@ -208,51 +98,8 @@ async def extractor_activity(document_id: str, file_path: str, doc_type: str) ->
             raise ValueError("GENERAL_EXTRACTOR_AGENT_ID is not configured in settings/environment.")
         logger.info(f"[Document {document_id}] Routing to general extractor agent: {agent_id}")
 
-        # Define tools schema for Extractor Agent
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "extract_text_from_document",
-                    "description": "Extracts raw text and structured data from a document using OCR and schema annotations.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "file_path": {
-                                "type": "string",
-                                "description": "The file path of the document."
-                            },
-                            "doc_type": {
-                                "type": "string",
-                                "description": "The classified document type (e.g. Invoice, PAN Card)."
-                            }
-                        },
-                        "required": ["file_path", "doc_type"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "crop_kyc_images",
-                    "description": "Extracts and crops signature and photo images from a KYC identity document.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "file_path": {
-                                "type": "string",
-                                "description": "The file path of the identity document."
-                            },
-                            "doc_type": {
-                                "type": "string",
-                                "description": "The document type."
-                            }
-                        },
-                        "required": ["file_path", "doc_type"]
-                    }
-                }
-            }
-        ]
+        # Use imported tools schema
+        tools = EXTRACTOR_TOOLS
 
         normalization_rules = build_normalization_rules_prompt()
 
@@ -314,32 +161,15 @@ async def extractor_activity(document_id: str, file_path: str, doc_type: str) ->
 
                     logger.info(f"[Document {document_id}] Executing extract_text_from_document tool for file: {t_file_path}")
 
-                    # Load fields for target annotations
-                    fields_list = get_template_fields(t_doc_type)
-                    annotation_format = build_json_schema_from_fields(fields_list)
-                    annotation_prompt = build_ocr_prompt_from_fields(fields_list)
-
-                    ocr_result = extract_with_ocr(
-                        file_path=t_file_path, 
-                        doc_type=t_doc_type,
-                        document_annotation_format=annotation_format,
-                        document_annotation_prompt=annotation_prompt
-                    )
-
-                    raw_text = ocr_result.get("raw_text", "")
-                    ocr_confidence = ocr_result.get("confidence", 0.0)
-                    word_confidence_scores = ocr_result.get("word_confidence_scores", [])
-                    doc_annotation = ocr_result.get("document_annotation") or {}
-
-                    tool_output = {
-                        "raw_ocr_text": raw_text,
-                        "structured_ocr_extraction": doc_annotation
-                    }
+                    res = extract_text_from_document(t_file_path, t_doc_type, document_id=document_id)
+                    raw_text = res["raw_text"]
+                    ocr_confidence = res["confidence"]
+                    word_confidence_scores = res["word_confidence_scores"]
 
                     messages.append({
                         "role": "tool",
                         "name": "extract_text_from_document",
-                        "content": json.dumps(tool_output),
+                        "content": json.dumps(res["tool_output"]),
                         "tool_call_id": tool_call.id
                     })
 
@@ -350,35 +180,13 @@ async def extractor_activity(document_id: str, file_path: str, doc_type: str) ->
 
                     logger.info(f"[Document {document_id}] Executing crop_kyc_images tool for file: {t_file_path}")
 
-                    template_meta = get_template_metadata(t_doc_type)
-                    kyc_boxes = template_meta.get("kyc_boxes")
-
-                    try:
-                        from utils.signature_extractor import extract_signature_and_photo
-                        kyc_image_result = extract_signature_and_photo(
-                            file_path=t_file_path,
-                            document_id=document_id,
-                            output_dir=os.path.join(settings.STORAGE_DIR, "crops", document_id),
-                            kyc_boxes=kyc_boxes
-                        )
-                        logger.info(f"[Document {document_id}] KYC crops complete. signature={kyc_image_result.get('has_signature')}, photo={kyc_image_result.get('has_photo')}")
-                        tool_output = {
-                            "has_signature": kyc_image_result.get("has_signature", False),
-                            "has_photo": kyc_image_result.get("has_photo", False),
-                            "signer_name": kyc_image_result.get("signer_name", "")
-                        }
-                    except Exception as e:
-                        logger.error(f"[Document {document_id}] KYC image cropping failed: {e}")
-                        tool_output = {
-                            "has_signature": False,
-                            "has_photo": False,
-                            "error": str(e)
-                        }
+                    res = crop_kyc_images(t_file_path, t_doc_type, document_id)
+                    kyc_image_result = res["kyc_image_result"]
 
                     messages.append({
                         "role": "tool",
                         "name": "crop_kyc_images",
-                        "content": json.dumps(tool_output),
+                        "content": json.dumps(res["tool_output"]),
                         "tool_call_id": tool_call.id
                     })
 

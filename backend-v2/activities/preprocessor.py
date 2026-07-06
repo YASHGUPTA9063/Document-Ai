@@ -54,33 +54,8 @@ async def preprocessor_activity(document_id: str, file_path: str) -> dict:
         output_dir = os.path.join(settings.STORAGE_DIR, "preprocessed", document_id)
         output_path = os.path.join(output_dir, output_filename)
 
-        # Lazy import to avoid startup cost
-        from utils.preprocessor import preprocess_image
-
-        # Define quality validation tool schema
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "enhance_document_image",
-                    "description": "Applies image resolution normalization, brightness CLAHE adjustment, Gaussian noise removal, and skew angle correction to the document file.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "file_path": {
-                                "type": "string",
-                                "description": "The file path of the document to preprocess."
-                            },
-                            "output_path": {
-                                "type": "string",
-                                "description": "The output file path where the preprocessed file should be saved."
-                            }
-                        },
-                        "required": ["file_path", "output_path"]
-                    }
-                }
-            }
-        ]
+        from tools.preprocessor import PREPROCESSOR_TOOLS, enhance_document_image
+        tools = PREPROCESSOR_TOOLS
 
         prompt = (
             f"You are the Preprocessing Agent. We need to enhance the document image quality "
@@ -135,10 +110,9 @@ async def preprocessor_activity(document_id: str, file_path: str) -> dict:
 
                     logger.info(f"[Document {document_id}] Executing image enhancement tool for file_path={t_file_path}")
 
-                    result = preprocess_image(
+                    result = enhance_document_image(
                         file_path=t_file_path,
-                        output_path=t_output_path,
-                        preprocess_pdf=settings.ENABLE_PREPROCESSING_PDF,
+                        output_path=t_output_path
                     )
 
                     messages.append({
@@ -174,10 +148,9 @@ async def preprocessor_activity(document_id: str, file_path: str) -> dict:
             return result
         else:
             logger.warning(f"[Document {document_id}] Preprocessing Agent did not request tool call. Performing fallback preprocessing.")
-            result = preprocess_image(
+            result = enhance_document_image(
                 file_path=file_path,
-                output_path=output_path,
-                preprocess_pdf=settings.ENABLE_PREPROCESSING_PDF,
+                output_path=output_path
             )
             return result
 

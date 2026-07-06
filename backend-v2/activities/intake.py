@@ -5,6 +5,8 @@ from mistralai.client import Mistral
 import db.operations as db
 from config import settings
 
+from tools.intake import INTAKE_TOOLS, check_document_duplicates
+
 logger = logging.getLogger(__name__)
 client = Mistral(api_key=settings.MISTRAL_API_KEY)
 
@@ -31,30 +33,8 @@ async def intake_activity(document_id: str, filename: str) -> dict:
         if not settings.INTAKE_AGENT_ID:
             raise ValueError("INTAKE_AGENT_ID is not configured in settings/environment.")
 
-        # Define check duplicate tool schema
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "check_document_duplicates",
-                    "description": "Checks the database for existing duplicate documents by file hash or filename.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "document_id": {
-                                "type": "string",
-                                "description": "The unique ID of the document being processed."
-                            },
-                            "filename": {
-                                "type": "string",
-                                "description": "The name of the uploaded document file."
-                            }
-                        },
-                        "required": ["document_id", "filename"]
-                    }
-                }
-            }
-        ]
+        # Use imported tools schema
+        tools = INTAKE_TOOLS
 
         prompt = (
             f"You are the Intake Agent. We have received a new document upload. "
@@ -107,21 +87,7 @@ async def intake_activity(document_id: str, filename: str) -> dict:
                     
                     logger.info(f"[Document {document_id}] Executing duplicate check tool for document_id={doc_id}, filename={fname}")
                     
-                    doc = await db.get_document(doc_id)
-                    if not doc:
-                        raise ValueError(f"Document {doc_id} not found in database")
-            
-                    existing_id = None
-                    if doc.file_hash:
-                        existing_id = await db.check_duplicate_hash(doc.file_hash, exclude_id=doc_id)
-            
-                    if not existing_id:
-                        existing_id = await db.check_duplicate_filename(fname, exclude_id=doc_id)
-                    
-                    tool_result = {
-                        "is_duplicate": bool(existing_id),
-                        "existing_document_id": existing_id
-                    }
+                    tool_result = await check_document_duplicates(doc_id, fname)
                     
                     messages.append({
                         "role": "tool",
