@@ -11,6 +11,8 @@ import { Agents }     from './pages/Agents';
 import { Analytics }  from './pages/Analytics';
 import { Settings }   from './pages/Settings';
 import { Templates }  from './pages/Templates';
+import { ClaimProcess }  from './pages/ClaimProcess';
+import { ClaimWorkflow } from './pages/ClaimWorkflow';
 
 const router = createBrowserRouter([
   {
@@ -26,7 +28,9 @@ const router = createBrowserRouter([
       { path: 'agents',       element: <Agents />     },
       { path: 'analytics',    element: <Analytics />  },
       { path: 'settings',     element: <Settings />   },
-      { path: 'templates',    element: <Templates />  },
+      { path: 'templates',       element: <Templates />  },
+      { path: 'claim-process',   element: <ClaimProcess /> },
+      { path: 'claim-workflow',  element: <ClaimWorkflow /> },
     ],
   },
 ]);
