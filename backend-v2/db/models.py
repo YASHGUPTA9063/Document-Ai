@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Float, JSON, DateTime, ForeignKey
+from sqlalchemy import Column, String, Float, JSON, DateTime, ForeignKey, Integer, Text
 from sqlalchemy.orm import relationship
 import uuid
 from datetime import datetime
@@ -57,3 +57,93 @@ class ExtractedData(Base):
 
     document = relationship("Document", back_populates="extracted_data")
 
+
+# ─── CLAIM PROCESSING MODELS ───────────────────────────────────────────────────
+
+class Claim(Base):
+    """
+    Represents a single insurance claim submitted for processing.
+    Stores top-level metadata; detailed document field-values live in ClaimDocument.
+    """
+    __tablename__ = "claims"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    claim_id = Column(String, index=True, unique=True, nullable=False)  # e.g. CLM-001
+    claimant_id = Column(String, index=True, nullable=False)
+    policy_id = Column(String, index=True, nullable=False)
+    claimant_name = Column(String, nullable=True)
+    submitted_at = Column(DateTime, nullable=True)
+    status = Column(String, nullable=False, default="pending")  # pending | processing | completed | failed
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    documents = relationship("ClaimDocument", back_populates="claim", cascade="all, delete-orphan")
+    report = relationship("ClaimReport", back_populates="claim", uselist=False, cascade="all, delete-orphan")
+
+
+class ClaimDocument(Base):
+    """
+    Stores the OCR-extracted field-value pairs for each document type within a claim.
+    One row per (claim_id, doc_type) combination.
+    In the POC, rows are seeded manually to simulate OCR output.
+    """
+    __tablename__ = "claim_documents"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    claim_id = Column(String, ForeignKey("claims.claim_id"), nullable=False, index=True)
+    doc_type = Column(String, nullable=False)  # e.g. "claim_form", "medical_report"
+    fields = Column(JSON, nullable=False, default=dict)  # key-value pairs extracted by OCR
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    claim = relationship("Claim", back_populates="documents")
+
+
+class ClaimantHistory(Base):
+    """
+    Stores prior claims submitted by a claimant.
+    One row per prior claim event per claimant.
+    Used by the Integrity and Litigation agents.
+    """
+    __tablename__ = "claimant_history"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    claimant_id = Column(String, index=True, nullable=False)
+    prior_claim_id = Column(String, nullable=False)
+    submitted_at = Column(DateTime, nullable=True)
+    status = Column(String, nullable=True)  # approved / rejected / pending
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PolicyDetails(Base):
+    """
+    Stores insurance policy coverage details keyed by policy_id.
+    Used by the Integrity agent to validate policy dates and coverage.
+    """
+    __tablename__ = "policy_details"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    policy_id = Column(String, index=True, unique=True, nullable=False)
+    holder_name = Column(String, nullable=True)
+    coverage_type = Column(String, nullable=True)  # e.g. "comprehensive", "basic"
+    start_date = Column(DateTime, nullable=True)
+    end_date = Column(DateTime, nullable=True)
+    details = Column(JSON, nullable=True)  # any extra coverage metadata
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ClaimReport(Base):
+    """
+    Stores the final structured report produced by the claim processing workflow.
+    One report per claim. Contains all 5 agent results and the final suggestion paragraph.
+    """
+    __tablename__ = "claim_reports"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    claim_id = Column(String, ForeignKey("claims.claim_id"), nullable=False, unique=True, index=True)
+    claimant_name = Column(String, nullable=True)
+    agent_results = Column(JSON, nullable=False, default=dict)  # dict with all 5 agent outputs
+    suggestion = Column(Text, nullable=True)  # final LLM-generated suggestion paragraph
+    overall_status = Column(String, nullable=True)  # PASS / FAIL / REVIEW
+    processed_at = Column(DateTime, default=datetime.utcnow)
+
+    claim = relationship("Claim", back_populates="report")

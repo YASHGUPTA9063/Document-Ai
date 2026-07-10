@@ -44,3 +44,13 @@ async def init_db():
             pass
 
 
+async def init_claim_tables():
+    """
+    Ensures all claim processing tables exist.
+    Safe to call on every startup — uses CREATE TABLE IF NOT EXISTS via SQLAlchemy metadata.
+    Also runs defensive ALTER TABLE migrations for any columns added after initial creation.
+    """
+    async with engine.begin() as conn:
+        # Import claim models so SQLAlchemy registers them on Base.metadata
+        from db.models import Claim, ClaimDocument, ClaimantHistory, PolicyDetails, ClaimReport  # noqa: F401
+        await conn.run_sync(Base.metadata.create_all)

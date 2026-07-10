@@ -43,6 +43,14 @@ class Settings(BaseSettings):
     FACE_AGE_AGENT_ID: str = Field(default="", description="Face Age Variation Agent ID")
     FACE_JUDGE_AGENT_ID: str = Field(default="", description="Face Judge Agent ID")
 
+    # Claim Processing Agent IDs (create each in Mistral Studio — see agents_config.py)
+    CLAIM_INTEGRITY_AGENT_ID: str = Field(default="", description="Claim Integrity Agent ID — validates completeness, dates, policy, duplicates")
+    CLAIM_MEDICAL_AGENT_ID: str = Field(default="", description="Medical Agent ID — validates diagnosis, ICD code, provider, documentation")
+    CLAIM_TREATMENT_AGENT_ID: str = Field(default="", description="Treatment Agent ID — validates treatment-diagnosis alignment and billing")
+    CLAIM_DISABILITY_AGENT_ID: str = Field(default="", description="Disability Agent ID — validates disability certificate and severity")
+    CLAIM_LITIGATION_AGENT_ID: str = Field(default="", description="Litigation Agent ID — detects attorney involvement and fraud red flags")
+    CLAIM_REPORT_AGENT_ID: str = Field(default="", description="Claim Report Agent ID — generates the final suggestion paragraph")
+
     # Google Document AI settings
     GOOGLE_APPLICATION_CREDENTIALS: str = Field(default="", description="Path to Google Cloud service account JSON key file")
     DOCUMENTAI_PROJECT_ID: str = Field(default="458272416814", description="Google Cloud Project ID")
