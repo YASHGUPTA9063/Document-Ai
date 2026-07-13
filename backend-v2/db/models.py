@@ -68,12 +68,17 @@ class Claim(Base):
     __tablename__ = "claims"
 
     id = Column(String, primary_key=True, default=generate_uuid)
-    claim_id = Column(String, index=True, unique=True, nullable=False)  # e.g. CLM-001
+    claim_id = Column(String, index=True, unique=True, nullable=False)  # e.g. CLM-2026-001
     claimant_id = Column(String, index=True, nullable=False)
     policy_id = Column(String, index=True, nullable=False)
     claimant_name = Column(String, nullable=True)
+    claim_type = Column(String, nullable=True)       # e.g. "Health Insurance"
+    amount = Column(Float, nullable=True)            # claimed amount in INR
+    priority = Column(String, nullable=True)         # low | medium | high | urgent
+    description = Column(Text, nullable=True)
     submitted_at = Column(DateTime, nullable=True)
-    status = Column(String, nullable=False, default="pending")  # pending | processing | completed | failed
+    status = Column(String, nullable=False, default="creating")  # creating | extracting | ready | processing | completed | approved | rejected | failed
+    workflow_run_id = Column(String, nullable=True)  # claim_processing_workflow run ID
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -147,3 +152,19 @@ class ClaimReport(Base):
     processed_at = Column(DateTime, default=datetime.utcnow)
 
     claim = relationship("Claim", back_populates="report")
+
+
+class ClaimDocumentLink(Base):
+    """
+    Join table that maps a Document (OCR pipeline) to a Claim + doc_type.
+    Created when a document is uploaded with a claim_id query param.
+    When OCR completes, the extracted fields are synced to claim_documents via this link.
+    """
+    __tablename__ = "claim_document_links"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    claim_id = Column(String, ForeignKey("claims.claim_id"), nullable=False, index=True)
+    document_id = Column(String, ForeignKey("documents.id"), nullable=False, index=True)
+    doc_type = Column(String, nullable=False)    # e.g. "medical_report"
+    synced = Column(String, nullable=False, default="pending")  # pending | synced | failed
+    created_at = Column(DateTime, default=datetime.utcnow)

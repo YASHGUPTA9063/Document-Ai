@@ -144,10 +144,10 @@ async def classifier_activity(document_id: str, file_path: str) -> dict:
         doc_type_returned = parsed.get("doc_type", "Others").strip()
 
         # Match returned type back to the formal display name or default to Others
-        matched_doc_type = "Others"
+        matched_doc_type = "others"
         for key, display_name in types_map.items():
             if doc_type_returned.lower() in [key.lower(), display_name.lower(), key.replace("_", " ").lower()]:
-                matched_doc_type = display_name
+                matched_doc_type = key  # store snake_case key — all downstream queries use this form
                 break
 
         return {

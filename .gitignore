@@ -39,3 +39,6 @@ test.*
 test_*.*
 fake*.*
 scratch.*
+
+# Agent customizations (skills, rules — local dev config only)
+.agents/

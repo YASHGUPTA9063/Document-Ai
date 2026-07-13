@@ -152,7 +152,7 @@ async def pre_validator_activity(document_id: str, file_path: str) -> dict:
                 if mime_type == "application/pdf":
                     file_content_block = {
                         "type": "document_url",
-                        "document_url": {"url": data_url},
+                        "document_url": data_url,
                     }
                 else:
                     file_content_block = {

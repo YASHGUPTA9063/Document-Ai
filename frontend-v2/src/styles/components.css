@@ -1640,7 +1640,8 @@ input[type='range']::-webkit-slider-runnable-track {
 }
 
 .wf-graph-grid-wrap {
-  position: relative; flex: 0 0 auto;
+  position: relative; flex: 1; margin: 40px 32px;
+  display: flex; flex-direction: column;
 }
 .wf-graph-edges {
   position: absolute; inset: 0; width: 100%; height: 100%;
@@ -1657,7 +1658,8 @@ input[type='range']::-webkit-slider-runnable-track {
 .wf-graph-grid {
   position: relative; z-index: 2;
   display: grid; grid-template-columns: 1fr 1fr;
-  gap: 20px 40px; padding: 28px 32px;
+  flex: 1; align-items: center; justify-items: center;
+  gap: 0 40px;
 }
 
 /* Graph Node (replaces old wf-pipe-node) */
@@ -1672,6 +1674,7 @@ input[type='range']::-webkit-slider-runnable-track {
 .wf-graph-node.waiting  { border-color: var(--border); }
 .wf-graph-node.running  { border-color: rgba(59,130,246,0.5); background: rgba(59,130,246,0.05); }
 .wf-graph-node.completed { border-color: rgba(16,185,129,0.4); background: rgba(16,185,129,0.05); }
+.wf-graph-node.warning, .wf-graph-node.failed { border-color: var(--danger-border); background: var(--danger-dim); }
 
 .wf-graph-node-head { display: flex; align-items: center; gap: 8px; }
 .wf-graph-node-icon {
@@ -1681,6 +1684,7 @@ input[type='range']::-webkit-slider-runnable-track {
 }
 .wf-graph-node-icon.running  { border-color: rgba(59,130,246,0.4); color: var(--info); }
 .wf-graph-node-icon.completed { border-color: rgba(16,185,129,0.4); color: var(--success); }
+.wf-graph-node-icon.warning, .wf-graph-node-icon.failed { border-color: var(--danger-border); color: var(--danger); }
 .wf-graph-node-icon.waiting  { color: var(--muted); }
 
 .wf-graph-node-label { font-size: var(--text-md); font-weight: 600; }
@@ -1688,6 +1692,7 @@ input[type='range']::-webkit-slider-runnable-track {
 .wf-graph-node-state { font-weight: 600; }
 .wf-graph-node-state.running { color: var(--info); }
 .wf-graph-node-state.completed { color: var(--success); }
+.wf-graph-node-state.warning, .wf-graph-node-state.failed { color: var(--danger); }
 .wf-graph-node-state.waiting { color: var(--muted); }
 .wf-graph-node-dur { font-family: monospace; color: var(--muted); }
 
@@ -2005,4 +2010,83 @@ input[type='range']::-webkit-slider-runnable-track {
 
 .wf-final-exports { display: flex; gap: 8px; margin-top: 12px; }
 .wf-final-exports .btn { flex: 1; }
+
+/* Bulk Uploader Styles */
+.bulk-upload-zone {
+  border: 2px dashed rgba(79, 110, 247, 0.25);
+  border-radius: var(--radius);
+  background: rgba(79, 110, 247, 0.02);
+  padding: 32px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all var(--dur-md) var(--ease);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  position: relative;
+}
+.bulk-upload-zone:hover, .bulk-upload-zone.drag-active {
+  border-color: var(--accent);
+  background: rgba(79, 110, 247, 0.06);
+  transform: translateY(-1px);
+}
+.bulk-upload-icon {
+  color: var(--accent);
+  transition: transform var(--dur-md) var(--ease);
+}
+.bulk-upload-zone:hover .bulk-upload-icon {
+  transform: translateY(-2px) scale(1.05);
+}
+.bulk-upload-title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text);
+}
+.bulk-upload-sub {
+  font-size: var(--text-sm);
+  color: var(--muted);
+  line-height: 1.4;
+}
+.bulk-file-list {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.bulk-file-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--card-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: var(--text-sm);
+  animation: slide-in 200ms var(--ease) both;
+}
+.bulk-file-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+.bulk-file-name {
+  color: var(--text);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.bulk-file-size {
+  font-size: var(--text-xs);
+  color: var(--muted);
+  flex-shrink: 0;
+}
 

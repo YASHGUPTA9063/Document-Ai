@@ -90,7 +90,7 @@ async def claim_integrity_activity(claim_id: str, claimant_id: str, policy_id: s
 
             for tool_call in message.tool_calls:
                 args = json.loads(tool_call.function.arguments)
-                result = dispatch_claim_tool(tool_call.function.name, args)
+                result = await dispatch_claim_tool(tool_call.function.name, args)
                 logger.info(f"[Claim {claim_id}] Executed tool '{tool_call.function.name}'")
                 messages.append({
                     "role": "tool",

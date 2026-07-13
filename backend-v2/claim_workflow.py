@@ -45,6 +45,39 @@ async def update_claim_status_activity(claim_id: str, status: str) -> str:
     await claim_db.update_claim_status(claim_id, status)
     return status
 
+@workflows.activity()
+async def save_claim_report_activity(
+    claim_id: str,
+    agent_results: dict,
+    suggestion: str,
+    overall_status: str
+) -> dict:
+    """Saves the final report to DB as an activity to prevent Temporal IO errors."""
+    import db.claim_operations as claim_db
+    
+    claim = await claim_db.get_claim(claim_id)
+    claimant_name = claim.claimant_name if claim else None
+    
+    await claim_db.save_claim_report(
+        claim_id=claim_id,
+        claimant_name=claimant_name,
+        agent_results=agent_results,
+        suggestion=suggestion,
+        overall_status=overall_status
+    )
+    from datetime import datetime, timezone
+    return {
+        "claimant_name": claimant_name,
+        "processed_at": datetime.now(timezone.utc).isoformat()
+    }
+# ─── INCREMENTAL RESULT ACTIVITY ─────────────────────────────────────────────
+
+@workflows.activity()
+async def upsert_agent_result_activity(claim_id: str, agent_key: str, result: dict) -> None:
+    """Persists one agent's output to DB mid-workflow so the frontend can show it live."""
+    import db.claim_operations as claim_db
+    await claim_db.upsert_agent_result(claim_id, agent_key, result)
+
 
 # ─── REPORT AGENT ACTIVITY ────────────────────────────────────────────────────
 
@@ -170,26 +203,31 @@ class ClaimProcessingWorkflow(workflows.InteractiveWorkflow):
         logger.info(f"[Claim {claim_id}] Step 1: Claim Integrity Agent")
         await update_claim_status_activity(claim_id, "checking_integrity")
         integrity_result = await claim_integrity_activity(claim_id, claimant_id, policy_id)
+        await upsert_agent_result_activity(claim_id, "claim_integrity", integrity_result)
 
         # ── Step 2 — Medical Agent ────────────────────────────────────────────
         logger.info(f"[Claim {claim_id}] Step 2: Medical Agent")
         await update_claim_status_activity(claim_id, "checking_medical")
         medical_result = await claim_medical_activity(claim_id)
+        await upsert_agent_result_activity(claim_id, "medical", medical_result)
 
         # ── Step 3 — Treatment Agent ──────────────────────────────────────────
         logger.info(f"[Claim {claim_id}] Step 3: Treatment Agent")
         await update_claim_status_activity(claim_id, "checking_treatment")
         treatment_result = await claim_treatment_activity(claim_id)
+        await upsert_agent_result_activity(claim_id, "treatment", treatment_result)
 
         # ── Step 4 — Disability Agent ─────────────────────────────────────────
         logger.info(f"[Claim {claim_id}] Step 4: Disability Agent")
         await update_claim_status_activity(claim_id, "checking_disability")
         disability_result = await claim_disability_activity(claim_id)
+        await upsert_agent_result_activity(claim_id, "disability", disability_result)
 
         # ── Step 5 — Litigation Agent ─────────────────────────────────────────
         logger.info(f"[Claim {claim_id}] Step 5: Litigation Agent")
         await update_claim_status_activity(claim_id, "checking_litigation")
         litigation_result = await claim_litigation_activity(claim_id, claimant_id)
+        await upsert_agent_result_activity(claim_id, "litigation", litigation_result)
 
         # ── Collect all agent results ─────────────────────────────────────────
         agent_results = {
@@ -208,18 +246,15 @@ class ClaimProcessingWorkflow(workflows.InteractiveWorkflow):
         overall_status = suggestion_result.get("overall_status", "REVIEW BEFORE APPROVAL")
         suggestion_text = suggestion_result.get("suggestion", "")
 
-        # Pull claimant name from integrity result if available
-        claimant_name = _extract_claimant_name(integrity_result)
-
         # ── Step 7 — Save report to DB ────────────────────────────────────────
         logger.info(f"[Claim {claim_id}] Step 7: Saving report to DB")
-        await claim_db.save_claim_report(
+        save_result = await save_claim_report_activity(
             claim_id=claim_id,
-            claimant_name=claimant_name,
             agent_results=agent_results,
             suggestion=suggestion_text,
             overall_status=overall_status
         )
+        claimant_name = save_result.get("claimant_name")
         await update_claim_status_activity(claim_id, "completed")
 
         # ── Build and return the full report dict ─────────────────────────────
@@ -228,7 +263,8 @@ class ClaimProcessingWorkflow(workflows.InteractiveWorkflow):
             claimant_name=claimant_name,
             agent_results=agent_results,
             overall_status=overall_status,
-            suggestion=suggestion_text
+            suggestion=suggestion_text,
+            processed_at=save_result.get("processed_at")
         )
 
         logger.info(f"[Claim {claim_id}] Workflow completed. Overall status: {overall_status}")
@@ -236,39 +272,23 @@ class ClaimProcessingWorkflow(workflows.InteractiveWorkflow):
 
 
 # ─── HELPERS ──────────────────────────────────────────────────────────────────
-
-def _extract_claimant_name(integrity_result: dict) -> str | None:
-    """
-    Tries to extract the claimant name from the Integrity Agent's evidence/checks.
-    Returns None if not found — the DB field is nullable.
-    """
-    checks = integrity_result.get("checks", [])
-    for check in checks:
-        explanation = check.get("explanation", "")
-        # Simple heuristic: the required fields check usually mentions the claimant name
-        # If the agent surfaces evidence, it would be in a structured field
-    # Fall back to None — can be set from the Claim table directly
-    return integrity_result.get("claimant_name") or None
-
-
 def _build_report_dict(
     claim_id: str,
     claimant_name: str | None,
     agent_results: dict,
     overall_status: str,
-    suggestion: str
+    suggestion: str,
+    processed_at: str | None
 ) -> dict:
     """
     Builds the structured final report dictionary returned by the workflow.
     Matches the format described in the POC spec.
     """
-    from datetime import datetime, timezone
-
     # Map agent results to a display-friendly summary
     agent_summary = {}
     for key, result in agent_results.items():
         agent_summary[key] = {
-            "status": result.get("status", "UNKNOWN"),
+            "status": result.get("status") or "UNKNOWN",   # `or` catches None and "" too
             "overall_reason": result.get("overall_reason", ""),
             "checks": result.get("checks", [])
         }
@@ -276,7 +296,7 @@ def _build_report_dict(
     return {
         "claim_id": claim_id,
         "claimant_name": claimant_name,
-        "processed_at": datetime.now(timezone.utc).isoformat(),
+        "processed_at": processed_at,
         "agent_results": agent_summary,
         "overall_status": overall_status,
         "suggestion": suggestion

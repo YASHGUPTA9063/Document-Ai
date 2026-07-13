@@ -167,7 +167,7 @@ export function Dashboard() {
                       </td>
                       <td>
                         {doc.doc_type ? (
-                          <span className="badge badge-cyan">{doc.doc_type}</span>
+                          <span className="badge badge-cyan">{doc.doc_type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</span>
                         ) : (
                           <span style={{ color: 'var(--muted)', fontSize: 'var(--text-sm)' }}>—</span>
                         )}

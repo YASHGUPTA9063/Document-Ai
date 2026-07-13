@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import declarative_base
+from sqlalchemy import text
 from config import settings
 
 engine = create_async_engine(
@@ -15,33 +16,23 @@ AsyncSessionLocal = async_sessionmaker(
     autoflush=False
 )
 
-from sqlalchemy import text
-
 Base = declarative_base()
+
 
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        try:
-            await conn.execute(text("ALTER TABLE documents ADD COLUMN file_hash VARCHAR"))
-        except Exception:
-            pass
-        try:
-            await conn.execute(text("ALTER TABLE documents ADD COLUMN customer_id VARCHAR"))
-        except Exception:
-            pass
-        try:
-            await conn.execute(text("ALTER TABLE extracted_data ADD COLUMN signature_verification JSON"))
-        except Exception:
-            pass
-        try:
-            await conn.execute(text("ALTER TABLE extracted_data ADD COLUMN photo_verification JSON"))
-        except Exception:
-            pass
-        try:
-            await conn.execute(text("ALTER TABLE extracted_data ADD COLUMN fraud_check JSON"))
-        except Exception:
-            pass
+        for col in [
+            "ALTER TABLE documents ADD COLUMN file_hash VARCHAR",
+            "ALTER TABLE documents ADD COLUMN customer_id VARCHAR",
+            "ALTER TABLE extracted_data ADD COLUMN signature_verification JSON",
+            "ALTER TABLE extracted_data ADD COLUMN photo_verification JSON",
+            "ALTER TABLE extracted_data ADD COLUMN fraud_check JSON",
+        ]:
+            try:
+                await conn.execute(text(col))
+            except Exception:
+                pass
 
 
 async def init_claim_tables():
@@ -52,5 +43,18 @@ async def init_claim_tables():
     """
     async with engine.begin() as conn:
         # Import claim models so SQLAlchemy registers them on Base.metadata
-        from db.models import Claim, ClaimDocument, ClaimantHistory, PolicyDetails, ClaimReport  # noqa: F401
+        from db.models import Claim, ClaimDocument, ClaimantHistory, PolicyDetails, ClaimReport, ClaimDocumentLink  # noqa: F401
         await conn.run_sync(Base.metadata.create_all)
+
+        # Defensive migrations for Claim columns added in this iteration
+        for col in [
+            "ALTER TABLE claims ADD COLUMN claim_type VARCHAR",
+            "ALTER TABLE claims ADD COLUMN amount FLOAT",
+            "ALTER TABLE claims ADD COLUMN priority VARCHAR",
+            "ALTER TABLE claims ADD COLUMN description TEXT",
+            "ALTER TABLE claims ADD COLUMN workflow_run_id VARCHAR",
+        ]:
+            try:
+                await conn.execute(text(col))
+            except Exception:
+                pass

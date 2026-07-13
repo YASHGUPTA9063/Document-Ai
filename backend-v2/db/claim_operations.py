@@ -5,14 +5,207 @@ Async database operations for the Claim Processing workflow.
 Kept separate from operations.py to avoid polluting the OCR document workflow's DB layer.
 """
 import logging
+import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 
 from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
 from db.database import AsyncSessionLocal
-from db.models import Claim, ClaimDocument, ClaimantHistory, PolicyDetails, ClaimReport
+from db.models import Claim, ClaimDocument, ClaimantHistory, PolicyDetails, ClaimReport, ClaimDocumentLink, Document, ExtractedData
 
 logger = logging.getLogger(__name__)
+
+
+def _gen_claim_id() -> str:
+    """Generate a human-readable claim ID like CLM-2026-XXX."""
+    suffix = str(uuid.uuid4().int)[:4]
+    return f"CLM-{datetime.utcnow().year}-{suffix}"
+
+
+def _gen_claimant_id(claimant_name: str) -> str:
+    """Derive a simple claimant ID from the name."""
+    slug = claimant_name.strip().replace(" ", "")[:6].upper()
+    return f"CLT-{slug}-{str(uuid.uuid4().int)[:4]}"
+
+
+# ─── CLAIM CRUD ───────────────────────────────────────────────────────────────
+
+async def create_claim(
+    claimant_name: str,
+    claim_type: str,
+    policy_number: str,
+    description: Optional[str] = None,
+    priority: str = "medium",
+    amount: float = 0.0,
+) -> Claim:
+    """Creates a new Claim record. Returns the created Claim object."""
+    claim_id = _gen_claim_id()
+    claimant_id = _gen_claimant_id(claimant_name)
+
+    async with AsyncSessionLocal() as session:
+        claim = Claim(
+            claim_id=claim_id,
+            claimant_id=claimant_id,
+            policy_id=policy_number,
+            claimant_name=claimant_name,
+            claim_type=claim_type,
+            amount=amount,
+            priority=priority,
+            description=description,
+            submitted_at=datetime.utcnow(),
+            status="creating",
+        )
+        session.add(claim)
+        await session.commit()
+        await session.refresh(claim)
+        logger.info(f"Created claim {claim_id} for claimant '{claimant_name}'")
+        return claim
+
+
+async def get_all_claims() -> list[Claim]:
+    """Returns all claims ordered by created_at descending."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Claim).order_by(Claim.created_at.desc())
+        )
+        return result.scalars().all()
+
+
+async def get_claim_with_docs(claim_id: str) -> Optional[Claim]:
+    """Returns a Claim with its ClaimDocumentLinks eagerly loaded."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Claim).where(Claim.claim_id == claim_id)
+        )
+        return result.scalar_one_or_none()
+
+
+async def get_claim_extraction_status(claim_id: str) -> dict:
+    """
+    Checks how many documents linked to this claim have finished OCR.
+    Returns total, completed, failed, and whether all are done (ready_to_process).
+    """
+    async with AsyncSessionLocal() as session:
+        # Get all document links for this claim
+        links_result = await session.execute(
+            select(ClaimDocumentLink).where(ClaimDocumentLink.claim_id == claim_id)
+        )
+        links = links_result.scalars().all()
+
+        if not links:
+            return {
+                "claim_id": claim_id,
+                "total_docs": 0,
+                "completed_docs": 0,
+                "failed_docs": 0,
+                "ready_to_process": False,
+                "doc_statuses": []
+            }
+
+        doc_statuses = []
+        completed = 0
+        failed = 0
+
+        for link in links:
+            doc_result = await session.execute(
+                select(Document).where(Document.id == link.document_id)
+            )
+            doc = doc_result.scalar_one_or_none()
+            status = doc.status if doc else "unknown"
+            filename = doc.filename if doc else "unknown"
+
+            if status == "completed":
+                completed += 1
+            elif status in ("failed", "rejected"):
+                failed += 1
+
+            doc_statuses.append({
+                "document_id": link.document_id,
+                "doc_type": doc.doc_type if doc else link.doc_type,
+                "filename": filename,
+                "status": status,
+                "extracted": link.synced == "synced"
+            })
+
+        total = len(links)
+        ready = (completed + failed) == total and completed > 0
+
+        if ready:
+            claim_result = await session.execute(select(Claim).where(Claim.claim_id == claim_id))
+            claim = claim_result.scalar_one_or_none()
+            if claim and claim.status == "extracting":
+                claim.status = "ready"
+                
+                # Fetch claim_form data to populate top level fields
+                for link in links:
+                    doc_res = await session.execute(select(Document).where(Document.id == link.document_id))
+                    doc = doc_res.scalar_one_or_none()
+                    if doc and doc.doc_type in ("claim_form", "policy_document"):
+                        ed_res = await session.execute(select(ExtractedData).where(ExtractedData.document_id == link.document_id))
+                        extracted = ed_res.scalar_one_or_none()
+                        if extracted and extracted.validated_data:
+                            fields = extracted.validated_data
+                            if doc.doc_type == "claim_form":
+                                claimant_name = fields.get("claimant_name") or fields.get("name")
+                                if claimant_name:
+                                    claim.claimant_name = str(claimant_name)
+                                claim_type = fields.get("claim_type") or fields.get("type")
+                                if claim_type:
+                                    claim.claim_type = str(claim_type)
+                                amount = fields.get("amount") or fields.get("claim_amount") or fields.get("billed_amount")
+                                if amount is not None:
+                                    try:
+                                        claim.amount = float(amount)
+                                    except (ValueError, TypeError):
+                                        pass
+                            if doc.doc_type in ("claim_form", "policy_document"):
+                                policy_num = fields.get("policy_number") or fields.get("policy_id") or fields.get("policy_num")
+                                if policy_num:
+                                    claim.policy_id = str(policy_num)
+                await session.commit()
+                logger.info(f"[Claim {claim_id}] All docs extracted — status → ready")
+
+        return {
+            "claim_id": claim_id,
+            "total_docs": total,
+            "completed_docs": completed,
+            "failed_docs": failed,
+            "ready_to_process": ready,
+            "doc_statuses": doc_statuses
+        }
+
+
+async def link_document_to_claim(claim_id: str, document_id: str, doc_type: str) -> ClaimDocumentLink:
+    """
+    Creates a ClaimDocumentLink entry linking an OCR document to a claim.
+    Called when a document is uploaded with a claim_id param.
+    Also transitions claim status to 'extracting' if it was 'creating'.
+    """
+    async with AsyncSessionLocal() as session:
+        link = ClaimDocumentLink(
+            claim_id=claim_id,
+            document_id=document_id,
+            doc_type=doc_type,
+            synced="pending"
+        )
+        session.add(link)
+
+        # Transition claim status from creating → extracting
+        claim_result = await session.execute(
+            select(Claim).where(Claim.claim_id == claim_id)
+        )
+        claim = claim_result.scalar_one_or_none()
+        if claim and claim.status == "creating":
+            claim.status = "extracting"
+
+        await session.commit()
+        await session.refresh(link)
+        logger.info(f"Linked document {document_id} (type: {doc_type}) → claim {claim_id}")
+        return link
+
+
+
 
 
 # ─── FETCH TOOLS (called by claim tool functions) ─────────────────────────────
@@ -21,26 +214,25 @@ async def get_claim_documents_data(claim_id: str, doc_types: list[str]) -> dict:
     """
     Fetches the OCR field-value pairs for the specified document types belonging to a claim.
     Returns a dict keyed by doc_type, each containing the extracted fields.
-
-    Example return:
-    {
-        "claim_form": {"claimant_name": "John Doe", "dob": "1985-03-12", ...},
-        "medical_report": {"diagnosis": "Lumbar Disc Herniation", "icd_code": "M51.16", ...}
-    }
     """
     result_data = {}
     async with AsyncSessionLocal() as session:
         for doc_type in doc_types:
-            query = select(ClaimDocument).where(
-                ClaimDocument.claim_id == claim_id,
-                ClaimDocument.doc_type == doc_type
+            query = (
+                select(ExtractedData.validated_data)
+                .join(Document, Document.id == ExtractedData.document_id)
+                .join(ClaimDocumentLink, ClaimDocumentLink.document_id == Document.id)
+                .where(
+                    ClaimDocumentLink.claim_id == claim_id,
+                    Document.doc_type == doc_type
+                )
             )
             result = await session.execute(query)
-            doc = result.scalar_one_or_none()
-            if doc:
-                result_data[doc_type] = doc.fields
+            fields = result.scalar_one_or_none()
+            if fields:
+                result_data[doc_type] = fields
             else:
-                result_data[doc_type] = None  # document type not found for this claim
+                result_data[doc_type] = None
                 logger.warning(f"[Claim {claim_id}] No document found for doc_type='{doc_type}'")
     return result_data
 
@@ -167,6 +359,34 @@ async def save_claim_report(
         return report
 
 
+async def upsert_agent_result(claim_id: str, agent_key: str, result: dict) -> None:
+    """
+    Writes a single agent's result into ClaimReport.agent_results incrementally.
+    Creates a shell ClaimReport row if one does not exist yet.
+    Called after each agent activity so results are visible before the workflow finishes.
+    """
+    import copy
+    from sqlalchemy.orm.attributes import flag_modified
+
+    async with AsyncSessionLocal() as session:
+        res = await session.execute(
+            select(ClaimReport).where(ClaimReport.claim_id == claim_id)
+        )
+        report = res.scalar_one_or_none()
+
+        if not report:
+            report = ClaimReport(claim_id=claim_id, agent_results={})
+            session.add(report)
+
+        current = copy.deepcopy(report.agent_results or {})
+        current[agent_key] = result
+        report.agent_results = current
+        flag_modified(report, "agent_results")  # force SQLAlchemy to detect JSON mutation
+
+        await session.commit()
+        logger.info(f"[Claim {claim_id}] Incremental agent result saved: {agent_key}")
+
+
 async def update_claim_status(claim_id: str, status: str):
     """Updates the processing status of a claim record."""
     async with AsyncSessionLocal() as session:
@@ -188,3 +408,24 @@ async def get_claim(claim_id: str) -> Optional[Claim]:
             select(Claim).where(Claim.claim_id == claim_id)
         )
         return result.scalar_one_or_none()
+
+
+async def delete_claim(claim_id: str) -> bool:
+    """Deletes a Claim record and all its linked ClaimDocumentLinks. Returns True if deleted, False if not found."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Claim)
+            .options(selectinload(Claim.documents), selectinload(Claim.report))
+            .where(Claim.claim_id == claim_id)
+        )
+        claim = result.scalar_one_or_none()
+        if not claim:
+            return False
+        # Delete linked documents first
+        from sqlalchemy import delete as sql_delete
+        await session.execute(sql_delete(ClaimDocumentLink).where(ClaimDocumentLink.claim_id == claim_id))
+        await session.delete(claim)
+        await session.commit()
+        logger.info(f"Deleted claim {claim_id} and its document links.")
+        return True
+

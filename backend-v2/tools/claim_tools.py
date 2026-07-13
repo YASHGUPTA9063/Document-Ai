@@ -96,62 +96,28 @@ CLAIM_TOOLS = [
 
 # ─── TOOL IMPLEMENTATIONS ─────────────────────────────────────────────────────
 
-def get_claim_documents_data(claim_id: str, doc_types: list) -> dict:
-    """
-    Sync wrapper around the async DB operation.
-    Called from within agent activity tool-call loops.
-    Returns field-value pairs grouped by doc_type.
-    """
+async def get_claim_documents_data(claim_id: str, doc_types: list) -> dict:
     from db.claim_operations import get_claim_documents_data as _async_fn
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = pool.submit(asyncio.run, _async_fn(claim_id, doc_types))
-                return future.result()
-        else:
-            return loop.run_until_complete(_async_fn(claim_id, doc_types))
+        return await _async_fn(claim_id, doc_types)
     except Exception as e:
         logger.error(f"[Tool] get_claim_documents_data failed for claim {claim_id}: {e}")
         return {"error": str(e)}
 
 
-def get_claimant_history(claimant_id: str) -> dict:
-    """
-    Sync wrapper around the async DB operation.
-    Returns prior claims count and list for the given claimant.
-    """
+async def get_claimant_history(claimant_id: str) -> dict:
     from db.claim_operations import get_claimant_history as _async_fn
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = pool.submit(asyncio.run, _async_fn(claimant_id))
-                return future.result()
-        else:
-            return loop.run_until_complete(_async_fn(claimant_id))
+        return await _async_fn(claimant_id)
     except Exception as e:
         logger.error(f"[Tool] get_claimant_history failed for claimant {claimant_id}: {e}")
         return {"error": str(e)}
 
 
-def get_policy_details(policy_id: str) -> dict:
-    """
-    Sync wrapper around the async DB operation.
-    Returns policy coverage info for the given policy_id.
-    """
+async def get_policy_details(policy_id: str) -> dict:
     from db.claim_operations import get_policy_details as _async_fn
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = pool.submit(asyncio.run, _async_fn(policy_id))
-                return future.result()
-        else:
-            return loop.run_until_complete(_async_fn(policy_id))
+        return await _async_fn(policy_id)
     except Exception as e:
         logger.error(f"[Tool] get_policy_details failed for policy {policy_id}: {e}")
         return {"error": str(e)}
@@ -159,7 +125,7 @@ def get_policy_details(policy_id: str) -> dict:
 
 # ─── DISPATCH HELPER ──────────────────────────────────────────────────────────
 
-def dispatch_claim_tool(tool_name: str, args: dict) -> dict:
+async def dispatch_claim_tool(tool_name: str, args: dict) -> dict:
     """
     Central dispatcher called from agent activity tool-call loops.
     Maps tool name strings to their implementations.
@@ -172,14 +138,14 @@ def dispatch_claim_tool(tool_name: str, args: dict) -> dict:
         dict result from the tool function, ready to be JSON-serialized as a tool message.
     """
     if tool_name == "get_claim_documents_data":
-        return get_claim_documents_data(
+        return await get_claim_documents_data(
             claim_id=args["claim_id"],
             doc_types=args["doc_types"]
         )
     elif tool_name == "get_claimant_history":
-        return get_claimant_history(claimant_id=args["claimant_id"])
+        return await get_claimant_history(claimant_id=args["claimant_id"])
     elif tool_name == "get_policy_details":
-        return get_policy_details(policy_id=args["policy_id"])
+        return await get_policy_details(policy_id=args["policy_id"])
     else:
         logger.error(f"[Tool Dispatcher] Unknown tool name: {tool_name}")
         return {"error": f"Unknown tool: {tool_name}"}

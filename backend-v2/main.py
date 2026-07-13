@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy import delete
 
 from config import settings
-from db.database import init_db, AsyncSessionLocal
+from db.database import init_db, init_claim_tables, AsyncSessionLocal
 from db.models import Document, ExtractedData, CustomerReference
 from utils.file_handler import save_file, delete_file
 from utils.norm_config import load_normalization_config, save_normalization_config
@@ -25,6 +25,12 @@ from schemas.documents import (
     UpdateExtractedDataRequest
 )
 from workflow import DocumentProcessingWorkflow
+from claim_workflow import ClaimProcessingWorkflow
+from schemas.claims import (
+    CreateClaimRequest, ClaimResponse, ClaimStatusResponse,
+    ClaimReportResponse, ClaimDecisionRequest
+)
+import db.claim_operations as claim_db
 
 import asyncio
 import mistralai.workflows as workflows
@@ -41,6 +47,7 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Initializing database...")
     await init_db()
+    await init_claim_tables()
     
     logger.info("Ensuring storage directory exists...")
     os.makedirs(settings.STORAGE_DIR, exist_ok=True)
@@ -56,7 +63,7 @@ async def lifespan(app: FastAPI):
     
     logger.info("Starting Mistral Workflow worker...")
     global worker_task
-    worker_task = asyncio.create_task(workflows.run_worker([DocumentProcessingWorkflow]))
+    worker_task = asyncio.create_task(workflows.run_worker([DocumentProcessingWorkflow, ClaimProcessingWorkflow]))
     
     yield
     
@@ -89,7 +96,9 @@ ALLOWED_TYPES = {
 @app.post("/upload", response_model=DocumentUploadResponse)
 async def upload_document(
     file: UploadFile = File(...),
-    customer_id: str = Query(None, description="Optional customer ID to associate with the document")
+    customer_id: str = Query(None, description="Optional customer ID to associate with the document"),
+    claim_id: str = Query(None, description="Optional claim ID — links this document to a claim and triggers field sync after OCR"),
+    doc_type: str = Query(None, description="Document type label for claim (e.g. medical_report, claim_form)"),
 ):
     if file.content_type not in ALLOWED_TYPES:
         raise HTTPException(status_code=400, detail="Unsupported file type")
@@ -125,7 +134,20 @@ async def upload_document(
         
         doc.workflow_run_id = run_id
         await session.commit()
-        
+
+        # If this upload is part of a claim, create the link
+        if claim_id:
+            try:
+                actual_doc_type = doc_type or "classification_pending"
+                await claim_db.link_document_to_claim(
+                    claim_id=claim_id,
+                    document_id=doc.id,
+                    doc_type=actual_doc_type
+                )
+                logger.info(f"Document {doc.id} linked to claim {claim_id} as '{actual_doc_type}'")
+            except Exception as link_err:
+                logger.warning(f"Failed to link document to claim: {link_err}")
+
         return DocumentUploadResponse(
             document_id=doc.id,
             filename=doc.filename,
@@ -1091,4 +1113,197 @@ async def register_customer_reference(ref: CustomerReferenceCreate):
             session.add(new_ref)
             await session.commit()
             return {"status": "created", "customer_id": ref.customer_id}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CLAIM PROCESSING ROUTES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/claims")
+async def create_claim(request: CreateClaimRequest):
+    """
+    Create a new claim record.
+    Returns the generated claim_id — the frontend uses this to link subsequent uploads.
+    """
+    claim = await claim_db.create_claim(
+        claimant_name=request.claimant_name,
+        claim_type=request.claim_type,
+        policy_number=request.policy_number,
+        description=request.description,
+        priority=request.priority or "medium",
+        amount=request.amount or 0.0,
+    )
+    return {
+        "claim_id": claim.claim_id,
+        "claimant_name": claim.claimant_name,
+        "claim_type": claim.claim_type,
+        "policy_number": claim.policy_id,
+        "priority": claim.priority,
+        "amount": claim.amount,
+        "description": claim.description,
+        "status": claim.status,
+        "submitted_at": claim.submitted_at.isoformat() if claim.submitted_at else None,
+    }
+
+
+@app.get("/claims")
+async def list_claims():
+    """
+    Return all claims ordered by newest first.
+    Each claim includes its current status and basic metadata.
+    """
+    claims = await claim_db.get_all_claims()
+    result = []
+    for c in claims:
+        result.append({
+            "claim_id": c.claim_id,
+            "claimant_name": c.claimant_name,
+            "claim_type": c.claim_type,
+            "policy_number": c.policy_id,
+            "priority": c.priority,
+            "amount": c.amount,
+            "description": c.description,
+            "status": c.status,
+            "submitted_at": c.submitted_at.isoformat() if c.submitted_at else None,
+            "workflow_run_id": c.workflow_run_id,
+        })
+    return result
+
+
+@app.get("/claims/{claim_id}/status")
+async def get_claim_status(claim_id: str):
+    """
+    Returns processing status and any agent results written so far.
+    agent_results is populated incrementally as each agent finishes,
+    so the frontend can show live reasoning without waiting for the full workflow.
+    """
+    claim = await claim_db.get_claim(claim_id)
+    if not claim:
+        raise HTTPException(status_code=404, detail=f"Claim {claim_id} not found")
+
+    status_info = await claim_db.get_claim_extraction_status(claim_id)
+
+    # Fetch any partial agent results written incrementally by the workflow
+    from sqlalchemy.future import select as _sel
+    from db.models import ClaimReport as _CR
+    agent_results = {}
+    async with AsyncSessionLocal() as session:
+        res = await session.execute(_sel(_CR).where(_CR.claim_id == claim_id))
+        partial_report = res.scalar_one_or_none()
+        if partial_report:
+            agent_results = partial_report.agent_results or {}
+
+    return {
+        "claim_id": claim_id,
+        "claim_status": claim.status,
+        "agent_results": agent_results,
+        "total_docs": status_info["total_docs"],
+        "completed_docs": status_info["completed_docs"],
+        "failed_docs": status_info["failed_docs"],
+        "ready_to_process": status_info["ready_to_process"],
+        "doc_statuses": status_info["doc_statuses"],
+    }
+
+
+@app.post("/claims/{claim_id}/run")
+async def run_claim_workflow(claim_id: str):
+    """
+    Triggers the claim_processing_workflow for a given claim.
+    Only allowed when claim status is 'ready'.
+    """
+    claim = await claim_db.get_claim(claim_id)
+    if not claim:
+        raise HTTPException(status_code=404, detail=f"Claim {claim_id} not found")
+    if claim.status not in ("ready", "failed"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Claim is not ready to process. Current status: {claim.status}"
+        )
+
+    try:
+        run_response = await mistral_client.workflows.execute_workflow_async(
+            workflow_identifier="claim_processing_workflow",
+            input={
+                "claim_id": claim_id,
+                "claimant_id": claim.claimant_id,
+                "policy_id": claim.policy_id,
+            }
+        )
+        run_id = run_response.execution_id if hasattr(run_response, "execution_id") else "unknown_run_id"
+
+        # Save run_id and update status → processing
+        async with AsyncSessionLocal() as session:
+            from sqlalchemy.future import select as _sel
+            from db.models import Claim as _Claim
+            result = await session.execute(_sel(_Claim).where(_Claim.claim_id == claim_id))
+            c = result.scalar_one_or_none()
+            if c:
+                c.workflow_run_id = run_id
+                c.status = "processing"
+                await session.commit()
+
+        return {"claim_id": claim_id, "workflow_run_id": run_id, "status": "processing"}
+    except Exception as e:
+        logger.error(f"Failed to start claim workflow for {claim_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/claims/{claim_id}/report")
+async def get_claim_report(claim_id: str):
+    """
+    Returns the final ClaimReport for a completed claim.
+    Contains all 5 agent results and the suggestion paragraph.
+    """
+    from sqlalchemy.future import select as _sel
+    from db.models import ClaimReport as _CR
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(_sel(_CR).where(_CR.claim_id == claim_id))
+        report = result.scalar_one_or_none()
+
+    if not report:
+        raise HTTPException(status_code=404, detail=f"No report found for claim {claim_id}. Has the workflow completed?")
+
+    return {
+        "claim_id": report.claim_id,
+        "claimant_name": report.claimant_name,
+        "overall_status": report.overall_status,
+        "suggestion": report.suggestion,
+        "agent_results": report.agent_results,
+        "processed_at": report.processed_at.isoformat() if report.processed_at else None,
+    }
+
+
+@app.post("/claims/{claim_id}/decision")
+async def submit_claim_decision(claim_id: str, request: ClaimDecisionRequest):
+    """
+    Records the adjuster's final decision on a claim (approve or reject).
+    Updates claim status in the DB.
+    """
+    if request.decision not in ("approve", "reject"):
+        raise HTTPException(status_code=400, detail="decision must be 'approve' or 'reject'")
+
+    claim = await claim_db.get_claim(claim_id)
+    if not claim:
+        raise HTTPException(status_code=404, detail=f"Claim {claim_id} not found")
+
+    new_status = "approved" if request.decision == "approve" else "rejected"
+    await claim_db.update_claim_status(claim_id, new_status)
+
+    logger.info(f"[Claim {claim_id}] Decision: {new_status}. Notes: {request.notes}")
+    return {"claim_id": claim_id, "decision": new_status, "notes": request.notes}
+
+
+@app.delete("/claims/{claim_id}")
+async def delete_claim(claim_id: str):
+    """
+    Permanently deletes a claim and all its linked document associations.
+    Does NOT delete the underlying document files from storage.
+    """
+    deleted = await claim_db.delete_claim(claim_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Claim {claim_id} not found")
+    return {"claim_id": claim_id, "deleted": True}
+
+
 

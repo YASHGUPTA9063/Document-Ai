@@ -266,5 +266,96 @@ export async function saveNormConfig(config) {
   return data;
 }
 
+// ─── Claim Processing APIs ────────────────────────────────────────────────────
+
+/**
+ * Create a new claim record.
+ * @param {{ claimant_name, claim_type, policy_number, description, priority, amount }} payload
+ */
+export async function createClaim(payload) {
+  const { data } = await api.post('/claims', payload);
+  return data;
+}
+
+/**
+ * List all claims.
+ * @returns {Promise<Array>}
+ */
+export async function listClaims() {
+  const { data } = await api.get('/claims');
+  return data;
+}
+
+/**
+ * Get extraction status for all docs linked to a claim.
+ * @param {string} claimId
+ * @returns {Promise<{ claim_status, total_docs, completed_docs, failed_docs, ready_to_process, doc_statuses }>}
+ */
+export async function getClaimStatus(claimId) {
+  const { data } = await api.get(`/claims/${claimId}/status`);
+  return data;
+}
+
+/**
+ * Trigger the claim processing workflow.
+ * @param {string} claimId
+ * @returns {Promise<{ claim_id, workflow_run_id, status }>}
+ */
+export async function runClaimWorkflow(claimId) {
+  const { data } = await api.post(`/claims/${claimId}/run`);
+  return data;
+}
+
+/**
+ * Get the final claim report (after workflow completes).
+ * @param {string} claimId
+ * @returns {Promise<{ claim_id, claimant_name, overall_status, suggestion, agent_results, processed_at }>}
+ */
+export async function getClaimReport(claimId) {
+  const { data } = await api.get(`/claims/${claimId}/report`);
+  return data;
+}
+
+/**
+ * Submit adjuster's accept/reject decision.
+ * @param {string} claimId
+ * @param {'approve'|'reject'} decision
+ * @param {string} [notes]
+ */
+export async function submitClaimDecision(claimId, decision, notes = '') {
+  const { data } = await api.post(`/claims/${claimId}/decision`, { decision, notes });
+  return data;
+}
+
+/**
+ * Permanently delete a claim and its document links.
+ * @param {string} claimId
+ */
+export async function deleteClaim(claimId) {
+  const { data } = await api.delete(`/claims/${claimId}`);
+  return data;
+}
+
+/**
+ * Upload a document as part of a claim — passes claim_id and doc_type as query params.
+ * @param {string} claimId
+ * @param {File} file
+ * @param {string} docType  e.g. "medical_report"
+ * @param {(pct: number) => void} onProgress
+ */
+export async function uploadClaimDocument(claimId, file, docType, onProgress) {
+  const form = new FormData();
+  form.append('file', file);
+  const { data } = await api.post('/upload', form, {
+    params: { claim_id: claimId, doc_type: docType },
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120_000,
+    onUploadProgress: (e) => {
+      if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100));
+    },
+  });
+  return data;
+}
+
 export default api;
 

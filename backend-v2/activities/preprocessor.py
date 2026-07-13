@@ -144,6 +144,13 @@ async def preprocessor_activity(document_id: str, file_path: str) -> dict:
                 content = "\n".join(lines[:-1])
 
             result = json.loads(content.strip())
+            
+            # Anti-hallucination check: if the agent hallucinates the output path when the tool skipped it
+            preprocessed_path = result.get("preprocessed_path")
+            if preprocessed_path and not os.path.exists(preprocessed_path):
+                logger.warning(f"[Document {document_id}] Agent hallucinated non-existent path: {preprocessed_path}. Falling back to original.")
+                result["preprocessed_path"] = file_path
+                
             logger.info(f"[Document {document_id}] Preprocessing Agent final decision: {result}")
             return result
         else:
