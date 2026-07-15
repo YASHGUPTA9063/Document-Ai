@@ -42,6 +42,18 @@ async def get_template_metadata_activity(doc_type: str) -> dict:
     from tools.extractor import get_template_metadata
     return get_template_metadata(doc_type)
 
+async def _update_status(document_id: str, status: str) -> str:
+    with workflows.run_activities_locally():
+        return await update_status_activity(document_id, status)
+
+async def _update_status_and_message(document_id: str, status: str, message: str) -> str:
+    with workflows.run_activities_locally():
+        return await update_status_and_message_activity(document_id, status, message)
+
+async def _update_doc_type(document_id: str, doc_type: str) -> str:
+    with workflows.run_activities_locally():
+        return await update_doc_type_activity(document_id, doc_type)
+
 @workflows.workflow.define(name="document_processing_workflow")
 class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
 
@@ -50,30 +62,30 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
         logger.info(f"Starting workflow for document {document_id}")
 
         # Step 1 — Intake
-        await update_status_activity(document_id, "processing")
+        await _update_status(document_id, "processing")
         intake_result = await intake_activity(document_id, filename)
 
         if intake_result.get("is_duplicate"):
             # Pause — wait for user duplicate override decision
             logger.info(f"[Document {document_id}] Pausing for duplicate check override")
-            await update_status_and_message_activity(document_id, "awaiting_review", "Duplicate detected. Waiting for override decision.")
+            await _update_status_and_message(document_id, "awaiting_review", "Duplicate detected. Waiting for override decision.")
             duplicate_decision = await self.wait_for_input(DuplicateDecisionRequest, timeout=timedelta(hours=24))
             
             if not duplicate_decision.override:
-                await update_status_and_message_activity(document_id, "rejected", "Duplicate not overridden.")
+                await _update_status_and_message(document_id, "rejected", "Duplicate not overridden.")
                 return {"status": "rejected", "reason": "duplicate_not_overridden"}
             else:
-                await update_status_and_message_activity(document_id, "processing", "")
+                await _update_status_and_message(document_id, "processing", "")
 
         # Step 2 — Pre-Validation
         # Checks blur, brightness, skew, readability, watermark (warning), orientation.
         # Skipped gracefully if PRE_VALIDATOR_AGENT_ID is not yet configured.
         if settings.PRE_VALIDATOR_AGENT_ID:
-            await update_status_activity(document_id, "pre_validating")
+            await _update_status(document_id, "pre_validating")
             pre_val = await pre_validator_activity(document_id, file_path)
             if not pre_val.get("passed"):
                 reason = pre_val.get("rejection_reason") or "Document failed pre-validation quality check."
-                await update_status_and_message_activity(document_id, "rejected", reason)
+                await _update_status_and_message(document_id, "rejected", reason)
                 return {"status": "rejected", "reason": reason, "pre_validation": pre_val}
             logger.info(
                 f"[Document {document_id}] Pre-validation passed. "
@@ -89,7 +101,7 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
         # Gated by ENABLE_PREPROCESSING flag in .env. DOCX and (by default) PDFs are skipped.
         clean_file_path = file_path  # default: pass original to downstream steps
         if settings.ENABLE_PREPROCESSING:
-            await update_status_activity(document_id, "preprocessing")
+            await _update_status(document_id, "preprocessing")
             preprocess_result = await preprocessor_activity(document_id, file_path)
             clean_file_path = preprocess_result.get("preprocessed_path") or file_path
             logger.info(
@@ -101,10 +113,10 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
             logger.info(f"[Document {document_id}] ENABLE_PREPROCESSING=false — skipping preprocessing step.")
 
         # Step 3 — Classify
-        await update_status_activity(document_id, "classifying")
+        await _update_status(document_id, "classifying")
         classifier_result = await classifier_activity(document_id, clean_file_path)
         doc_type = classifier_result["doc_type"]
-        await update_doc_type_activity(document_id, doc_type)
+        await _update_doc_type(document_id, doc_type)
 
         # Step 3.5 — Fraud Check (if KYC Document)
         fraud_check_result = None
@@ -112,25 +124,25 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
         is_kyc = template_meta.get("is_kyc", False) or doc_type.lower() in ("kyc", "kyc document", "identity document")
         
         if is_kyc:
-            await update_status_activity(document_id, "fraud_checking")
+            await _update_status(document_id, "fraud_checking")
             try:
                 fraud_check_result = await fraud_check_activity(document_id, clean_file_path)
                 if not fraud_check_result.get("passed", False):
                     reason = fraud_check_result.get("rejection_reason") or "Document failed fraud check verification."
-                    await update_status_and_message_activity(document_id, "rejected", reason)
+                    await _update_status_and_message(document_id, "rejected", reason)
                     return {"status": "rejected", "reason": reason, "fraud_check": fraud_check_result}
             except Exception as e:
                 logger.warning(f"[Document {document_id}] Fraud check failed (gracefully skipping): {e}")
 
 
         # Step 4 — Extract
-        await update_status_activity(document_id, "extracting")
+        await _update_status(document_id, "extracting")
 
         extractor_result = await extractor_activity(document_id, clean_file_path, doc_type)
         raw_extracted = extractor_result.get("raw_extracted")
 
         # Step 5 — Validate
-        await update_status_activity(document_id, "validating")
+        await _update_status(document_id, "validating")
         validator_result = await validator_activity(
             document_id=document_id, 
             extracted_data=extractor_result["fields"], 
@@ -142,7 +154,7 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
         # Step 5.5 — Automated Verification (KYC documents only)
         auto_verify_result = None
         if is_kyc:
-            await update_status_activity(document_id, "auto_verifying")
+            await _update_status(document_id, "auto_verifying")
             try:
                 auto_verify_result = await auto_verify_activity(
                     document_id=document_id, 
@@ -162,7 +174,7 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
             final_reviewer_result = {"approved": True, "corrections": None}
         else:
             logger.info(f"[Document {document_id}] Pausing for human review. Score < 80%")
-            await update_status_activity(document_id, "awaiting_review")
+            await _update_status(document_id, "awaiting_review")
             # Pause workflow using Mistral Workflow SDK Interactive Workflow primitives
             human_decision = await self.wait_for_input(ReviewerDecisionRequest, timeout=timedelta(hours=24))
             final_reviewer_result = {
@@ -172,7 +184,7 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
 
         if not final_reviewer_result.get("approved"):
             rejection_reason = human_decision.rejection_reason or "Rejected by human reviewer."
-            await update_status_and_message_activity(document_id, "rejected", rejection_reason)
+            await _update_status_and_message(document_id, "rejected", rejection_reason)
             return {"status": "rejected", "reason": rejection_reason}
 
         # Step 7 — Output

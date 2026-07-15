@@ -1,40 +1,61 @@
 /* ─── Google Fonts ───────────────────────────────── */
-@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300;0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;0,14..32,800;0,14..32,900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,700;1,400&family=Inter:ital,opsz,wght@0,14..32,300;0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;0,14..32,800;0,14..32,900&display=swap');
 
 /* ─── Reset & Base ─────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 /* ══════════════════════════════════════════════════
-   LIGHT THEME (default)
+   LIGHT THEME (default) — Mistral Warm Sunset
 ══════════════════════════════════════════════════ */
 :root {
+  /* ── Mistral Core Palette ── */
+  --mistral-orange:       #fa520f;
+  --mistral-orange-deep:  #cc3a05;
+  --mistral-sunshine-300: #ffd06a;
+  --mistral-sunshine-500: #ffb83e;
+  --mistral-sunshine-700: #ffa110;
+  --mistral-sunshine-800: #ff8105;
+  --mistral-sunshine-900: #ff8a00;
+  --mistral-yellow:       #ffd900;
+  --mistral-cream:        #fff8e0;
+  --mistral-cream-light:  #fffaeb;
+  --mistral-cream-deep:   #fff0c2;
+  --mistral-beige-deep:   #e6d5a8;
+  --mistral-ink:          #1f1f1f;
+  --mistral-ink-tint:     #3d3d3d;
+  --mistral-steel:        #6a6a6a;
+  --mistral-stone:        #8a8a8a;
+  --mistral-hairline:     #e5e5e5;
+  --mistral-hairline-soft:#ededed;
+
   /* ── Backgrounds & Surfaces ── */
-  --bg:              #f0f2f8;
+  --bg:              #fffaeb;
   --surface:         #ffffff;
   --surface-elevated: #ffffff;
-  --surface-sunken:  #e8ebf4;
+  --surface-sunken:  #fff0c2;
   --card:            #ffffff;
-  --card-alt:        #f4f6fb;
-  --card-hi:         #e8ebf4;
-  --border:          #dde1ec;
-  --border-hi:       #c8cede;
-  --border-glow:     rgba(79, 110, 247, 0.2);
+  --card-alt:        #fffaeb;
+  --card-hi:         #fff0c2;
+  --border:          #e6d5a8;
+  --border-hi:       #d4bc8a;
+  --border-glow:     rgba(250, 82, 15, 0.20);
 
   /* ── Brand Accents ── */
-  --accent:          #4f6ef7;
-  --accent-hover:    #3d5ce8;
-  --accent2:         #7c3aed;
-  --accent3:         #0ea5e9;
-  --accent4:         #ec4899;
-  --accent-dim:      rgba(79, 110, 247, 0.10);
-  --accent-dim2:     rgba(79, 110, 247, 0.05);
+  --accent:          #fa520f;
+  --accent-hover:    #cc3a05;
+  --accent2:         #ff8105;
+  --accent3:         #ffb83e;
+  --accent4:         #ffd900;
+  --accent-dim:      rgba(250, 82, 15, 0.10);
+  --accent-dim2:     rgba(250, 82, 15, 0.05);
 
   /* ── Gradients ── */
-  --grad-brand:    linear-gradient(135deg, #4f6ef7 0%, #7c3aed 100%);
-  --grad-cyan:     linear-gradient(135deg, #0ea5e9 0%, #4f6ef7 100%);
-  --grad-warm:     linear-gradient(135deg, #ec4899 0%, #7c3aed 100%);
+  --grad-brand:    linear-gradient(135deg, #fa520f 0%, #ff8105 100%);
+  --grad-sunset:   linear-gradient(90deg, #fa520f 0%, #ffa110 30%, #ffb83e 60%, #ffd900 80%, #fff8e0 100%);
+  --grad-cyan:     linear-gradient(135deg, #ffb83e 0%, #fa520f 100%);
+  --grad-warm:     linear-gradient(135deg, #fa520f 0%, #cc3a05 100%);
   --grad-success:  linear-gradient(135deg, #10b981 0%, #059669 100%);
-  --grad-surface:  linear-gradient(180deg, #ffffff 0%, #f0f2f8 100%);
+  --grad-surface:  linear-gradient(180deg, #ffffff 0%, #fffaeb 100%);
 
   /* ── Status ── */
   --success:         #10b981;
@@ -50,20 +71,20 @@
   --info-dim:        rgba(59, 130, 246, 0.10);
 
   /* ── Text ── */
-  --text:            #0f172a;
-  --text-dim:        #4b5675;
-  --muted:           #8b95b0;
+  --text:            #1f1f1f;
+  --text-dim:        #4a4a4a;
+  --muted:           #8a8a8a;
 
   /* ── Effects ── */
-  --highlight:       rgba(79, 110, 247, 0.10);
-  --glow:            0 8px 40px rgba(79, 110, 247, 0.14);
-  --glow-sm:         0 4px 20px rgba(79, 110, 247, 0.10);
+  --highlight:       rgba(250, 82, 15, 0.10);
+  --glow:            0 8px 40px rgba(250, 82, 15, 0.18);
+  --glow-sm:         0 4px 20px rgba(250, 82, 15, 0.12);
   --glow-success:    0 4px 20px rgba(16, 185, 129, 0.14);
-  --shadow:          0 16px 40px rgba(15, 23, 42, 0.10), 0 4px 12px rgba(15, 23, 42, 0.04);
-  --shadow-sm:       0 2px 8px rgba(15, 23, 42, 0.06);
-  --shadow-card:     0 2px 12px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.03);
-  --glass:           rgba(255, 255, 255, 0.80);
-  --glass-border:    rgba(15, 23, 42, 0.08);
+  --shadow:          0 16px 40px rgba(31, 31, 31, 0.10), 0 4px 12px rgba(31, 31, 31, 0.04);
+  --shadow-sm:       0 2px 8px rgba(31, 31, 31, 0.06);
+  --shadow-card:     rgba(0, 0, 0, 0.04) 0px 4px 12px 0px;
+  --glass:           rgba(255, 255, 255, 0.90);
+  --glass-border:    rgba(230, 213, 168, 0.60);
 
   /* ── Layout ── */
   --sidebar-w:       220px;
@@ -71,10 +92,10 @@
   --topbar-h:        60px;
   --radius:          12px;
   --radius-sm:       8px;
-  --radius-lg:       18px;
-  --radius-xl:       24px;
+  --radius-lg:       16px;
+  --radius-xl:       20px;
 
-  /* ── Typography Scale (8 sizes only) ── */
+  /* ── Typography Scale ── */
   --text-xs:   10px;
   --text-sm:   11px;
   --text-base: 12px;
@@ -83,6 +104,11 @@
   --text-xl:   16px;
   --text-2xl:  20px;
   --text-3xl:  28px;
+
+  /* ── Font Families ── */
+  --font-display: 'Playfair Display', 'Times New Roman', Georgia, serif;
+  --font-ui:      'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono:    'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
 
   /* ── Motion ── */
   --ease:        cubic-bezier(0.4, 0, 0.2, 1);
@@ -94,36 +120,37 @@
 }
 
 /* ══════════════════════════════════════════════════
-   DARK THEME — [data-theme="dark"]
+   DARK THEME — warm amber-adapted dark mode
 ══════════════════════════════════════════════════ */
 [data-theme="dark"] {
   /* ── Backgrounds & Surfaces ── */
-  --bg:              #080b14;
-  --surface:         #0e1220;
-  --surface-elevated: #131829;
-  --surface-sunken:  #060810;
-  --card:            #111827;
-  --card-alt:        #161e30;
-  --card-hi:         #1c2540;
-  --border:          #1e2740;
-  --border-hi:       #28335a;
-  --border-glow:     rgba(79, 110, 247, 0.25);
+  --bg:              #110a00;
+  --surface:         #1a1008;
+  --surface-elevated: #221508;
+  --surface-sunken:  #0d0800;
+  --card:            #1e1306;
+  --card-alt:        #251a0a;
+  --card-hi:         #2e2010;
+  --border:          #3a2810;
+  --border-hi:       #4a3418;
+  --border-glow:     rgba(250, 82, 15, 0.30);
 
-  /* ── Brand Accents (same hue, slightly brighter for dark bg) ── */
-  --accent:          #627ff8;
-  --accent-hover:    #748cf9;
-  --accent2:         #9461f7;
-  --accent3:         #22b8f0;
-  --accent4:         #f472b6;
-  --accent-dim:      rgba(98, 127, 248, 0.14);
-  --accent-dim2:     rgba(98, 127, 248, 0.07);
+  /* ── Brand Accents ── */
+  --accent:          #fb6b2d;
+  --accent-hover:    #fa520f;
+  --accent2:         #ff9420;
+  --accent3:         #ffc14a;
+  --accent4:         #ffe050;
+  --accent-dim:      rgba(251, 107, 45, 0.16);
+  --accent-dim2:     rgba(251, 107, 45, 0.08);
 
   /* ── Gradients ── */
-  --grad-brand:    linear-gradient(135deg, #627ff8 0%, #9461f7 100%);
-  --grad-cyan:     linear-gradient(135deg, #22b8f0 0%, #627ff8 100%);
-  --grad-warm:     linear-gradient(135deg, #f472b6 0%, #9461f7 100%);
+  --grad-brand:    linear-gradient(135deg, #fb6b2d 0%, #ff9420 100%);
+  --grad-sunset:   linear-gradient(90deg, #fa520f 0%, #ffa110 30%, #ffb83e 60%, #ffd900 80%, #fff8e0 100%);
+  --grad-cyan:     linear-gradient(135deg, #ffc14a 0%, #fb6b2d 100%);
+  --grad-warm:     linear-gradient(135deg, #fb6b2d 0%, #fa520f 100%);
   --grad-success:  linear-gradient(135deg, #10b981 0%, #059669 100%);
-  --grad-surface:  linear-gradient(180deg, #0e1220 0%, #080b14 100%);
+  --grad-surface:  linear-gradient(180deg, #1a1008 0%, #110a00 100%);
 
   /* ── Status ── */
   --success:         #10b981;
@@ -139,20 +166,20 @@
   --info-dim:        rgba(96, 165, 250, 0.12);
 
   /* ── Text ── */
-  --text:            #e8ecf8;
-  --text-dim:        #8b9abd;
-  --muted:           #4e5a7a;
+  --text:            #f5e8d0;
+  --text-dim:        #b8956a;
+  --muted:           #7a6040;
 
   /* ── Effects ── */
-  --highlight:       rgba(98, 127, 248, 0.12);
-  --glow:            0 8px 40px rgba(98, 127, 248, 0.20);
-  --glow-sm:         0 4px 20px rgba(98, 127, 248, 0.14);
+  --highlight:       rgba(251, 107, 45, 0.14);
+  --glow:            0 8px 40px rgba(251, 107, 45, 0.24);
+  --glow-sm:         0 4px 20px rgba(251, 107, 45, 0.16);
   --glow-success:    0 4px 20px rgba(16, 185, 129, 0.18);
-  --shadow:          0 16px 40px rgba(0, 0, 0, 0.50), 0 4px 12px rgba(0, 0, 0, 0.30);
-  --shadow-sm:       0 2px 8px rgba(0, 0, 0, 0.30);
-  --shadow-card:     0 2px 12px rgba(0, 0, 0, 0.25), 0 1px 3px rgba(0, 0, 0, 0.20);
-  --glass:           rgba(14, 18, 32, 0.80);
-  --glass-border:    rgba(255, 255, 255, 0.06);
+  --shadow:          0 16px 40px rgba(0, 0, 0, 0.60), 0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-sm:       0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-card:     rgba(0, 0, 0, 0.30) 0px 4px 12px 0px;
+  --glass:           rgba(26, 16, 8, 0.88);
+  --glass-border:    rgba(255, 200, 100, 0.10);
 }
 
 /* ══════════════════════════════════════════════════
@@ -163,22 +190,22 @@ html { font-size: 14px; scroll-behavior: smooth; }
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-family: var(--font-ui);
   min-height: 100vh;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background-image:
-    radial-gradient(ellipse 70% 50% at 50% -5%, rgba(79, 110, 247, 0.12) 0%, transparent 70%),
-    radial-gradient(ellipse 50% 40% at 85% 85%, rgba(124, 58, 237, 0.08) 0%, transparent 60%);
+    radial-gradient(ellipse 70% 50% at 50% -5%, rgba(250, 82, 15, 0.06) 0%, transparent 70%),
+    radial-gradient(ellipse 50% 40% at 90% 90%, rgba(255, 165, 16, 0.05) 0%, transparent 60%);
   background-attachment: fixed;
   transition: background-color var(--dur-lg) var(--ease), color var(--dur-lg) var(--ease);
 }
 
 [data-theme="dark"] body {
   background-image:
-    radial-gradient(ellipse 70% 50% at 50% -5%, rgba(98, 127, 248, 0.18) 0%, transparent 70%),
-    radial-gradient(ellipse 50% 40% at 85% 85%, rgba(148, 97, 247, 0.12) 0%, transparent 60%);
+    radial-gradient(ellipse 70% 50% at 50% -5%, rgba(251, 107, 45, 0.12) 0%, transparent 70%),
+    radial-gradient(ellipse 50% 40% at 90% 90%, rgba(255, 148, 32, 0.08) 0%, transparent 60%);
 }
 
 a { color: var(--accent); text-decoration: none; }
@@ -198,6 +225,13 @@ img { max-width: 100%; }
   border-radius: var(--radius-sm);
 }
 
+/* ── Display / Editorial font utility ── */
+.font-display {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: -0.5px;
+}
+
 /* ── Gradient text utility ── */
 .grad {
   background: var(--grad-brand);
@@ -205,8 +239,8 @@ img { max-width: 100%; }
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
-.grad-cyan {
-  background: var(--grad-cyan);
+.grad-warm {
+  background: var(--grad-warm);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -218,7 +252,6 @@ img { max-width: 100%; }
   background: var(--card-alt); border: 1px solid var(--border);
   border-radius: 99px; padding: 3px 10px;
   font-size: var(--text-sm); color: var(--text-dim);
-  backdrop-filter: blur(8px);
 }
 
 /* ── Animated border (upload zone — only on dragover) ── */

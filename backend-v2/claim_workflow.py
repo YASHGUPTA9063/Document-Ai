@@ -79,6 +79,28 @@ async def upsert_agent_result_activity(claim_id: str, agent_key: str, result: di
     await claim_db.upsert_agent_result(claim_id, agent_key, result)
 
 
+async def _update_claim_status(claim_id: str, status: str) -> str:
+    with workflows.run_activities_locally():
+        return await update_claim_status_activity(claim_id, status)
+
+async def _upsert_agent_result(claim_id: str, agent_key: str, result: dict) -> None:
+    with workflows.run_activities_locally():
+        await upsert_agent_result_activity(claim_id, agent_key, result)
+
+async def _save_claim_report(
+    claim_id: str,
+    agent_results: dict,
+    suggestion: str,
+    overall_status: str
+) -> dict:
+    with workflows.run_activities_locally():
+        return await save_claim_report_activity(
+            claim_id=claim_id,
+            agent_results=agent_results,
+            suggestion=suggestion,
+            overall_status=overall_status
+        )
+
 # ─── REPORT AGENT ACTIVITY ────────────────────────────────────────────────────
 
 @workflows.activity()
@@ -197,37 +219,37 @@ class ClaimProcessingWorkflow(workflows.InteractiveWorkflow):
         logger.info(f"[Claim {claim_id}] Starting claim processing workflow.")
 
         # ── Mark claim as processing ──────────────────────────────────────────
-        await update_claim_status_activity(claim_id, "processing")
+        await _update_claim_status(claim_id, "processing")
 
         # ── Step 1 — Claim Integrity Agent ────────────────────────────────────
         logger.info(f"[Claim {claim_id}] Step 1: Claim Integrity Agent")
-        await update_claim_status_activity(claim_id, "checking_integrity")
+        await _update_claim_status(claim_id, "checking_integrity")
         integrity_result = await claim_integrity_activity(claim_id, claimant_id, policy_id)
-        await upsert_agent_result_activity(claim_id, "claim_integrity", integrity_result)
+        await _upsert_agent_result(claim_id, "claim_integrity", integrity_result)
 
         # ── Step 2 — Medical Agent ────────────────────────────────────────────
         logger.info(f"[Claim {claim_id}] Step 2: Medical Agent")
-        await update_claim_status_activity(claim_id, "checking_medical")
+        await _update_claim_status(claim_id, "checking_medical")
         medical_result = await claim_medical_activity(claim_id)
-        await upsert_agent_result_activity(claim_id, "medical", medical_result)
+        await _upsert_agent_result(claim_id, "medical", medical_result)
 
         # ── Step 3 — Treatment Agent ──────────────────────────────────────────
         logger.info(f"[Claim {claim_id}] Step 3: Treatment Agent")
-        await update_claim_status_activity(claim_id, "checking_treatment")
+        await _update_claim_status(claim_id, "checking_treatment")
         treatment_result = await claim_treatment_activity(claim_id)
-        await upsert_agent_result_activity(claim_id, "treatment", treatment_result)
+        await _upsert_agent_result(claim_id, "treatment", treatment_result)
 
         # ── Step 4 — Disability Agent ─────────────────────────────────────────
         logger.info(f"[Claim {claim_id}] Step 4: Disability Agent")
-        await update_claim_status_activity(claim_id, "checking_disability")
+        await _update_claim_status(claim_id, "checking_disability")
         disability_result = await claim_disability_activity(claim_id)
-        await upsert_agent_result_activity(claim_id, "disability", disability_result)
+        await _upsert_agent_result(claim_id, "disability", disability_result)
 
         # ── Step 5 — Litigation Agent ─────────────────────────────────────────
         logger.info(f"[Claim {claim_id}] Step 5: Litigation Agent")
-        await update_claim_status_activity(claim_id, "checking_litigation")
+        await _update_claim_status(claim_id, "checking_litigation")
         litigation_result = await claim_litigation_activity(claim_id, claimant_id)
-        await upsert_agent_result_activity(claim_id, "litigation", litigation_result)
+        await _upsert_agent_result(claim_id, "litigation", litigation_result)
 
         # ── Collect all agent results ─────────────────────────────────────────
         agent_results = {
@@ -240,7 +262,7 @@ class ClaimProcessingWorkflow(workflows.InteractiveWorkflow):
 
         # ── Step 6 — Generate suggestion ──────────────────────────────────────
         logger.info(f"[Claim {claim_id}] Step 6: Generating final suggestion")
-        await update_claim_status_activity(claim_id, "generating_report")
+        await _update_claim_status(claim_id, "generating_report")
         suggestion_result = await generate_claim_suggestion_activity(claim_id, agent_results)
 
         overall_status = suggestion_result.get("overall_status", "REVIEW BEFORE APPROVAL")
@@ -248,14 +270,14 @@ class ClaimProcessingWorkflow(workflows.InteractiveWorkflow):
 
         # ── Step 7 — Save report to DB ────────────────────────────────────────
         logger.info(f"[Claim {claim_id}] Step 7: Saving report to DB")
-        save_result = await save_claim_report_activity(
+        save_result = await _save_claim_report(
             claim_id=claim_id,
             agent_results=agent_results,
             suggestion=suggestion_text,
             overall_status=overall_status
         )
         claimant_name = save_result.get("claimant_name")
-        await update_claim_status_activity(claim_id, "completed")
+        await _update_claim_status(claim_id, "completed")
 
         # ── Build and return the full report dict ─────────────────────────────
         report = _build_report_dict(

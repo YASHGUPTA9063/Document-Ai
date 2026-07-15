@@ -1,7 +1,11 @@
 import os
+os.environ["DEPLOYMENT_NAME"] = "document-processing-workflow"
+
+from utils.perf_logger import install_performance_hooks
+install_performance_hooks()
+
 import tempfile
 from typing import List
-os.environ["DEPLOYMENT_NAME"] = "document-processing-workflow"
 import logging
 import mimetypes
 from contextlib import asynccontextmanager

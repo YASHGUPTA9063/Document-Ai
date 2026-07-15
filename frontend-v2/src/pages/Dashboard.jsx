@@ -80,6 +80,17 @@ export function Dashboard() {
 
   return (
     <div className="page">
+      {/* ── Mistral-style editorial hero header ── */}
+      <div className="page-hero">
+        <div className="page-hero-eyebrow">IDP Platform · v2.0</div>
+        <div className="page-hero-title">
+          {loading ? 'Loading…' : `${totalCount.toLocaleString()} document${totalCount !== 1 ? 's' : ''} processed`}
+        </div>
+        <div className="page-hero-sub">
+          {successRate}% success · {reviewDocs.length} pending review · {errorCount > 0 ? `${errorCount} errors` : 'No errors'}
+        </div>
+      </div>
+
       {/* ── Stat Cards ── */}
       <div className="stats-row">
         <StatCard

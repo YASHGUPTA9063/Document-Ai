@@ -9,13 +9,21 @@
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: visible;
   z-index: 100;
   position: relative;
   flex-shrink: 0;
   /* Collapse transition */
   transition: width var(--dur-md) var(--ease), min-width var(--dur-md) var(--ease);
+}
+
+.sidebar-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 /* Collapsed sidebar — icon rail */
@@ -24,13 +32,13 @@
   min-width: var(--sidebar-collapsed-w);
 }
 
-/* Subtle gradient decoration */
+/* Subtle warm gradient decoration */
 .sidebar::before {
   content: '';
   position: absolute;
   top: 0; left: 0; right: 0;
   height: 220px;
-  background: radial-gradient(ellipse 100% 60% at 50% -10%, rgba(79, 110, 247, 0.12) 0%, transparent 70%);
+  background: radial-gradient(ellipse 100% 60% at 50% -10%, rgba(250, 82, 15, 0.10) 0%, transparent 70%);
   pointer-events: none;
   z-index: 0;
 }
@@ -51,7 +59,7 @@
   border-radius: 10px;
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
-  box-shadow: 0 4px 16px rgba(79, 110, 247, 0.30), 0 2px 8px rgba(15, 23, 42, 0.10);
+  box-shadow: 0 4px 16px rgba(250, 82, 15, 0.30), 0 2px 8px rgba(31, 31, 31, 0.10);
   position: relative;
   overflow: hidden;
 }
@@ -73,12 +81,12 @@
 }
 
 .logo-text {
-  font-size: var(--text-lg); font-weight: 800;
+  font-size: var(--text-lg); font-weight: 700;
   letter-spacing: -0.3px;
-  background: linear-gradient(135deg, var(--text), var(--accent));
-  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  color: var(--text);
   line-height: 1.2;
   display: block;
+  font-family: var(--font-display);
 }
 .logo-sub {
   font-size: var(--text-xs); color: var(--muted); font-weight: 500;
@@ -88,7 +96,7 @@
 
 /* ─── Collapse Toggle Button ─────────────────────── */
 .sidebar-collapse-btn {
-  position: absolute; top: 18px; right: 8px;
+  position: absolute; top: 24px; right: -12px;
   width: 24px; height: 24px;
   background: var(--surface-elevated);
   border: 1px solid var(--border);
@@ -103,7 +111,7 @@
 }
 .sidebar:hover .sidebar-collapse-btn { opacity: 1; }
 .sidebar-collapse-btn:hover { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
-.sidebar.collapsed .sidebar-collapse-btn { opacity: 1; right: 6px; }
+.sidebar.collapsed .sidebar-collapse-btn { opacity: 1; }
 
 /* ─── Nav Sections ──────────────────────────────── */
 .nav-section { padding: 8px 8px 2px; position: relative; z-index: 1; }
@@ -149,7 +157,7 @@
   width: 3px;
   background: var(--grad-brand);
   border-radius: 0 3px 3px 0;
-  box-shadow: 0 0 10px rgba(79, 110, 247, 0.40);
+  box-shadow: 0 0 10px rgba(250, 82, 15, 0.40);
   animation: nav-indicator-in var(--dur-md) var(--ease-spring) both;
 }
 
@@ -180,7 +188,7 @@
 .nav-badge {
   background: var(--accent); color: white;
   font-size: var(--text-xs); font-weight: 700; padding: 1px 6px; border-radius: 99px;
-  box-shadow: 0 0 8px rgba(79, 110, 247, 0.30);
+  box-shadow: 0 0 8px rgba(250, 82, 15, 0.30);
   flex-shrink: 0;
   transition: opacity var(--dur) var(--ease);
 }
@@ -227,14 +235,14 @@
   border-bottom: 1px solid var(--border);
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 22px; position: sticky; top: 0; z-index: 50; flex-shrink: 0;
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 .topbar-left { display: flex; align-items: center; gap: 12px; }
 .topbar-breadcrumb {
   display: flex; flex-direction: column; gap: 1px;
 }
-.topbar-title { font-size: var(--text-lg); font-weight: 700; letter-spacing: -0.2px; }
+.topbar-title { font-size: var(--text-lg); font-weight: 700; letter-spacing: -0.2px; font-family: var(--font-display); }
 .topbar-sub { font-size: var(--text-sm); color: var(--muted); }
 .topbar-right { display: flex; align-items: center; gap: 8px; }
 

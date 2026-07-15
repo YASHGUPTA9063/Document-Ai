@@ -193,8 +193,8 @@ export function TopBar({ onMobileMenuToggle }) {
             width: 34, height: 34, borderRadius: '50%',
             background: 'var(--grad-brand)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 0 14px rgba(79,110,247,0.25)',
-            border: '2px solid rgba(79,110,247,0.20)',
+            boxShadow: '0 0 14px rgba(250,82,15,0.25)',
+            border: '2px solid rgba(250,82,15,0.20)',
             cursor: 'pointer',
             flexShrink: 0,
           }}

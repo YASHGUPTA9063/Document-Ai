@@ -154,7 +154,7 @@ function AgentCard({ agent, index }) {
             {agent.agent_id}
           </span>
           <a
-            href={`https://console.mistral.ai/agents/${agent.agent_id}`}
+            href={`https://console.mistral.ai/build/playground?agentId=${agent.agent_id}&from=agents`}
             target="_blank"
             rel="noopener noreferrer"
             title="Open in Mistral Studio"

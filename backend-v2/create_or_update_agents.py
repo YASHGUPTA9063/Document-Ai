@@ -1,9 +1,9 @@
 """
-One-time script to register the Claim Processing agents on the Mistral account
-according to agents_config.py and automatically update the .env file.
+Utility script to create or update all configured Mistral agents in Mistral AI Studio
+and automatically update the .env file with the corresponding Agent IDs.
 
 Usage:
-    python create_claim_agents.py
+    python create_or_update_agents.py
 """
 
 import os
@@ -26,9 +26,9 @@ if not api_key:
     print("ERROR: MISTRAL_API_KEY not found in environment or .env file.")
     sys.exit(1)
 
-# Import the claim agents configuration
+# Import configurations
 sys.path.append(base_dir)
-from agents_config import CLAIM_AGENTS
+from agents_config import AGENT_CONFIGS
 
 client = Mistral(api_key=api_key)
 
@@ -73,32 +73,64 @@ def update_env_file(env_file_path, updates):
 
 
 def main():
-    print("Creating Claim Processing agents...\n")
+    print("=== Mistral AI Studio Agent Creator & Updater ===\n")
+    print(f"Loaded {len(AGENT_CONFIGS)} agent configurations.")
+
     new_ids = {}
 
-    for agent_cfg in CLAIM_AGENTS:
+    for agent_cfg in AGENT_CONFIGS:
         name = agent_cfg["name"]
         env_var = agent_cfg["env_var"]
         description = agent_cfg["description"]
         instructions = agent_cfg["instructions"]
+        model = agent_cfg.get("model", "mistral-small-latest")
+        completion_args = agent_cfg.get("completion_args", {})
 
-        print(f"Creating agent: {name} ({env_var})...")
+        existing_id = os.getenv(env_var)
+
+        # Prepare arguments for creation/update
+        kwargs = {
+            "name": name,
+            "description": description,
+            "instructions": instructions,
+            "model": model,
+        }
+        if completion_args:
+            kwargs["completion_args"] = completion_args
+
+        if existing_id:
+            print(f"\nChecking/Updating existing agent: {name} ({env_var}: {existing_id})...")
+            try:
+                # Try updating the agent in Mistral Studio
+                updated_agent = client.beta.agents.update(
+                    agent_id=existing_id,
+                    **kwargs
+                )
+                print(f"  -> Successfully updated! ID: {updated_agent.id}")
+                new_ids[env_var] = updated_agent.id
+                continue
+            except Exception as e:
+                print(f"  -> Update failed ({e}). Recreating agent...")
+
+        # Create new agent
+        print(f"\nCreating new agent: {name} ({env_var})...")
         try:
-            agent = client.beta.agents.create(
-                model="mistral-small-latest",
-                name=name,
-                description=description,
-                instructions=instructions,
-            )
-            print(f"  -> Created successfully! ID: {agent.id}")
-            new_ids[env_var] = agent.id
+            new_agent = client.beta.agents.create(**kwargs)
+            print(f"  -> Successfully created! ID: {new_agent.id}")
+            new_ids[env_var] = new_agent.id
+            # Update local env so subsequent steps in the same execution see the new ID if needed
+            os.environ[env_var] = new_agent.id
         except Exception as e:
             print(f"  -> ERROR creating agent {name}: {e}")
             sys.exit(1)
 
-    print("\nUpdating .env file with new Agent IDs...")
-    update_env_file(env_path, new_ids)
-    print("\n[SUCCESS] All claim processing agents registered and saved to .env successfully!")
+    if new_ids:
+        print("\nUpdating .env file with Agent IDs...")
+        update_env_file(env_path, new_ids)
+        print("\n[SUCCESS] Agent registrations/updates completed and saved to .env!")
+    else:
+        print("\n[SUCCESS] All agents are already up to date!")
+
 
 if __name__ == "__main__":
     main()

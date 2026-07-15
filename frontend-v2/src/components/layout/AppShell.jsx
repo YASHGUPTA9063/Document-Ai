@@ -28,6 +28,8 @@ export function AppShell() {
         <main className="main-content">
           <Outlet />
         </main>
+        {/* Mistral signature: sunset stripe at the foot of every page */}
+        <div className="sunset-stripe" aria-hidden="true" />
       </div>
       <ToastContainer />
     </>
