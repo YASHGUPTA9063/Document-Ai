@@ -21,6 +21,7 @@ from db.database import init_db, init_claim_tables, AsyncSessionLocal
 from db.models import Document, ExtractedData, CustomerReference
 from utils.file_handler import save_file, delete_file
 from utils.norm_config import load_normalization_config, save_normalization_config
+from utils.classification_config import load_classification_config, save_classification_config
 from schemas.documents import (
     DocumentUploadResponse, 
     WorkflowStatusResponse, 
@@ -775,6 +776,15 @@ async def get_normalization_settings():
 @app.put("/settings/normalization")
 async def update_normalization_settings(config: dict):
     save_normalization_config(config)
+    return {"success": True}
+
+@app.get("/settings/classification")
+async def get_classification_settings():
+    return load_classification_config()
+
+@app.put("/settings/classification")
+async def update_classification_settings(doc_types: list[str]):
+    save_classification_config(doc_types)
     return {"success": True}
 
 @app.get("/templates")

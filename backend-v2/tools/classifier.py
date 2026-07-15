@@ -3,6 +3,7 @@ import json
 import logging
 from config import settings
 from utils.ocr import extract_with_ocr
+from utils.classification_config import load_classification_config
 
 logger = logging.getLogger(__name__)
 
@@ -41,17 +42,14 @@ CLASSIFIER_TOOLS = [
 # ─── TOOL FUNCTIONS ───
 def get_supported_doc_types() -> dict:
     types_map = {}
-    templates_path = os.path.join(settings.STORAGE_DIR, "templates.json")
-    if os.path.exists(templates_path):
-        try:
-            with open(templates_path, "r") as f:
-                templates = json.load(f)
-                for key in templates.keys():
-                    normalized_key = key.lower().replace(" ", "_")
-                    display_name = " ".join(word.capitalize() for word in normalized_key.split("_"))
-                    types_map[normalized_key] = display_name
-        except Exception as e:
-            logger.error(f"Failed to read templates in classifier: {e}")
+    try:
+        doc_types = load_classification_config()
+        for key in doc_types:
+            normalized_key = key.lower().replace(" ", "_")
+            display_name = " ".join(word.capitalize() for word in normalized_key.split("_"))
+            types_map[normalized_key] = display_name
+    except Exception as e:
+        logger.error(f"Failed to load classification config in classifier tool: {e}")
     return types_map
 
 

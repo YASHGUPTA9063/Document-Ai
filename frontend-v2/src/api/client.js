@@ -266,6 +266,26 @@ export async function saveNormConfig(config) {
   return data;
 }
 
+/**
+ * Get classification document types.
+ * @returns {Promise<string[]>}
+ */
+export async function getClassificationConfig() {
+  const { data } = await api.get('/settings/classification');
+  return data;
+}
+
+/**
+ * Save classification document types.
+ * @param {string[]} docTypes
+ * @returns {Promise<object>}
+ */
+export async function saveClassificationConfig(docTypes) {
+  const { data } = await api.put('/settings/classification', docTypes);
+  return data;
+}
+
+
 // ─── Claim Processing APIs ────────────────────────────────────────────────────
 
 /**

@@ -2104,3 +2104,8 @@
 2026-07-14 16:45:00,568 - INFO - [PERF] [ACTIVITY_END] save_claim_report_activity took 0.031s
 2026-07-14 16:45:00,991 - INFO - [PERF] [ACTIVITY_START] update_claim_status_activity started
 2026-07-14 16:45:00,998 - INFO - [PERF] [ACTIVITY_END] update_claim_status_activity took 0.006s
+2026-07-15 15:23:49,607 - INFO - Initializing performance timing hooks...
+2026-07-15 15:23:50,329 - INFO - Successfully patched Mistral Agents API client methods
+2026-07-15 15:23:54,288 - INFO - Successfully patched mistralai.workflows activity decorator
+2026-07-15 15:23:56,938 - INFO - Successfully patched document workflow tool functions
+2026-07-15 15:23:56,944 - INFO - Successfully patched claim workflow tool functions

@@ -67,3 +67,18 @@ except ValidationError as e:
     print(e)
     import sys
     sys.exit(1)
+
+SUPPORTED_DOCUMENT_TYPES = [
+    "invoice",
+    "pan_card",
+    "claim_form",
+    "policy_document",
+    "id_proof",
+    "medical_report",
+    "lab_reports",
+    "prescription_records",
+    "bills_invoices",
+    "disability_certificate",
+    "legal_letter"
+]
+

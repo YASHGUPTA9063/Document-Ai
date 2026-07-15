@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useApp } from '../store/AppStore';
-import { getNormConfig, saveNormConfig } from '../api/client';
+import { getNormConfig, saveNormConfig, getClassificationConfig, saveClassificationConfig } from '../api/client';
 import {
   Settings as SettingsIcon, SlidersHorizontal, BarChart3,
   CheckCircle2, Circle, ChevronRight, Zap, Eye, ShieldCheck,
-  Palette, Info, RotateCcw, Save,
+  Palette, Info, RotateCcw, Save, Tag, Trash2, Plus,
 } from 'lucide-react';
 
 /* ─────────────────────────────────────────────────────────────
@@ -14,6 +14,7 @@ const NAV = [
   { id: 'confidence',  label: 'Confidence Scores',  icon: BarChart3,        desc: 'Granularity & display mode' },
   { id: 'thresholds',  label: 'Thresholds',         icon: SlidersHorizontal, desc: 'Highlight & approval limits' },
   { id: 'normalization', label: 'Normalization Format', icon: Palette,      desc: 'Date, number & name rules' },
+  { id: 'classification', label: 'Classification Types', icon: Tag,          desc: 'Supported document types' },
 ];
 
 /* ─────────────────────────────────────────────────────────────
@@ -732,6 +733,226 @@ function NormalizationSection({ toast }) {
 }
 
 /* ─────────────────────────────────────────────────────────────
+   CLASSIFICATION DOCUMENT TYPES SECTION
+   ───────────────────────────────────────────────────────────── */
+function ClassificationSection({ toast }) {
+  const [docTypes, setDocTypes] = useState([]);
+  const [newType, setNewType] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    async function load() {
+      try {
+        const data = await getClassificationConfig();
+        if (active) {
+          setDocTypes(data);
+          setLoading(false);
+        }
+      } catch (err) {
+        if (active) {
+          toast(err.message || 'Failed to load classification settings', 'error');
+          setLoading(false);
+        }
+      }
+    }
+    load();
+    return () => { active = false; };
+  }, [toast]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await saveClassificationConfig(docTypes);
+      toast('Classification document types saved successfully ✓', 'success');
+    } catch (err) {
+      toast(err.message || 'Failed to save settings', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAddType = () => {
+    const trimmed = newType.trim().toLowerCase().replace(/\s+/g, '_');
+    if (!trimmed) return;
+    if (docTypes.includes(trimmed)) {
+      toast('This document type already exists', 'warning');
+      return;
+    }
+    setDocTypes(prev => [...prev, trimmed]);
+    setNewType('');
+  };
+
+  const handleRemoveType = (typeToRemove) => {
+    setDocTypes(prev => prev.filter(t => t !== typeToRemove));
+  };
+
+  const handleReset = () => {
+    setDocTypes([
+      "invoice", "pan_card", "claim_form", "policy_document", 
+      "id_proof", "medical_report", "lab_reports", 
+      "prescription_records", "bills_invoices", 
+      "disability_certificate", "legal_letter"
+    ]);
+    toast('Reset to default classification types (remember to save) ✓', 'info');
+  };
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 300, color: 'var(--muted)' }}>
+        <div style={{ fontSize: 13, fontWeight: 500 }}>Loading classification settings...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <SectionHeader icon={Tag} label="Classification Document Types" desc="Configure which document types the AI classifier should recognize" />
+
+      <InfoCallout>
+        Adding a document type enables the Classifier Agent to identify it. 
+        Note that you will also need to configure corresponding extraction rules on the Templates page.
+      </InfoCallout>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 24, marginTop: 10 }}>
+        
+        {/* Add new type form */}
+        <div style={{ display: 'flex', gap: 10 }}>
+          <input
+            type="text"
+            placeholder="e.g. utility_bill, driver_license"
+            value={newType}
+            onChange={(e) => setNewType(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleAddType(); }}
+            style={{
+              flex: 1,
+              background: 'var(--surface)',
+              border: '1px solid var(--border)',
+              borderRadius: 8,
+              padding: '10px 14px',
+              fontSize: 13,
+              color: 'var(--text)',
+              outline: 'none',
+              boxSizing: 'border-box'
+            }}
+          />
+          <button
+            onClick={handleAddType}
+            style={{
+              all: 'unset', cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '10px 18px', borderRadius: 8,
+              background: 'var(--accent)',
+              fontSize: 12.5, fontWeight: 600, color: 'white',
+              transition: 'all 0.15s ease',
+              boxShadow: '0 2px 6px rgba(79,110,247,0.2)'
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'color-mix(in srgb, var(--accent) 90%, black)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'var(--accent)'}
+          >
+            <Plus size={14} />
+            Add Type
+          </button>
+        </div>
+
+        {/* Current list of types */}
+        <div>
+          <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', display: 'block', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Currently Supported Types ({docTypes.length})
+          </label>
+          {docTypes.length === 0 ? (
+            <div style={{ padding: '24px 18px', border: '1px dashed var(--border)', borderRadius: 10, textAlign: 'center', color: 'var(--muted)', fontSize: 12.5 }}>
+              No document types configured. The classifier will fail unless you add at least one type.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {docTypes.map((type) => {
+                // Generate a pretty display name
+                const displayName = type.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                return (
+                  <div
+                    key={type}
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      padding: '10px 14px', borderRadius: 8,
+                      background: 'var(--card-alt)', border: '1px solid var(--border)',
+                    }}
+                  >
+                    <div>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{displayName}</span>
+                      <span style={{ fontSize: 10.5, color: 'var(--muted)', marginLeft: 10, fontFamily: 'monospace', background: 'var(--surface)', padding: '2px 6px', borderRadius: 4 }}>
+                        {type}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => handleRemoveType(type)}
+                      style={{
+                        all: 'unset', cursor: 'pointer',
+                        width: 28, height: 28, borderRadius: 6,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        color: 'var(--muted)',
+                        transition: 'all 0.15s ease',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = 'color-mix(in srgb, var(--danger) 10%, transparent)'; e.currentTarget.style.color = 'var(--danger)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--muted)'; }}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Action Buttons */}
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          borderTop: '1px solid var(--border)', paddingTop: 20, marginTop: 10
+        }}>
+          <button
+            onClick={handleReset}
+            style={{
+              all: 'unset', cursor: 'pointer',
+              fontSize: 11.5, fontWeight: 600, color: 'var(--text-dim)',
+              padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)',
+              background: 'transparent',
+              transition: 'all 0.15s ease'
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--card-alt)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >
+            Reset Presets
+          </button>
+          
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            style={{
+              all: 'unset', cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '8px 18px', borderRadius: 8,
+              background: 'var(--accent)',
+              fontSize: 12.5, fontWeight: 600, color: 'white',
+              opacity: saving ? 0.7 : 1,
+              transition: 'all 0.15s ease',
+              boxShadow: '0 2px 6px rgba(79,110,247,0.2)'
+            }}
+            onMouseEnter={e => { if(!saving) e.currentTarget.style.background = 'color-mix(in srgb, var(--accent) 90%, black)'; }}
+            onMouseLeave={e => { if(!saving) e.currentTarget.style.background = 'var(--accent)'; }}
+          >
+            <Save size={14} />
+            {saving ? 'Saving...' : 'Save Configuration'}
+          </button>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
    MAIN SETTINGS COMPONENT
 ───────────────────────────────────────────────────────────── */
 export function Settings() {
@@ -888,6 +1109,11 @@ export function Settings() {
           )}
           {activeNav === 'normalization' && (
             <NormalizationSection
+              toast={toast}
+            />
+          )}
+          {activeNav === 'classification' && (
+            <ClassificationSection
               toast={toast}
             />
           )}
