@@ -2109,3 +2109,8 @@
 2026-07-15 15:23:54,288 - INFO - Successfully patched mistralai.workflows activity decorator
 2026-07-15 15:23:56,938 - INFO - Successfully patched document workflow tool functions
 2026-07-15 15:23:56,944 - INFO - Successfully patched claim workflow tool functions
+2026-07-15 16:46:41,217 - INFO - Initializing performance timing hooks...
+2026-07-15 16:46:41,898 - INFO - Successfully patched Mistral Agents API client methods
+2026-07-15 16:46:43,710 - INFO - Successfully patched mistralai.workflows activity decorator
+2026-07-15 16:46:44,723 - INFO - Successfully patched document workflow tool functions
+2026-07-15 16:46:44,723 - INFO - Successfully patched claim workflow tool functions
