@@ -76,7 +76,7 @@ async def validator_activity(
         messages = [{"role": "user", "content": prompt}]
 
         logger.info(f"[Document {document_id}] Calling Validator Agent ({settings.VALIDATOR_AGENT_ID})")
-        response = client.agents.complete(
+        response = await client.agents.complete_async(
             agent_id=settings.VALIDATOR_AGENT_ID,
             messages=messages,
             tools=tools
@@ -120,7 +120,7 @@ async def validator_activity(
                     })
 
             logger.info(f"[Document {document_id}] Resuming Validator Agent with tool result")
-            response = client.agents.complete(
+            response = await client.agents.complete_async(
                 agent_id=settings.VALIDATOR_AGENT_ID,
                 messages=messages,
                 tools=tools
@@ -145,7 +145,7 @@ async def validator_activity(
                     "}"
                 )
             })
-            response = client.agents.complete(
+            response = await client.agents.complete_async(
                 agent_id=settings.VALIDATOR_AGENT_ID,
                 messages=messages,
                 response_format={"type": "json_object"}

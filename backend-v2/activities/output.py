@@ -92,7 +92,7 @@ async def output_activity(
         messages = [{"role": "user", "content": prompt}]
 
         logger.info(f"[Document {document_id}] Calling Output Agent ({settings.OUTPUT_AGENT_ID})")
-        response = client.agents.complete(
+        response = await client.agents.complete_async(
             agent_id=settings.OUTPUT_AGENT_ID,
             messages=messages,
             tools=tools
@@ -175,7 +175,7 @@ async def output_activity(
                     })
 
             logger.info(f"[Document {document_id}] Resuming Output Agent with tool result")
-            response = client.agents.complete(
+            response = await client.agents.complete_async(
                 agent_id=settings.OUTPUT_AGENT_ID,
                 messages=messages,
                 tools=tools
@@ -200,7 +200,7 @@ async def output_activity(
                     "}"
                 )
             })
-            response = client.agents.complete(
+            response = await client.agents.complete_async(
                 agent_id=settings.OUTPUT_AGENT_ID,
                 messages=messages,
                 response_format={"type": "json_object"}

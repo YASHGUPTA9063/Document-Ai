@@ -126,7 +126,7 @@ async def extractor_activity(document_id: str, file_path: str, doc_type: str) ->
         messages = [{"role": "user", "content": prompt}]
 
         logger.info(f"[Document {document_id}] Calling Extractor Agent ({agent_id})")
-        response = client.agents.complete(
+        response = await client.agents.complete_async(
             agent_id=agent_id,
             messages=messages,
             tools=tools
@@ -197,7 +197,7 @@ async def extractor_activity(document_id: str, file_path: str, doc_type: str) ->
                     })
 
             logger.info(f"[Document {document_id}] Resuming Extractor Agent with tool result")
-            response = client.agents.complete(
+            response = await client.agents.complete_async(
                 agent_id=agent_id,
                 messages=messages,
                 tools=tools

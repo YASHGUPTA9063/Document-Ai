@@ -98,7 +98,7 @@ async def pre_validator_activity(document_id: str, file_path: str) -> dict:
         ]
 
         logger.info(f"[Document {document_id}] Calling Pre-Validator Agent ({settings.PRE_VALIDATOR_AGENT_ID})")
-        response = client.agents.complete(
+        response = await client.agents.complete_async(
             agent_id=settings.PRE_VALIDATOR_AGENT_ID,
             messages=messages,
             tools=tools
@@ -177,7 +177,7 @@ async def pre_validator_activity(document_id: str, file_path: str) -> dict:
                 })
 
             logger.info(f"[Document {document_id}] Resuming Pre-Validator Agent with tool result")
-            response = client.agents.complete(
+            response = await client.agents.complete_async(
                 agent_id=settings.PRE_VALIDATOR_AGENT_ID,
                 messages=messages,
                 response_format={"type": "json_object"}

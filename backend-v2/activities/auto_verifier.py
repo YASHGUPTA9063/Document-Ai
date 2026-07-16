@@ -1,4 +1,5 @@
 import os
+import asyncio
 import base64 as b64mod
 import tempfile
 import logging
@@ -59,20 +60,25 @@ async def auto_verify_activity(document_id: str, validated_data: dict) -> dict:
             return {"status": "skipped", "reason": ref_status.get("reason", "no_reference")}
 
         c_id = ref_status["customer_id"]
-        sig_res = None
-        face_res = None
 
-        if ref_status["has_doc_signature"] and ref_status["has_ref_signature"]:
+        async def safe_verify_sig():
             try:
-                sig_res = await verify_signature(c_id, validated_data.get("signature_image"), res["reference_signature"])
+                return await verify_signature(c_id, validated_data.get("signature_image"), res["reference_signature"])
             except Exception as e:
                 logger.error(f"[AutoVerifier] Direct signature verifier failed: {e}")
+                return None
 
-        if ref_status["has_doc_photo"] and ref_status["has_ref_photo"]:
+        async def safe_verify_face():
             try:
-                face_res = await verify_face(c_id, validated_data.get("photo_image"), res["reference_photo"])
+                return await verify_face(c_id, validated_data.get("photo_image"), res["reference_photo"])
             except Exception as e:
                 logger.error(f"[AutoVerifier] Direct face verifier failed: {e}")
+                return None
+
+        sig_coro = safe_verify_sig() if (ref_status["has_doc_signature"] and ref_status["has_ref_signature"]) else asyncio.sleep(0)
+        face_coro = safe_verify_face() if (ref_status["has_doc_photo"] and ref_status["has_ref_photo"]) else asyncio.sleep(0)
+
+        sig_res, face_res = await asyncio.gather(sig_coro, face_coro)
 
         return {
             "status": "success",
@@ -105,10 +111,11 @@ async def auto_verify_activity(document_id: str, validated_data: dict) -> dict:
         messages = [{"role": "user", "content": prompt}]
 
         logger.info(f"[AutoVerifier] Calling Auto-Verifier Agent ({settings.AUTO_VERIFIER_AGENT_ID})")
-        response = client.agents.complete(
+        response = await client.agents.complete_async(
             agent_id=settings.AUTO_VERIFIER_AGENT_ID,
             messages=messages,
-            tools=tools
+            tools=tools,
+            response_format={"type": "json_object"}
         )
         message = response.choices[0].message
 
@@ -136,8 +143,10 @@ async def auto_verify_activity(document_id: str, validated_data: dict) -> dict:
             }
             messages.append(assistant_msg)
 
-            for tool_call in message.tool_calls:
-                if tool_call.function.name == "find_customer_reference":
+            async def execute_tool(tool_call):
+                nonlocal cached_ref_signature, cached_ref_photo, signature_result, photo_result, status
+                name = tool_call.function.name
+                if name == "find_customer_reference":
                     logger.info(f"[AutoVerifier] Executing find_customer_reference tool")
                     res = await find_customer_reference(document_id, validated_data)
                     cached_ref_signature = res["reference_signature"]
@@ -145,55 +154,61 @@ async def auto_verify_activity(document_id: str, validated_data: dict) -> dict:
                     result = res["tool_output"]
                     if result.get("matched"):
                         status = "success"
-
-                    messages.append({
+                    return {
                         "role": "tool",
                         "name": "find_customer_reference",
                         "content": json.dumps(result),
                         "tool_call_id": tool_call.id
-                    })
-
-                elif tool_call.function.name == "verify_signature":
+                    }
+                elif name == "verify_signature":
                     args = json.loads(tool_call.function.arguments)
                     c_id = args.get("customer_id")
-                    
                     logger.info(f"[AutoVerifier] Executing verify_signature tool for customer_id: {c_id}")
                     signature_result = await verify_signature(
                         c_id,
                         validated_data.get("signature_image"),
                         cached_ref_signature
                     )
-
-                    messages.append({
+                    return {
                         "role": "tool",
                         "name": "verify_signature",
                         "content": json.dumps(signature_result or {"status": "error"}),
                         "tool_call_id": tool_call.id
-                    })
-
-                elif tool_call.function.name == "verify_face":
+                    }
+                elif name == "verify_face":
                     args = json.loads(tool_call.function.arguments)
                     c_id = args.get("customer_id")
-
                     logger.info(f"[AutoVerifier] Executing verify_face tool for customer_id: {c_id}")
                     photo_result = await verify_face(
                         c_id,
                         validated_data.get("photo_image"),
                         cached_ref_photo
                     )
-
-                    messages.append({
+                    return {
                         "role": "tool",
                         "name": "verify_face",
                         "content": json.dumps(photo_result or {"status": "error"}),
                         "tool_call_id": tool_call.id
-                    })
+                    }
+                else:
+                    logger.warning(f"[AutoVerifier] Unknown tool call name: {name}")
+                    return {
+                        "role": "tool",
+                        "name": name,
+                        "content": json.dumps({"error": "unknown_tool"}),
+                        "tool_call_id": tool_call.id
+                    }
+
+            tool_tasks = [execute_tool(tc) for tc in message.tool_calls]
+            tool_responses = await asyncio.gather(*tool_tasks)
+            messages.extend(tool_responses)
 
             logger.info(f"[AutoVerifier] Resuming Auto-Verifier Agent with tool result")
-            response = client.agents.complete(
+            response = await client.agents.complete_async(
                 agent_id=settings.AUTO_VERIFIER_AGENT_ID,
                 messages=messages,
-                tools=tools
+                tools=tools,
+                response_format={"type": "json_object"}
             )
             message = response.choices[0].message
 
@@ -215,7 +230,7 @@ async def auto_verify_activity(document_id: str, validated_data: dict) -> dict:
                     "}"
                 )
             })
-            response = client.agents.complete(
+            response = await client.agents.complete_async(
                 agent_id=settings.AUTO_VERIFIER_AGENT_ID,
                 messages=messages,
                 response_format={"type": "json_object"}

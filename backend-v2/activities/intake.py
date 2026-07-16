@@ -51,7 +51,7 @@ async def intake_activity(document_id: str, filename: str) -> dict:
         messages = [{"role": "user", "content": prompt}]
         
         logger.info(f"[Document {document_id}] Calling Intake Agent ({settings.INTAKE_AGENT_ID})")
-        response = client.agents.complete(
+        response = await client.agents.complete_async(
             agent_id=settings.INTAKE_AGENT_ID,
             messages=messages,
             tools=tools
@@ -103,7 +103,7 @@ async def intake_activity(document_id: str, filename: str) -> dict:
                 "content": "Based on the tool output above, output the final intake verdict in the requested JSON format."
             })
             
-            response = client.agents.complete(
+            response = await client.agents.complete_async(
                 agent_id=settings.INTAKE_AGENT_ID,
                 messages=messages,
                 response_format={"type": "json_object"}
