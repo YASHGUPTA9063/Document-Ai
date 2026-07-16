@@ -700,6 +700,68 @@ async def get_ocr_blocks(document_id: str):
         return {"blocks": [], "available": False}
 
 
+@app.post("/documents/{document_id}/retry")
+async def retry_document(document_id: str):
+    """
+    Re-trigger workflow for a stuck/orphaned document.
+    Useful when a server restart kills an in-flight workflow,
+    leaving the document stuck at 'pending' or 'processing' forever.
+    """
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Document).where(Document.id == document_id))
+        doc = result.scalar_one_or_none()
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+        if doc.status in ("completed", "deleted"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Document is already '{doc.status}' and cannot be retried."
+            )
+
+        # Cancel the old workflow execution if it exists
+        if doc.workflow_run_id and doc.workflow_run_id != "unknown_run_id":
+            try:
+                await mistral_client.workflows.executions.cancel_workflow_execution_async(
+                    execution_id=doc.workflow_run_id
+                )
+            except Exception:
+                pass  # Old execution may already be dead
+
+        # Delete old extracted data so it starts fresh
+        await session.execute(
+            delete(ExtractedData).where(ExtractedData.document_id == document_id)
+        )
+
+        # Reset document state
+        doc.status = "pending"
+        doc.doc_type = None
+        doc.error_details = None
+        await session.commit()
+
+        # Re-trigger the workflow
+        run_response = await mistral_client.workflows.execute_workflow_async(
+            workflow_identifier="document_processing_workflow",
+            input={
+                "document_id": doc.id,
+                "filename": doc.filename,
+                "file_path": doc.file_path
+            }
+        )
+
+        run_id = run_response.execution_id if hasattr(run_response, "execution_id") else "unknown_run_id"
+        doc.workflow_run_id = run_id
+        await session.commit()
+
+        logger.info(f"Retried document {document_id} with new workflow run {run_id}")
+
+        return {
+            "document_id": doc.id,
+            "status": "pending",
+            "workflow_run_id": run_id,
+            "message": "Workflow re-triggered successfully."
+        }
+
+
 @app.delete("/documents/{document_id}")
 async def delete_document(document_id: str):
     async with AsyncSessionLocal() as session:
