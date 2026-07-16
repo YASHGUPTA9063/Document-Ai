@@ -49,6 +49,37 @@
   --accent-dim:      rgba(250, 82, 15, 0.10);
   --accent-dim2:     rgba(250, 82, 15, 0.05);
 
+  /* ── Button Shadow Variables ── */
+  --btn-shadow:       rgba(250, 82, 15, 0.25);
+  --btn-shadow-hover: rgba(250, 82, 15, 0.35);
+
+  /* ── Logo Shadow Variable ── */
+  --logo-shadow:      0 4px 16px rgba(250, 82, 15, 0.30);
+
+  /* ── Navigation variables ── */
+  --nav-indicator-shadow: 0 0 10px rgba(250, 82, 15, 0.40);
+  --nav-badge-shadow:     0 0 8px rgba(250, 82, 15, 0.30);
+
+  /* ── Upload Zone Shadow Variables ── */
+  --upload-radial-glow:       rgba(250, 82, 15, 0.06);
+  --upload-radial-glow-hover: rgba(250, 82, 15, 0.12);
+  --upload-icon-border:       rgba(250, 82, 15, 0.15);
+  --upload-icon-inner-shadow: inset 0 2px 4px rgba(250, 82, 15, 0.05);
+  --upload-icon-dashed-border: rgba(250, 82, 15, 0.18);
+  --upload-icon-border-hover:  rgba(250, 82, 15, 0.35);
+
+  /* ── Pipeline variables ── */
+  --pipeline-step-glow:       0 0 16px rgba(250, 82, 15, 0.40);
+
+  /* ── Page Hero variables ── */
+  --hero-radial-glow:         rgba(250, 82, 15, 0.08);
+
+  /* ── Animations Pulse variables ── */
+  --pulse-glow-1:             rgba(250, 82, 15, 0.2);
+  --pulse-glow-2:             rgba(250, 82, 15, 0);
+  --glow-pulse-1:             0 0 16px rgba(250, 82, 15, 0.3);
+  --glow-pulse-2:             0 0 28px rgba(250, 82, 15, 0.6);
+
   /* ── Gradients ── */
   --grad-brand:    linear-gradient(135deg, #fa520f 0%, #ff8105 100%);
   --grad-sunset:   linear-gradient(90deg, #fa520f 0%, #ffa110 30%, #ffb83e 60%, #ffd900 80%, #fff8e0 100%);
@@ -124,62 +155,93 @@
 ══════════════════════════════════════════════════ */
 [data-theme="dark"] {
   /* ── Backgrounds & Surfaces ── */
-  --bg:              #110a00;
-  --surface:         #1a1008;
-  --surface-elevated: #221508;
-  --surface-sunken:  #0d0800;
-  --card:            #1e1306;
-  --card-alt:        #251a0a;
-  --card-hi:         #2e2010;
-  --border:          #3a2810;
-  --border-hi:       #4a3418;
-  --border-glow:     rgba(250, 82, 15, 0.30);
+  --bg:              #050505;
+  --surface:         #0a0a0a;
+  --surface-elevated: #0e0e0e;
+  --surface-sunken:  #030303;
+  --card:            #0a0a0a;
+  --card-alt:        #0e0e0e;
+  --card-hi:         #141414;
+  --border:          #1e1e1e;
+  --border-hi:       #2c2c2c;
+  --border-glow:     rgba(204, 58, 5, 0.25);
 
-  /* ── Brand Accents ── */
-  --accent:          #fb6b2d;
-  --accent-hover:    #fa520f;
-  --accent2:         #ff9420;
-  --accent3:         #ffc14a;
-  --accent4:         #ffe050;
-  --accent-dim:      rgba(251, 107, 45, 0.16);
-  --accent-dim2:     rgba(251, 107, 45, 0.08);
+  /* ── Brand Accents (darker orange) ── */
+  --accent:          #cc3a05;
+  --accent-hover:    #ad2e01;
+  --accent2:         #d35400;
+  --accent3:         #e67e22;
+  --accent4:         #f39c12;
+  --accent-dim:      rgba(204, 58, 5, 0.15);
+  --accent-dim2:     rgba(204, 58, 5, 0.08);
+
+  /* ── Button Shadow Variables ── */
+  --btn-shadow:       rgba(204, 58, 5, 0.30);
+  --btn-shadow-hover: rgba(204, 58, 5, 0.40);
+
+  /* ── Logo Shadow Variable ── */
+  --logo-shadow:      0 4px 16px rgba(204, 58, 5, 0.40);
+
+  /* ── Navigation variables ── */
+  --nav-indicator-shadow: 0 0 10px rgba(204, 58, 5, 0.50);
+  --nav-badge-shadow:     0 0 8px rgba(204, 58, 5, 0.40);
+
+  /* ── Upload Zone Shadow Variables ── */
+  --upload-radial-glow:       rgba(204, 58, 5, 0.08);
+  --upload-radial-glow-hover: rgba(204, 58, 5, 0.16);
+  --upload-icon-border:       rgba(204, 58, 5, 0.25);
+  --upload-icon-inner-shadow: inset 0 2px 4px rgba(204, 58, 5, 0.08);
+  --upload-icon-dashed-border: rgba(204, 58, 5, 0.28);
+  --upload-icon-border-hover:  rgba(204, 58, 5, 0.45);
+
+  /* ── Pipeline variables ── */
+  --pipeline-step-glow:       0 0 16px rgba(204, 58, 5, 0.50);
+
+  /* ── Page Hero variables ── */
+  --hero-radial-glow:         rgba(204, 58, 5, 0.12);
+
+  /* ── Animations Pulse variables ── */
+  --pulse-glow-1:             rgba(204, 58, 5, 0.25);
+  --pulse-glow-2:             rgba(204, 58, 5, 0);
+  --glow-pulse-1:             0 0 16px rgba(204, 58, 5, 0.45);
+  --glow-pulse-2:             0 0 28px rgba(204, 58, 5, 0.75);
 
   /* ── Gradients ── */
-  --grad-brand:    linear-gradient(135deg, #fb6b2d 0%, #ff9420 100%);
-  --grad-sunset:   linear-gradient(90deg, #fa520f 0%, #ffa110 30%, #ffb83e 60%, #ffd900 80%, #fff8e0 100%);
-  --grad-cyan:     linear-gradient(135deg, #ffc14a 0%, #fb6b2d 100%);
-  --grad-warm:     linear-gradient(135deg, #fb6b2d 0%, #fa520f 100%);
+  --grad-brand:    linear-gradient(135deg, #cc3a05 0%, #d35400 100%);
+  --grad-sunset:   linear-gradient(90deg, #cc3a05 0%, #d35400 30%, #e67e22 60%, #f39c12 80%, #fff8e0 100%);
+  --grad-cyan:     linear-gradient(135deg, #e67e22 0%, #cc3a05 100%);
+  --grad-warm:     linear-gradient(135deg, #cc3a05 0%, #ad2e01 100%);
   --grad-success:  linear-gradient(135deg, #10b981 0%, #059669 100%);
-  --grad-surface:  linear-gradient(180deg, #1a1008 0%, #110a00 100%);
+  --grad-surface:  linear-gradient(180deg, #0a0a0a 0%, #050505 100%);
 
   /* ── Status ── */
-  --success:         #10b981;
-  --success-dim:     rgba(16, 185, 129, 0.12);
-  --success-border:  rgba(16, 185, 129, 0.28);
+  --success:         #34d399;
+  --success-dim:     rgba(52, 211, 153, 0.12);
+  --success-border:  rgba(52, 211, 153, 0.25);
   --warn:            #fbbf24;
   --warn-dim:        rgba(251, 191, 36, 0.12);
-  --warn-border:     rgba(251, 191, 36, 0.28);
+  --warn-border:     rgba(251, 191, 36, 0.25);
   --danger:          #f87171;
   --danger-dim:      rgba(248, 113, 113, 0.12);
-  --danger-border:   rgba(248, 113, 113, 0.28);
+  --danger-border:   rgba(248, 113, 113, 0.25);
   --info:            #60a5fa;
   --info-dim:        rgba(96, 165, 250, 0.12);
 
   /* ── Text ── */
-  --text:            #f5e8d0;
-  --text-dim:        #b8956a;
-  --muted:           #7a6040;
+  --text:            #f5f5f5;
+  --text-dim:        #b8b8b8;
+  --muted:           #8a8a8a;
 
   /* ── Effects ── */
-  --highlight:       rgba(251, 107, 45, 0.14);
-  --glow:            0 8px 40px rgba(251, 107, 45, 0.24);
-  --glow-sm:         0 4px 20px rgba(251, 107, 45, 0.16);
-  --glow-success:    0 4px 20px rgba(16, 185, 129, 0.18);
-  --shadow:          0 16px 40px rgba(0, 0, 0, 0.60), 0 4px 12px rgba(0, 0, 0, 0.35);
-  --shadow-sm:       0 2px 8px rgba(0, 0, 0, 0.35);
-  --shadow-card:     rgba(0, 0, 0, 0.30) 0px 4px 12px 0px;
-  --glass:           rgba(26, 16, 8, 0.88);
-  --glass-border:    rgba(255, 200, 100, 0.10);
+  --highlight:       rgba(204, 58, 5, 0.12);
+  --glow:            0 8px 40px rgba(204, 58, 5, 0.22);
+  --glow-sm:         0 4px 20px rgba(204, 58, 5, 0.14);
+  --glow-success:    0 4px 20px rgba(52, 211, 153, 0.16);
+  --shadow:          0 16px 40px rgba(0, 0, 0, 0.70), 0 4px 12px rgba(0, 0, 0, 0.45);
+  --shadow-sm:       0 2px 8px rgba(0, 0, 0, 0.45);
+  --shadow-card:     rgba(0, 0, 0, 0.40) 0px 4px 12px 0px;
+  --glass:           rgba(8, 8, 8, 0.94);
+  --glass-border:    rgba(255, 255, 255, 0.06);
 }
 
 /* ══════════════════════════════════════════════════
@@ -203,9 +265,8 @@ body {
 }
 
 [data-theme="dark"] body {
-  background-image:
-    radial-gradient(ellipse 70% 50% at 50% -5%, rgba(251, 107, 45, 0.12) 0%, transparent 70%),
-    radial-gradient(ellipse 50% 40% at 90% 90%, rgba(255, 148, 32, 0.08) 0%, transparent 60%);
+  background: linear-gradient(180deg, #0e0e0e 0%, #050505 35%, #030303 100%);
+  background-attachment: fixed;
 }
 
 a { color: var(--accent); text-decoration: none; }
@@ -244,6 +305,14 @@ img { max-width: 100%; }
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+}
+[data-theme="dark"] .grad,
+[data-theme="dark"] .grad-warm {
+  background: none;
+  -webkit-background-clip: initial;
+  -webkit-text-fill-color: initial;
+  background-clip: initial;
+  color: var(--text);
 }
 
 /* ── Chip ── */

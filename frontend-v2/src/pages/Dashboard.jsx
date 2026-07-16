@@ -18,19 +18,29 @@ const STATUS_COLORS = {
   awaiting_review: 'var(--warn)',
   error:           'var(--danger)',
   pre_validating:  '#0891b2',
+  preprocessing:   'var(--accent2)',
   processing:      'var(--accent)',
+  classifying:     'var(--accent)',
+  extracting:      'var(--accent)',
+  validating:      'var(--accent)',
   pending:         'var(--muted)',
   rejected:        'var(--danger)',
+  failed:          'var(--danger)',
 };
 
 const STATUS_LABELS = {
   completed:       'Completed',
-  awaiting_review: 'Awaiting review',
+  awaiting_review: 'Human Review',
   error:           'Error',
-  pre_validating:  'Pre-Validating',
-  processing:      'Processing',
+  pre_validating:  'Quality Check',
+  preprocessing:   'Pre Processing',
+  processing:      'Ingestion',
+  classifying:     'Classification',
+  extracting:      'Extraction',
+  validating:      'Validation',
   pending:         'Queued',
   rejected:        'Rejected',
+  failed:          'Failed',
 };
 
 export function Dashboard() {

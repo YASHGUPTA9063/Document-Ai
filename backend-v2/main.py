@@ -353,7 +353,7 @@ async def resume_review(workflow_run_id: str, decision: ReviewerDecisionRequest)
 AGENT_PIPELINE_META = {
     "intake": {
         "step": 1,
-        "role": "Document intake and duplicate checking",
+        "role": "Document ingestion and duplicate checking",
         "emoji": "📥",
         "color": "rgba(6,192,219,0.15)",
         "border": "#06c0db",
@@ -361,7 +361,7 @@ AGENT_PIPELINE_META = {
     },
     "pre_validator": {
         "step": 2,
-        "role": "Document quality gate",
+        "role": "Document quality check",
         "emoji": "🛡️",
         "color": "rgba(6,182,212,0.15)",
         "border": "#06b6d4",
@@ -369,7 +369,7 @@ AGENT_PIPELINE_META = {
     },
     "preprocessing": {
         "step": 2.5,
-        "role": "Document image enhancement",
+        "role": "Document pre-processing",
         "emoji": "⚙️",
         "color": "rgba(16,185,129,0.15)",
         "border": "#10b981",
@@ -377,7 +377,7 @@ AGENT_PIPELINE_META = {
     },
     "classifier": {
         "step": 3,
-        "role": "Document type identification",
+        "role": "Document classification",
         "emoji": "🏷️",
         "color": "rgba(124,58,237,0.15)",
         "border": "#7c3aed",
@@ -385,7 +385,7 @@ AGENT_PIPELINE_META = {
     },
     "fraud_checker": {
         "step": 3.5,
-        "role": "KYC forensic fraud check",
+        "role": "KYC  fraud check",
         "emoji": "🛡️",
         "color": "rgba(225,29,72,0.15)",
         "border": "#e11d48",
@@ -394,7 +394,7 @@ AGENT_PIPELINE_META = {
     # ── Extractor (step 4) ──────────────────
     "others_extractor": {
         "step": 4,
-        "role": "General document extraction",
+        "role": "Document extraction",
         "emoji": "📄",
         "color": "rgba(107,114,128,0.15)",
         "border": "#6b7280",
@@ -403,7 +403,7 @@ AGENT_PIPELINE_META = {
     # ─────────────────────────────────────────────────────────────────────────
     "validator": {
         "step": 5,
-        "role": "Data quality assurance",
+        "role": "Document validation & quality assurance",
         "emoji": "✅",
         "color": "rgba(245,158,11,0.15)",
         "border": "#f59e0b",
@@ -467,7 +467,7 @@ AGENT_PIPELINE_META = {
     },
     "reviewer": {
         "step": 6,
-        "role": "Human-in-the-loop review",
+        "role": "Human review",
         "emoji": "👤",
         "color": "rgba(240,64,96,0.15)",
         "border": "#f04060",
@@ -475,7 +475,7 @@ AGENT_PIPELINE_META = {
     },
     "output": {
         "step": 7,
-        "role": "Result persistence and export",
+        "role": "Document output persistence and export",
         "emoji": "📤",
         "color": "rgba(79,110,247,0.15)",
         "border": "#4f6ef7",
@@ -532,9 +532,20 @@ async def list_agents():
                     else:
                         tool_names.append(str(t))
             display_name = " ".join(w.capitalize() for w in key.split("_"))
+            name_mapping = {
+                "intake": "Ingestion Agent",
+                "pre_validator": "Quality Check Agent",
+                "preprocessing": "Pre Processing Agent",
+                "classifier": "Classification Agent",
+                "others_extractor": "Extraction Agent",
+                "validator": "Validation Agent",
+                "reviewer": "Human Review Agent",
+                "output": "Output Agent"
+            }
+            agent_default_name = name_mapping.get(key, display_name + " Agent")
             mistral_agents.append({
                 "key": key,
-                "name": agent_data.name or display_name + " Agent",
+                "name": agent_data.name or agent_default_name,
                 "step": meta["step"],
                 "role": meta["role"],
                 "description": agent_data.description or f"Mistral-hosted agent for {display_name.lower()} tasks.",
@@ -549,10 +560,21 @@ async def list_agents():
         except Exception as e:
             logger.warning(f"Failed to fetch Mistral agent '{key}' ({agent_id}): {e}")
             display_name = " ".join(w.capitalize() for w in key.split("_"))
+            name_mapping = {
+                "intake": "Ingestion Agent",
+                "pre_validator": "Quality Check Agent",
+                "preprocessing": "Pre Processing Agent",
+                "classifier": "Classification Agent",
+                "others_extractor": "Extraction Agent",
+                "validator": "Validation Agent",
+                "reviewer": "Human Review Agent",
+                "output": "Output Agent"
+            }
+            agent_default_name = name_mapping.get(key, display_name + " Agent")
             # Graceful fallback — still show the agent with static data
             mistral_agents.append({
                 "key": key,
-                "name": display_name + " Agent",
+                "name": agent_default_name,
                 "step": meta["step"],
                 "role": meta["role"],
                 "description": f"Mistral-hosted agent for {display_name.lower()} tasks. (Metadata fetch failed)",

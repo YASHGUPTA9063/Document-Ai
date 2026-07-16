@@ -43,3 +43,4 @@ scratch.*
 # Agent customizations (skills, rules — local dev config only)
 .agents/
 backend-v2/venv
+backend-v2/doc_workflow.db-shm

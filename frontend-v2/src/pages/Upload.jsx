@@ -536,7 +536,7 @@ export function Upload() {
               <div>
                 <div className="card-title">AI Processing Pipeline</div>
                 <div className="card-sub">
-                  6-step automated workflow · All batch files run through each stage in parallel
+                  8-step automated workflow · All batch files run through each stage in parallel
                 </div>
               </div>
               <span className="batch-mode-chip">
@@ -546,12 +546,14 @@ export function Upload() {
 
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               {[
-                { icon: <CheckCircle2 size={15} />, label: 'Intake',    desc: 'Duplicate detection via SHA-256 & initial validation' },
-                { icon: <Brain size={15} />,        label: 'Classify',  desc: 'AI determines document type automatically' },
-                { icon: <ScanSearch size={15} />,   label: 'Extract',   desc: 'Mistral OCR + structured field extraction per type' },
-                { icon: <ShieldCheck size={15} />,  label: 'Validate',  desc: 'Math cross-checks, date logic, schema validation' },
-                { icon: <UserCheck size={15} />,    label: 'Review',    desc: 'Human approval required when confidence < 80%' },
-                { icon: <Share2 size={15} />,       label: 'Output',    desc: 'Structured JSON persisted & ready to export' },
+                { icon: <CheckCircle2 size={15} />, label: 'Ingestion',     desc: 'Duplicate detection via SHA-256 & initial validation' },
+                { icon: <ShieldCheck size={15} />,  label: 'Quality Check',   desc: 'Verification of document readability, layout alignment, and security constraints' },
+                { icon: <Brain size={15} />,        label: 'Pre Processing',  desc: 'Automatic image enhancement, deskewing, and formatting conversion' },
+                { icon: <Layers size={15} />,       label: 'Classification',  desc: 'AI determines document type and selects extraction schema automatically' },
+                { icon: <ScanSearch size={15} />,   label: 'Extraction',      desc: 'Mistral OCR + structured field extraction per document type' },
+                { icon: <ShieldCheck size={15} />,  label: 'Validation',      desc: 'Math cross-checks, date logic, and custom schema validation' },
+                { icon: <UserCheck size={15} />,    label: 'Human Review',    desc: 'Human approval required when extraction confidence is low' },
+                { icon: <Share2 size={15} />,       label: 'Output',          desc: 'Structured JSON persisted & ready for downstream export' },
               ].map(({ icon, label, desc }) => (
                 <div key={label} className="info-row">
                   <div className="info-row-icon">{icon}</div>

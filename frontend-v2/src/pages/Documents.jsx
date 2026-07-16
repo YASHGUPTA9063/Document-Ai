@@ -7,6 +7,17 @@ import { StatusBadge } from '../components/ui/StatusBadge';
 
 const STATUS_FILTERS = ['all', 'pending', 'processing', 'awaiting_review', 'completed', 'rejected', 'failed', 'error'];
 
+const STATUS_FILTER_LABELS = {
+  all:             'All',
+  pending:         'Pending',
+  processing:      'Ingestion',
+  awaiting_review: 'Human Review',
+  completed:       'Completed',
+  rejected:        'Rejected',
+  failed:          'Failed',
+  error:           'Error',
+};
+
 /** Renders a rejection/failure reason with expand/collapse if the text is long */
 function ExpandableReason({ reason }) {
   const [expanded, setExpanded] = useState(false);
@@ -108,7 +119,7 @@ export function Documents() {
               style={filter === s ? { borderColor: 'var(--accent)', color: 'var(--accent)', background: 'var(--accent-dim)' } : {}}
               onClick={() => setFilter(s)}
             >
-              {s === 'all' ? 'All' : s.replace(/_/g, ' ')}
+              {STATUS_FILTER_LABELS[s] || s}
               {s !== 'all' && (
                 <span style={{ marginLeft: 4, opacity: 0.6 }}>
                   ({documents.filter((d) => d.status === s).length})
@@ -123,7 +134,7 @@ export function Documents() {
             <Folder className="empty-icon" size={36} />
             <div className="empty-title">No documents</div>
             <div className="empty-sub">
-              {filter !== 'all' ? `No documents with status "${filter}".` : 'Upload a document to get started.'}
+              {filter !== 'all' ? `No documents with status "${STATUS_FILTER_LABELS[filter] || filter}".` : 'Upload a document to get started.'}
             </div>
           </div>
         ) : (
@@ -144,7 +155,7 @@ export function Documents() {
                     <td>
                       <FileText size={14} className="doc-icon" style={{ display: 'inline-block', verticalAlign: 'middle' }} />
                       <span
-                        style={{ cursor: 'pointer', color: 'var(--accent)' }}
+                        className="doc-filename-link"
                         onClick={() => navigate('/extraction')}
                       >
                         {doc.filename}
