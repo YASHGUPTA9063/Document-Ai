@@ -60,7 +60,7 @@ async def claim_treatment_activity(claim_id: str) -> dict:
         messages = [{"role": "user", "content": prompt}]
 
         logger.info(f"[Claim {claim_id}] Calling Treatment Agent ({settings.CLAIM_TREATMENT_AGENT_ID})")
-        response = client.agents.complete(
+        response = await client.agents.complete_async(
             agent_id=settings.CLAIM_TREATMENT_AGENT_ID,
             messages=messages,
             tools=CLAIM_TOOLS
@@ -96,7 +96,7 @@ async def claim_treatment_activity(claim_id: str) -> dict:
                     "tool_call_id": tool_call.id
                 })
 
-            response = client.agents.complete(
+            response = await client.agents.complete_async(
                 agent_id=settings.CLAIM_TREATMENT_AGENT_ID,
                 messages=messages,
                 tools=CLAIM_TOOLS
@@ -113,7 +113,7 @@ async def claim_treatment_activity(claim_id: str) -> dict:
                 "role": "user",
                 "content": "Please output only the JSON result object with no extra text."
             })
-            response = client.agents.complete(
+            response = await client.agents.complete_async(
                 agent_id=settings.CLAIM_TREATMENT_AGENT_ID,
                 messages=messages,
                 response_format={"type": "json_object"}

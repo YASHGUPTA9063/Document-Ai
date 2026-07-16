@@ -63,7 +63,7 @@ async def claim_integrity_activity(claim_id: str, claimant_id: str, policy_id: s
         messages = [{"role": "user", "content": prompt}]
 
         logger.info(f"[Claim {claim_id}] Calling Claim Integrity Agent ({settings.CLAIM_INTEGRITY_AGENT_ID})")
-        response = client.agents.complete(
+        response = await client.agents.complete_async(
             agent_id=settings.CLAIM_INTEGRITY_AGENT_ID,
             messages=messages,
             tools=CLAIM_TOOLS
@@ -99,7 +99,7 @@ async def claim_integrity_activity(claim_id: str, claimant_id: str, policy_id: s
                     "tool_call_id": tool_call.id
                 })
 
-            response = client.agents.complete(
+            response = await client.agents.complete_async(
                 agent_id=settings.CLAIM_INTEGRITY_AGENT_ID,
                 messages=messages,
                 tools=CLAIM_TOOLS
@@ -116,7 +116,7 @@ async def claim_integrity_activity(claim_id: str, claimant_id: str, policy_id: s
                 "role": "user",
                 "content": "Please output only the JSON result object with no extra text."
             })
-            response = client.agents.complete(
+            response = await client.agents.complete_async(
                 agent_id=settings.CLAIM_INTEGRITY_AGENT_ID,
                 messages=messages,
                 response_format={"type": "json_object"}

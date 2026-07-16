@@ -61,7 +61,7 @@ async def fraud_check_activity(document_id: str, file_path: str) -> dict:
         messages = [{"role": "user", "content": prompt}]
 
         logger.info(f"[Document {document_id}] Calling Fraud Examiner Agent ({settings.FRAUD_AGENT_ID})")
-        response = client.agents.complete(
+        response = await client.agents.complete_async(
             agent_id=settings.FRAUD_AGENT_ID,
             messages=messages,
             tools=tools
@@ -105,7 +105,7 @@ async def fraud_check_activity(document_id: str, file_path: str) -> dict:
                     })
 
             logger.info(f"[Document {document_id}] Resuming Fraud Examiner Agent with tool result")
-            response = client.agents.complete(
+            response = await client.agents.complete_async(
                 agent_id=settings.FRAUD_AGENT_ID,
                 messages=messages,
                 tools=tools
@@ -131,7 +131,7 @@ async def fraud_check_activity(document_id: str, file_path: str) -> dict:
                     "}"
                 )
             })
-            response = client.agents.complete(
+            response = await client.agents.complete_async(
                 agent_id=settings.FRAUD_AGENT_ID,
                 messages=messages,
                 response_format={"type": "json_object"}

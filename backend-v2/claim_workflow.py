@@ -145,7 +145,7 @@ async def generate_claim_suggestion_activity(claim_id: str, agent_results: dict)
 
     logger.info(f"[Claim {claim_id}] Calling Claim Report Agent ({settings.CLAIM_REPORT_AGENT_ID})")
     try:
-        response = client.agents.complete(
+        response = await client.agents.complete_async(
             agent_id=settings.CLAIM_REPORT_AGENT_ID,
             messages=messages,
             response_format={"type": "json_object"}
