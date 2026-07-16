@@ -4628,3 +4628,5 @@
 2026-07-16 22:03:01,034 - INFO - [PERF] [ACTIVITY_END] output_activity took 477.408s
 2026-07-16 22:03:01,190 - INFO - [PERF] [TOOL_END] persist_final_extraction took 0.287s
 2026-07-16 22:03:01,190 - INFO - [PERF] [AGENT_START] Agent completion for agent_id='ag_019f5f9024677043835539a78d653a7f' started
+2026-07-16 22:04:01,087 - INFO - [PERF] [AGENT_END] Agent completion for agent_id='ag_019f5f9024677043835539a78d653a7f' took 59.896s
+2026-07-16 22:04:01,087 - INFO - [PERF] [ACTIVITY_END] output_activity took 236.805s
