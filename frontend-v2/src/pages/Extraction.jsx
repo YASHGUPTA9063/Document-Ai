@@ -1262,13 +1262,13 @@ function KycImageCard({ label, icon: Icon, base64Data, detected, accentColor, ve
               fontSize: 9, fontWeight: 600,
               padding: '2px 8px', borderRadius: 99,
               display: 'inline-flex', alignItems: 'center', gap: 3,
-              ...(verificationResult.verdict === 'genuine'
+              ...(['genuine', 'same_person'].includes(verificationResult.verdict)
                 ? { color: '#059669', background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)' }
-                : verificationResult.verdict === 'uncertain'
+                : ['uncertain', 'needs_review'].includes(verificationResult.verdict)
                   ? { color: '#d97706', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }
                   : { color: '#dc2626', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' })
             }}>
-              {verificationResult.verdict === 'genuine' ? <CheckCircle2 size={8} /> : verificationResult.verdict === 'uncertain' ? <AlertTriangle size={8} /> : <Shield size={8} />}
+              {['genuine', 'same_person'].includes(verificationResult.verdict) ? <CheckCircle2 size={8} /> : ['uncertain', 'needs_review'].includes(verificationResult.verdict) ? <AlertTriangle size={8} /> : <Shield size={8} />}
               {(verificationResult.verdict || 'unknown').toUpperCase()}
             </span>
           )}

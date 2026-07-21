@@ -96,16 +96,19 @@ async def auto_verify_activity(document_id: str, validated_data: dict) -> dict:
 
         prompt = (
             f"You are the Auto-Verifier Agent. We need to verify the signatures and photos for document '{document_id}'.\n"
-            f"1. Call `find_customer_reference` first to check if customer reference images are available in the database.\n"
+            f"1. Call `find_customer_reference` ONCE to check if customer reference images are available in the database.\n"
             f"2. Based on the returned check results:\n"
-            f"   - If signature crops are available on both the document and reference, call `verify_signature`.\n"
-            f"   - If photo crops are available on both the document and reference, call `verify_face`.\n"
+            f"   - If `matched` is false, STOP IMMEDIATELY and return: {{\"status\": \"skipped\", \"reason\": \"no_customer_reference_found\", \"signature\": null, \"photo\": null}}\n"
+            f"   - If `matched` is true and signature crops are available on both the document and reference, call `verify_signature`.\n"
+            f"   - If `matched` is true and photo crops are available on both the document and reference, call `verify_face`.\n"
             f"3. Combine the results and return the final verification output matching exactly this JSON schema:\n"
             f"{{\n"
             f"  \"status\": \"success\" or \"skipped\",\n"
             f"  \"signature\": dict or null,\n"
             f"  \"photo\": dict or null\n"
-            f"}}"
+            f"}}\n"
+            f"IMPORTANT: Do NOT call `find_customer_reference` more than once. Do NOT retry tools. "
+            f"If no match is found on the first call, immediately return the skipped JSON."
         )
 
         messages = [{"role": "user", "content": prompt}]
@@ -123,8 +126,15 @@ async def auto_verify_activity(document_id: str, validated_data: dict) -> dict:
         signature_result = None
         photo_result = None
         status = "skipped"
+        customer_ref_checked = False  # Track whether find_customer_reference has been called
 
+        MAX_TOOL_LOOP_ITERATIONS = 10
+        loop_iter = 0
         while message.tool_calls:
+            loop_iter += 1
+            if loop_iter > MAX_TOOL_LOOP_ITERATIONS:
+                logger.warning(f"[AutoVerifier] Tool call loop exceeded {MAX_TOOL_LOOP_ITERATIONS} iterations, breaking out.")
+                break
             logger.info(f"[AutoVerifier] Agent requested tool calls: {message.tool_calls}")
 
             assistant_msg = {
@@ -144,9 +154,19 @@ async def auto_verify_activity(document_id: str, validated_data: dict) -> dict:
             messages.append(assistant_msg)
 
             async def execute_tool(tool_call):
-                nonlocal cached_ref_signature, cached_ref_photo, signature_result, photo_result, status
+                nonlocal cached_ref_signature, cached_ref_photo, signature_result, photo_result, status, customer_ref_checked
                 name = tool_call.function.name
                 if name == "find_customer_reference":
+                    if customer_ref_checked:
+                        # Agent is retrying find_customer_reference — return cached result and tell it to stop
+                        logger.warning(f"[AutoVerifier] Agent retried find_customer_reference — returning cached no-match result.")
+                        return {
+                            "role": "tool",
+                            "name": "find_customer_reference",
+                            "content": json.dumps({"matched": False, "reason": "already_checked_no_reference_found"}),
+                            "tool_call_id": tool_call.id
+                        }
+                    customer_ref_checked = True
                     logger.info(f"[AutoVerifier] Executing find_customer_reference tool")
                     res = await find_customer_reference(document_id, validated_data)
                     cached_ref_signature = res["reference_signature"]
@@ -202,6 +222,26 @@ async def auto_verify_activity(document_id: str, validated_data: dict) -> dict:
             tool_tasks = [execute_tool(tc) for tc in message.tool_calls]
             tool_responses = await asyncio.gather(*tool_tasks)
             messages.extend(tool_responses)
+
+            # If find_customer_reference returned no match, inject a stop instruction
+            # so the agent produces a final JSON instead of looping
+            if customer_ref_checked and status == "skipped":
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "No customer reference was found. Do NOT call any more tools. "
+                        "Return immediately with this exact JSON: "
+                        '{"status": "skipped", "reason": "no_customer_reference_found", "signature": null, "photo": null}'
+                    )
+                })
+                logger.info(f"[AutoVerifier] No customer match — injecting stop instruction to agent.")
+                response = await client.agents.complete_async(
+                    agent_id=settings.AUTO_VERIFIER_AGENT_ID,
+                    messages=messages,
+                    response_format={"type": "json_object"}
+                )
+                message = response.choices[0].message
+                break
 
             logger.info(f"[AutoVerifier] Resuming Auto-Verifier Agent with tool result")
             response = await client.agents.complete_async(

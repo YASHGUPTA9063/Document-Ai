@@ -79,6 +79,8 @@ SUPPORTED_DOCUMENT_TYPES = [
     "prescription_records",
     "bills_invoices",
     "disability_certificate",
-    "legal_letter"
+    "legal_letter",
+    "utility_bill",
+    "Bank_Statement"
 ]
 
