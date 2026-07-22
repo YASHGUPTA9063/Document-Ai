@@ -42,6 +42,7 @@ class MistralOCR(OCRProvider):
         file_path: str,
         pages: list[int] | None = None,
         include_blocks: bool = True,
+        **kwargs,
     ) -> OCRResponse:
         """
         Extract text from a document using Mistral OCR.
@@ -97,6 +98,9 @@ class MistralOCR(OCRProvider):
         }
         if actual_pages is not None:
             ocr_args["pages"] = actual_pages
+            
+        # Add any vendor-specific kwargs
+        ocr_args.update(kwargs)
 
         start = time.monotonic()
         try:

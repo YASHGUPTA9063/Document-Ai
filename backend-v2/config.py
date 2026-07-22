@@ -5,6 +5,7 @@ class Settings(BaseSettings):
     MISTRAL_API_KEY: str = Field(..., description="Mistral API Key")
     STORAGE_DIR: str = Field("./storage", description="Directory for file storage")
     DATABASE_URL: str = Field("sqlite+aiosqlite:///./doc_workflow.db", description="Database URL")
+    REDIS_URL: str = Field("redis://localhost:6379/0", description="Redis URL")
     APP_HOST: str = Field("0.0.0.0", description="FastAPI host")
     APP_PORT: int = Field(8000, description="FastAPI port")
     DEBUG: bool = Field(True, description="Enable debug mode")

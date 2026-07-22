@@ -1,143 +1,61 @@
-import json
+"""
+Reviewer Activity
+==================
+Evaluates processed documents for human review or auto-approval.
+
+MIGRATED from direct Mistral SDK to provider-agnostic ProviderRegistry + PromptManager.
+"""
+
 import logging
-import mistralai.workflows as workflows
-from mistralai.client import Mistral
-from config import settings
+import json
 import db.operations as db
 from tools.reviewer import REVIEWER_TOOLS, get_review_context
+from platform_core.registry import ProviderRegistry
+from platform_core.prompts.manager import PromptManager
+from platform_core.agent_loop import run_agent_loop
 
 logger = logging.getLogger(__name__)
-client = Mistral(api_key=settings.MISTRAL_API_KEY)
+prompts = PromptManager()
 
 
-def _extract_text(content) -> str:
-    if isinstance(content, str):
-        return content
-    elif isinstance(content, list):
-        parts = []
-        for chunk in content:
-            if isinstance(chunk, str):
-                parts.append(chunk)
-            elif hasattr(chunk, "text") and chunk.text:
-                parts.append(chunk.text)
-            elif isinstance(chunk, dict) and "text" in chunk:
-                parts.append(chunk["text"])
-        return "".join(parts)
-    return str(content) if content is not None else ""
-
-
-@workflows.activity()
-async def reviewer_activity(document_id: str, validated_data: dict, confidence_score: float) -> dict:
+async def reviewer_activity(document_id: str) -> dict:
     """
     Step 6 — Reviewer.
-    Determines if human review is needed, generating a summary via the Reviewer Agent.
+    Determines if a document needs manual review or can be auto-approved.
     """
     try:
-        logger.info(f"[Document {document_id}] Starting reviewer activity. Confidence: {confidence_score}")
-        
-        # Remove massive base64 images from the validated data to avoid overwhelming the LLM
-        prompt_data = validated_data.copy()
-        prompt_data.pop("signature_image", None)
-        prompt_data.pop("photo_image", None)
+        logger.info(f"[Document {document_id}] Starting reviewer activity")
 
-        # Use imported tools schema
-        tools = REVIEWER_TOOLS
+        registry = ProviderRegistry.get()
+        llm = registry.get_llm()
+        system_prompt = prompts.get("reviewer")
 
-        prompt = (
-            f"You are the Reviewer Agent. We need to evaluate document '{document_id}' to see if it requires human review.\n"
-            f"First, call the `get_review_context` tool to retrieve the document confidence score and validated data.\n\n"
-            f"Evaluation Rules:\n"
-            f"- If the confidence_score is greater than or equal to 0.80, the document is auto-approved. Return approved=True and auto_approved=True.\n"
-            f"- If the confidence_score is below 0.80, the document needs manual review. Generate a summary of the data and return needs_review=True.\n\n"
-            f"Output a JSON object matching exactly this schema:\n"
-            f"{{\n"
-            f"  \"approved\": bool (or null if needs_review is true),\n"
-            f"  \"auto_approved\": bool (or null if needs_review is true),\n"
-            f"  \"needs_review\": bool (or null if approved is true),\n"
-            f"  \"summary\": str or null\n"
-            f"}}"
+        async def execute_tool(name: str, args: dict):
+            if name == "get_review_context":
+                t_doc_id = args.get("document_id", document_id)
+                logger.info(f"[Document {document_id}] Executing get_review_context for: {t_doc_id}")
+                return await get_review_context(t_doc_id)
+            else:
+                return {"error": f"Unknown tool: {name}"}
+
+        user_message = (
+            f"Please evaluate document '{document_id}' and determine if it requires "
+            f"manual human review or can be automatically approved.\n"
+            f"Call the `get_review_context` tool with document_id='{document_id}' "
+            f"to get the document's validation details and confidence score."
         )
 
-        messages = [{"role": "user", "content": prompt}]
-
-        logger.info(f"[Document {document_id}] Calling Reviewer Agent ({settings.REVIEWER_AGENT_ID})")
-        response = await client.agents.complete_async(
-            agent_id=settings.REVIEWER_AGENT_ID,
-            messages=messages,
-            tools=tools
+        result = await run_agent_loop(
+            llm=llm,
+            system_prompt=system_prompt,
+            user_message=user_message,
+            tools_schema=REVIEWER_TOOLS,
+            tool_executor=execute_tool,
+            temperature=0.2,
         )
 
-        message = response.choices[0].message
-
-        while message.tool_calls:
-            logger.info(f"[Document {document_id}] Reviewer Agent requested tool calls: {message.tool_calls}")
-
-            assistant_msg = {
-                "role": "assistant",
-                "content": message.content or "",
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments
-                        }
-                    } for tc in message.tool_calls
-                ]
-            }
-            messages.append(assistant_msg)
-
-            for tool_call in message.tool_calls:
-                if tool_call.function.name == "get_review_context":
-                    logger.info(f"[Document {document_id}] Executing get_review_context tool")
-                    
-                    tool_output = get_review_context(confidence_score, prompt_data)
-
-                    messages.append({
-                        "role": "tool",
-                        "name": "get_review_context",
-                        "content": json.dumps(tool_output),
-                        "tool_call_id": tool_call.id
-                    })
-
-            logger.info(f"[Document {document_id}] Resuming Reviewer Agent with tool result")
-            response = await client.agents.complete_async(
-                agent_id=settings.REVIEWER_AGENT_ID,
-                messages=messages,
-                tools=tools
-            )
-            message = response.choices[0].message
-
-        # Parse final response
-        content = _extract_text(message.content).strip()
-        try:
-            parsed = json.loads(content)
-        except Exception:
-            logger.info(f"[Document {document_id}] Final message not JSON. Requesting JSON formatting.")
-            messages.append({
-                "role": "user",
-                "content": (
-                    "Based on your evaluation, please output the final review decision "
-                    "as a JSON object matching exactly this schema:\n"
-                    "{\n"
-                    "  \"approved\": bool,\n"
-                    "  \"auto_approved\": bool,\n"
-                    "  \"needs_review\": bool,\n"
-                    "  \"summary\": \"...\" or null\n"
-                    "}"
-                )
-            })
-            response = await client.agents.complete_async(
-                agent_id=settings.REVIEWER_AGENT_ID,
-                messages=messages,
-                response_format={"type": "json_object"}
-            )
-            message = response.choices[0].message
-            content = _extract_text(message.content).strip()
-            parsed = json.loads(content)
-
-        return parsed
+        logger.info(f"[Document {document_id}] Review result: approved={result.get('approved')}, needs_review={result.get('needs_review')}")
+        return result
 
     except Exception as e:
         logger.error(f"[Document {document_id}] Reviewer failed: {str(e)}")

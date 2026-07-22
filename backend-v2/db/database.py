@@ -5,7 +5,7 @@ from config import settings
 
 engine = create_async_engine(
     settings.DATABASE_URL,
-    echo=settings.DEBUG,
+    echo=False,
     connect_args={"check_same_thread": False} if settings.DATABASE_URL.startswith("sqlite") else {}
 )
 
@@ -39,7 +39,8 @@ async def init_db():
             "ALTER TABLE extracted_data ADD COLUMN fraud_check JSON",
         ]:
             try:
-                await conn.execute(text(col))
+                async with conn.begin_nested():
+                    await conn.execute(text(col))
             except Exception:
                 pass
 
@@ -64,6 +65,7 @@ async def init_claim_tables():
             "ALTER TABLE claims ADD COLUMN workflow_run_id VARCHAR",
         ]:
             try:
-                await conn.execute(text(col))
+                async with conn.begin_nested():
+                    await conn.execute(text(col))
             except Exception:
                 pass

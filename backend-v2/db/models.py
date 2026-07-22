@@ -168,3 +168,19 @@ class ClaimDocumentLink(Base):
     doc_type = Column(String, nullable=False)    # e.g. "medical_report"
     synced = Column(String, nullable=False, default="pending")  # pending | synced | failed
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ─── PIPELINE MODELS ───────────────────────────────────────────────────────────
+
+class PipelineCheckpoint(Base):
+    """
+    Stores pipeline state checkpoints (for the PipelineEngine).
+    Used to resume interrupted pipelines after a crash.
+    """
+    __tablename__ = "pipeline_checkpoints"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    pipeline_id = Column(String, index=True, unique=True, nullable=False)
+    data = Column(Text, nullable=False)  # JSON blob of the checkpoint state
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

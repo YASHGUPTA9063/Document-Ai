@@ -19,7 +19,6 @@ import os
 from pathlib import Path
 from typing import Optional
 
-import cv2
 import numpy as np
 from PIL import Image
 
@@ -68,6 +67,7 @@ def correct_brightness(img: Image.Image) -> tuple[Image.Image, bool]:
     Returns (processed_image, was_applied).
     """
     # PIL RGB → NumPy BGR (OpenCV convention)
+    import cv2
     img_np = np.array(img.convert("RGB"))
     img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
 
@@ -93,6 +93,7 @@ def remove_noise(img: Image.Image) -> tuple[Image.Image, bool]:
 
     Returns (processed_image, was_applied).
     """
+    import cv2
     img_np = np.array(img.convert("RGB"))
     img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
     blurred = cv2.GaussianBlur(img_bgr, GAUSSIAN_KERNEL, 0)
@@ -115,6 +116,7 @@ def correct_skew(img: Image.Image) -> tuple[Image.Image, bool]:
 
     Returns (processed_image, was_applied).
     """
+    import cv2
     img_np = np.array(img.convert("RGB"))
     gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
 

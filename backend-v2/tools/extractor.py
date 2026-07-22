@@ -188,12 +188,12 @@ def _save_ocr_blocks(document_id: str, blocks: list):
 
 
 # ─── TOOL FUNCTIONS ───
-def extract_text_from_document(file_path: str, doc_type: str, document_id: str = None) -> dict:
+async def extract_text_from_document(file_path: str, doc_type: str, document_id: str = None) -> dict:
     fields_list = get_template_fields(doc_type)
     annotation_format = build_json_schema_from_fields(fields_list)
     annotation_prompt = build_ocr_prompt_from_fields(fields_list)
 
-    ocr_result = extract_with_ocr(
+    ocr_result = await extract_with_ocr(
         file_path=file_path, 
         doc_type=doc_type,
         document_annotation_format=annotation_format,
@@ -223,13 +223,13 @@ def extract_text_from_document(file_path: str, doc_type: str, document_id: str =
     }
 
 
-def crop_kyc_images(file_path: str, doc_type: str, document_id: str) -> dict:
+async def crop_kyc_images(file_path: str, doc_type: str, document_id: str) -> dict:
     template_meta = get_template_metadata(doc_type)
     kyc_boxes = template_meta.get("kyc_boxes")
 
     try:
         from utils.signature_extractor import extract_signature_and_photo
-        kyc_image_result = extract_signature_and_photo(
+        kyc_image_result = await extract_signature_and_photo(
             file_path=file_path,
             document_id=document_id,
             output_dir=os.path.join(settings.STORAGE_DIR, "crops", document_id),

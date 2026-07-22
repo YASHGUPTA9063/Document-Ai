@@ -1,153 +1,62 @@
-import os
-import json
+"""
+Fraud Checker Activity
+=======================
+Runs identity document proofing checks via the Fraud Examiner Agent.
+
+MIGRATED from direct Mistral SDK to provider-agnostic ProviderRegistry + PromptManager.
+"""
+
 import logging
-import mimetypes
-import mistralai.workflows as workflows
-from mistralai.client import Mistral
-from config import settings
+import json
+import db.operations as db
+from tools.fraud_checker import FRAUD_CHECKER_TOOLS, run_identity_proofing
+from platform_core.registry import ProviderRegistry
+from platform_core.prompts.manager import PromptManager
+from platform_core.agent_loop import run_agent_loop
 
 logger = logging.getLogger(__name__)
-client = Mistral(api_key=settings.MISTRAL_API_KEY)
-
-from tools.fraud_checker import FRAUD_CHECKER_TOOLS, run_identity_proofing
-
-def _extract_text(content) -> str:
-    if isinstance(content, str):
-        return content
-    elif isinstance(content, list):
-        parts = []
-        for chunk in content:
-            if isinstance(chunk, str):
-                parts.append(chunk)
-            elif hasattr(chunk, "text") and chunk.text:
-                parts.append(chunk.text)
-            elif isinstance(chunk, dict) and "text" in chunk:
-                parts.append(chunk["text"])
-        return "".join(parts)
-    return str(content) if content is not None else ""
+prompts = PromptManager()
 
 
-
-
-@workflows.activity()
 async def fraud_check_activity(document_id: str, file_path: str) -> dict:
     """
     Step 3.5 — Fraud Checker.
-    Runs Google Document AI 'Identity Document Proofing' processor via Fraud Examiner Agent.
+    Runs identity document proofing via Fraud Examiner Agent.
     """
     try:
         logger.info(f"[Document {document_id}] Starting fraud check activity for {file_path}")
 
-        if not settings.FRAUD_AGENT_ID:
-            raise ValueError("FRAUD_AGENT_ID is not configured in settings/environment.")
+        registry = ProviderRegistry.get()
+        llm = registry.get_llm()
+        system_prompt = prompts.get("fraud_checker")
 
-        # Use imported tools schema
-        tools = FRAUD_CHECKER_TOOLS
+        async def execute_tool(name: str, args: dict):
+            if name == "run_identity_proofing":
+                t_file_path = args.get("file_path", file_path)
+                logger.info(f"[Document {document_id}] Executing identity proofing for: {t_file_path}")
+                return await run_identity_proofing(t_file_path)
+            else:
+                return {"error": f"Unknown tool: {name}"}
 
-        prompt = (
-            f"You are the Fraud Examiner Agent. We need to perform identity document proofing "
-            f"on the file located at '{file_path}'.\n"
-            f"Please call the `run_identity_proofing` tool with:\n"
-            f"- file_path: '{file_path}'\n\n"
-            f"Based on the tool output, return a JSON response matching exactly this schema:\n"
-            f"{{\n"
-            f"  \"passed\": bool,\n"
-            f"  \"rejection_reason\": str or null,\n"
-            f"  \"checks\": dict of check names to statuses,\n"
-            f"  \"mocked\": bool\n"
-            f"}}"
+        user_message = (
+            f"Please analyze the identity document at path '{file_path}' for potential "
+            f"security and verification indicators. "
+            f"Call the `run_identity_proofing` tool with the file_path to run forensic checks."
         )
 
-        messages = [{"role": "user", "content": prompt}]
-
-        logger.info(f"[Document {document_id}] Calling Fraud Examiner Agent ({settings.FRAUD_AGENT_ID})")
-        response = await client.agents.complete_async(
-            agent_id=settings.FRAUD_AGENT_ID,
-            messages=messages,
-            tools=tools
+        result = await run_agent_loop(
+            llm=llm,
+            system_prompt=system_prompt,
+            user_message=user_message,
+            tools_schema=FRAUD_CHECKER_TOOLS,
+            tool_executor=execute_tool,
+            temperature=0.7,
         )
 
-        message = response.choices[0].message
-
-        while message.tool_calls:
-            logger.info(f"[Document {document_id}] Fraud Examiner Agent requested tool calls: {message.tool_calls}")
-
-            assistant_msg = {
-                "role": "assistant",
-                "content": message.content or "",
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments
-                        }
-                    } for tc in message.tool_calls
-                ]
-            }
-            messages.append(assistant_msg)
-
-            for tool_call in message.tool_calls:
-                if tool_call.function.name == "run_identity_proofing":
-                    args = json.loads(tool_call.function.arguments)
-                    t_file_path = args.get("file_path", file_path)
-
-                    logger.info(f"[Document {document_id}] Executing run_identity_proofing tool for file: {t_file_path}")
-
-                    result = await run_identity_proofing(t_file_path, document_id)
-
-                    messages.append({
-                        "role": "tool",
-                        "name": "run_identity_proofing",
-                        "content": json.dumps(result),
-                        "tool_call_id": tool_call.id
-                    })
-
-            logger.info(f"[Document {document_id}] Resuming Fraud Examiner Agent with tool result")
-            response = await client.agents.complete_async(
-                agent_id=settings.FRAUD_AGENT_ID,
-                messages=messages,
-                tools=tools
-            )
-            message = response.choices[0].message
-
-        # Parse final response
-        content = _extract_text(message.content).strip()
-        try:
-            parsed = json.loads(content)
-        except Exception:
-            logger.info(f"[Document {document_id}] Final message not JSON. Requesting JSON formatting.")
-            messages.append({
-                "role": "user",
-                "content": (
-                    "Based on the tool output, please output the final fraud check results "
-                    "as a JSON object matching exactly this schema:\n"
-                    "{\n"
-                    "  \"passed\": bool,\n"
-                    "  \"rejection_reason\": str or null,\n"
-                    "  \"checks\": {},\n"
-                    "  \"mocked\": bool\n"
-                    "}"
-                )
-            })
-            response = await client.agents.complete_async(
-                agent_id=settings.FRAUD_AGENT_ID,
-                messages=messages,
-                response_format={"type": "json_object"}
-            )
-            message = response.choices[0].message
-            content = _extract_text(message.content).strip()
-            parsed = json.loads(content)
-
-        return parsed
+        logger.info(f"[Document {document_id}] Fraud check result: passed={result.get('passed')}")
+        return result
 
     except Exception as e:
-        logger.warning(
-            f"[Document {document_id}] Fraud check agent call failed with error: {str(e)}. "
-            f"Falling back to local execution to avoid blocking the pipeline."
-        )
-        # Record error and return direct execution
-        import db.operations as db
+        logger.error(f"[Document {document_id}] Fraud check failed: {str(e)}")
         await db.update_error(document_id, {"error": str(e), "stage": "fraud_checker"})
-        return await run_identity_proofing(file_path, document_id)
+        raise

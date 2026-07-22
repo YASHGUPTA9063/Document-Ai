@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 
 const api = axios.create({ baseURL: BASE, timeout: 30000 });
 
@@ -28,7 +28,7 @@ api.interceptors.response.use(
 export async function uploadDocument(file, onProgress) {
   const form = new FormData();
   form.append('file', file);
-  const { data } = await api.post('/upload', form, {
+  const { data } = await api.post('/documents/upload', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
     onUploadProgress: (e) => {
       if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100));
@@ -47,7 +47,7 @@ export async function uploadDocument(file, onProgress) {
 export async function uploadDocumentsBatch(files, onProgress) {
   const form = new FormData();
   files.forEach((f) => form.append('files', f));
-  const { data } = await api.post('/upload/batch', form, {
+  const { data } = await api.post('/documents/upload/batch', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: 300_000, // 5 min — large batches can take a while
     onUploadProgress: (e) => {
@@ -63,7 +63,7 @@ export async function uploadDocumentsBatch(files, onProgress) {
  * @returns {Promise<WorkflowStatusResponse>}
  */
 export async function getStatus(documentId) {
-  const { data } = await api.get(`/status/${documentId}`);
+  const { data } = await api.get(`/documents/${documentId}/status`);
   return data;
 }
 
@@ -366,7 +366,7 @@ export async function deleteClaim(claimId) {
 export async function uploadClaimDocument(claimId, file, docType, onProgress) {
   const form = new FormData();
   form.append('file', file);
-  const { data } = await api.post('/upload', form, {
+  const { data } = await api.post('/documents/upload', form, {
     params: { claim_id: claimId, doc_type: docType },
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: 120_000,

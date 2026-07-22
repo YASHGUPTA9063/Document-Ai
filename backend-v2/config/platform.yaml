@@ -1,0 +1,169 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Document AI Platform — Master Configuration
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# This single file controls ALL platform behavior.
+# Secrets are referenced via ${ENV_VAR} syntax and resolved from .env at runtime.
+# To add a new provider: add its config under providers → add to fallback_chains.
+
+app:
+  name: "Document AI Platform"
+  version: "2.0.0"
+  debug: false
+  host: "0.0.0.0"
+  port: 8000
+
+# ─── Provider Configuration ────────────────────────────────────────────────
+providers:
+  llm:
+    mistral:
+      type: mistral
+      params:
+        api_key: "${MISTRAL_API_KEY}"
+        model: "mistral-large-latest"
+
+    # Uncomment to add additional LLM providers:
+    # openai:
+    #   type: openai
+    #   params:
+    #     api_key: "${OPENAI_API_KEY}"
+    #     model: "gpt-4o"
+    # anthropic:
+    #   type: anthropic
+    #   params:
+    #     api_key: "${ANTHROPIC_API_KEY}"
+    #     model: "claude-sonnet-4-20250514"
+    # ollama:
+    #   type: ollama
+    #   params:
+    #     base_url: "http://localhost:11434"
+    #     model: "llama3"
+
+  ocr:
+    mistral:
+      type: mistral_ocr
+      params:
+        api_key: "${MISTRAL_API_KEY}"
+
+    # tesseract:
+    #   type: tesseract
+    #   params:
+    #     lang: "eng"
+
+  storage:
+    local:
+      type: local
+      params:
+        base_dir: "${STORAGE_DIR}"
+
+    # s3:
+    #   type: s3
+    #   params:
+    #     bucket: "${S3_BUCKET}"
+    #     region: "${AWS_REGION}"
+
+  embedding:
+    dinov2:
+      type: dinov2
+      params:
+        model: "facebook/dinov2-small"
+        device: "cpu"
+
+  vision:
+    mistral:
+      type: mistral_vision
+      params:
+        api_key: "${MISTRAL_API_KEY}"
+        model: "pixtral-12b-2409"
+
+    # openai:
+    #   type: openai_vision
+    #   params:
+    #     api_key: "${OPENAI_API_KEY}"
+
+# ─── Fallback Chains ──────────────────────────────────────────────────────
+# Format: "capability.purpose" → ordered list of provider names
+# When a provider fails, the next one in the list is tried automatically.
+fallback_chains:
+  llm.default:        [mistral]
+  llm.classifier:     [mistral]
+  llm.extractor:      [mistral]
+  llm.validator:      [mistral]
+  llm.reviewer:       [mistral]
+  llm.fraud_checker:  [mistral]
+  llm.claim_agents:   [mistral]
+  llm.intake:         [mistral]
+  llm.pre_validator:  [mistral]
+  llm.preprocessor:   [mistral]
+  llm.auto_verifier:  [mistral]
+  llm.output:         [mistral]
+  ocr.default:        [mistral]
+  storage.default:    [local]
+  vision.default:     [mistral]
+  embedding.default:  [dinov2]
+
+# ─── Resilience Configuration ─────────────────────────────────────────────
+resilience:
+  circuit_breaker:
+    failure_threshold: 5
+    recovery_timeout_seconds: 60
+  retry:
+    max_retries: 3
+    base_delay_seconds: 1.0
+    max_delay_seconds: 30.0
+  health_check:
+    interval_seconds: 30
+    timeout_seconds: 15
+
+# ─── Pipeline Configuration ──────────────────────────────────────────────
+pipelines:
+  document_processing:
+    enable_pre_validation: true
+    enable_preprocessing: false
+    enable_fraud_check: true
+    review_confidence_threshold: 0.80
+    step_timeout_seconds: 300
+    max_file_size_mb: 50
+
+  claim_processing:
+    step_timeout_seconds: 120
+
+# ─── CORS ─────────────────────────────────────────────────────────────────
+cors:
+  allowed_origins:
+    - "http://localhost:5173"
+    - "http://localhost:3000"
+    - "https://your-domain.com"
+
+# ─── Database ─────────────────────────────────────────────────────────────
+database:
+  url: "${DATABASE_URL}"
+  pool_size: 20
+  max_overflow: 10
+
+# ─── Observability ────────────────────────────────────────────────────────
+observability:
+  tracing:
+    enabled: false
+    exporter: "otlp"
+    endpoint: "${OTEL_ENDPOINT}"
+  metrics:
+    enabled: false
+    port: 9090
+  logging:
+    level: "INFO"
+    format: "json"
+
+# ─── Supported Document Types ────────────────────────────────────────────
+document_types:
+  - invoice
+  - pan_card
+  - claim_form
+  - policy_document
+  - id_proof
+  - medical_report
+  - lab_reports
+  - prescription_records
+  - bills_invoices
+  - disability_certificate
+  - legal_letter

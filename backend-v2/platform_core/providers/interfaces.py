@@ -120,6 +120,7 @@ class OCRProvider(ABC):
         file_path: str,
         pages: list[int] | None = None,
         include_blocks: bool = True,
+        **kwargs,
     ) -> OCRResponse:
         """Extract text, confidence scores, and bounding blocks from a document."""
         ...

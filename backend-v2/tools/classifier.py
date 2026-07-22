@@ -53,7 +53,7 @@ def get_supported_doc_types() -> dict:
     return types_map
 
 
-def get_document_text(file_path: str, document_id: str) -> str:
+async def get_document_text(file_path: str, document_id: str) -> str:
     _, ext = os.path.splitext(file_path.lower())
     pages = None
     if ext == ".pdf":
@@ -68,5 +68,5 @@ def get_document_text(file_path: str, document_id: str) -> str:
             logger.error(f"[Document {document_id}] Failed to count PDF pages: {e}")
             pages = [0, 1]
 
-    ocr_result = extract_with_ocr(file_path, "unknown", pages=pages)
+    ocr_result = await extract_with_ocr(file_path, "unknown", pages=pages)
     return ocr_result.get("raw_text", "")

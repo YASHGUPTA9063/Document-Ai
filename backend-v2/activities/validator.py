@@ -1,175 +1,63 @@
-import os
-import json
+"""
+Validator Activity
+===================
+Validates extracted data against business rules and corrects OCR errors.
+
+MIGRATED from direct Mistral SDK to provider-agnostic ProviderRegistry + PromptManager.
+"""
+
 import logging
-import mistralai.workflows as workflows
-from mistralai.client import Mistral
-from config import settings
+import json
 import db.operations as db
+from tools.validator import VALIDATOR_TOOLS, get_template_fields
+from platform_core.registry import ProviderRegistry
+from platform_core.prompts.manager import PromptManager
+from platform_core.agent_loop import run_agent_loop
 
 logger = logging.getLogger(__name__)
-client = Mistral(api_key=settings.MISTRAL_API_KEY)
+prompts = PromptManager()
 
 
-def _extract_text(content) -> str:
-    if isinstance(content, str):
-        return content
-    elif isinstance(content, list):
-        parts = []
-        for chunk in content:
-            if isinstance(chunk, str):
-                parts.append(chunk)
-            elif hasattr(chunk, "text") and chunk.text:
-                parts.append(chunk.text)
-            elif isinstance(chunk, dict) and "text" in chunk:
-                parts.append(chunk["text"])
-        return "".join(parts)
-    return str(content) if content is not None else ""
-
-
-from tools.validator import VALIDATOR_TOOLS, get_template_fields
-
-
-
-@workflows.activity()
-async def validator_activity(
-    document_id: str, 
-    extracted_data: dict, 
-    doc_type: str, 
-    ocr_confidence: float,
-    field_confidences: dict = None
-) -> dict:
+async def validator_activity(document_id: str, extracted_data: dict, doc_type: str) -> dict:
     """
     Step 5 — Validator.
-    Validates extracted fields schema using the Validator Agent.
+    Validates extracted data against business rules.
     """
     try:
-        logger.info(f"[Document {document_id}] Starting validator activity")
-        
-        # Remove massive base64 images from the prompt to avoid overwhelming the LLM
-        prompt_data = extracted_data.copy()
-        sig_img = prompt_data.pop("signature_image", None)
-        photo_img = prompt_data.pop("photo_image", None)
-        
-        json_data = json.dumps(prompt_data)
+        logger.info(f"[Document {document_id}] Starting validator activity for type: {doc_type}")
 
-        # Use imported tools schema
-        tools = VALIDATOR_TOOLS
+        registry = ProviderRegistry.get()
+        llm = registry.get_llm()
+        system_prompt = prompts.get("validator")
 
-        prompt = (
-            f"You are the Validator Agent. We have extracted data from a document of type '{doc_type}'.\n"
-            f"First, call the `get_validation_schema` tool with doc_type: '{doc_type}' to load the target schema.\n"
-            f"Then validate this extracted JSON data against that schema:\n"
-            f"{json_data}\n\n"
-            f"CRITICAL: If the `get_validation_schema` tool returns an empty list or indicates no template schema is configured, "
-            f"use your own intelligence to validate that the extracted data is logical, consistent, and free of obvious OCR/parsing errors "
-            f"for a document of type '{doc_type}'.\n\n"
-            f"Output a JSON object matching exactly this schema:\n"
-            f"{{\n"
-            f"  \"is_valid\": bool,\n"
-            f"  \"validation_errors\": list of strings,\n"
-            f"  \"validated_data\": dict\n"
-            f"}}\n\n"
-            f"IMPORTANT: Do not modify the casing, date formatting, number styles, or custom format rules present in the extracted data. "
-            f"Keep the values in 'validated_data' formatted exactly as they are in the extracted data."
+        async def execute_tool(name: str, args: dict):
+            if name == "get_template_fields":
+                t_doc_type = args.get("doc_type", doc_type)
+                logger.info(f"[Document {document_id}] Executing get_template_fields for: {t_doc_type}")
+                return get_template_fields(t_doc_type)
+            else:
+                return {"error": f"Unknown tool: {name}"}
+
+        user_message = (
+            f"Please validate the following extracted data for a '{doc_type}' document.\n\n"
+            f"Extracted data:\n{json.dumps(extracted_data, indent=2)}\n\n"
+            f"You can call the `get_template_fields` tool with doc_type='{doc_type}' to get "
+            f"the expected field schema for this document type.\n\n"
+            f"Validate the data against business rules, correct any obvious OCR errors, "
+            f"and return the validation result as JSON."
         )
 
-        messages = [{"role": "user", "content": prompt}]
-
-        logger.info(f"[Document {document_id}] Calling Validator Agent ({settings.VALIDATOR_AGENT_ID})")
-        response = await client.agents.complete_async(
-            agent_id=settings.VALIDATOR_AGENT_ID,
-            messages=messages,
-            tools=tools
+        result = await run_agent_loop(
+            llm=llm,
+            system_prompt=system_prompt,
+            user_message=user_message,
+            tools_schema=VALIDATOR_TOOLS,
+            tool_executor=execute_tool,
+            temperature=0.2,
         )
 
-        message = response.choices[0].message
-
-        while message.tool_calls:
-            logger.info(f"[Document {document_id}] Validator Agent requested tool calls: {message.tool_calls}")
-
-            assistant_msg = {
-                "role": "assistant",
-                "content": message.content or "",
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments
-                        }
-                    } for tc in message.tool_calls
-                ]
-            }
-            messages.append(assistant_msg)
-
-            for tool_call in message.tool_calls:
-                if tool_call.function.name == "get_validation_schema":
-                    args = json.loads(tool_call.function.arguments)
-                    t_doc_type = args.get("doc_type", doc_type)
-
-                    logger.info(f"[Document {document_id}] Executing get_validation_schema tool for: {t_doc_type}")
-
-                    fields_list = get_template_fields(t_doc_type) or []
-
-                    messages.append({
-                        "role": "tool",
-                        "name": "get_validation_schema",
-                        "content": json.dumps({"fields": fields_list}),
-                        "tool_call_id": tool_call.id
-                    })
-
-            logger.info(f"[Document {document_id}] Resuming Validator Agent with tool result")
-            response = await client.agents.complete_async(
-                agent_id=settings.VALIDATOR_AGENT_ID,
-                messages=messages,
-                tools=tools
-            )
-            message = response.choices[0].message
-
-        # Parse final response
-        content = _extract_text(message.content).strip()
-        try:
-            parsed = json.loads(content)
-        except Exception:
-            logger.info(f"[Document {document_id}] Final message not JSON. Requesting JSON formatting.")
-            messages.append({
-                "role": "user",
-                "content": (
-                    "Based on your validation checks, please output the final validation results "
-                    "as a JSON object matching exactly this schema:\n"
-                    "{\n"
-                    "  \"is_valid\": bool,\n"
-                    "  \"validation_errors\": [],\n"
-                    "  \"validated_data\": {}\n"
-                    "}"
-                )
-            })
-            response = await client.agents.complete_async(
-                agent_id=settings.VALIDATOR_AGENT_ID,
-                messages=messages,
-                response_format={"type": "json_object"}
-            )
-            message = response.choices[0].message
-            content = _extract_text(message.content).strip()
-            parsed = json.loads(content)
-
-        validated_data = parsed.get("validated_data", prompt_data)
-        logger.info(f"[Document {document_id}] Validated fields from validator: {validated_data}")
-        
-        # Re-inject the massive base64 strings so they are saved to the database
-        if sig_img is not None:
-            validated_data["signature_image"] = sig_img
-        if photo_img is not None:
-            validated_data["photo_image"] = photo_img
-        
-        return {
-            "is_valid": parsed.get("is_valid", False),
-            "confidence_score": ocr_confidence, # Pass through the OCR native confidence score
-            "validation_errors": parsed.get("validation_errors", []),
-            "validated_data": validated_data,
-            "field_confidences": field_confidences or {}
-        }
+        logger.info(f"[Document {document_id}] Validation result: is_valid={result.get('is_valid')}")
+        return result
 
     except Exception as e:
         logger.error(f"[Document {document_id}] Validator failed: {str(e)}")

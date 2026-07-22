@@ -1,32 +1,27 @@
+"""
+Pre-Validation Activity
+========================
+Checks document quality (blur, brightness, skew, readability, etc.).
+
+MIGRATED from direct Mistral SDK to provider-agnostic ProviderRegistry + PromptManager.
+
+Note: This activity has a special multi-turn flow — after calling get_file_metadata,
+if the file is visual, it sends the base64 image to the LLM for visual quality checks.
+This requires a custom loop instead of the generic run_agent_loop().
+"""
+
 import os
 import json
 import logging
-import mistralai.workflows as workflows
-from mistralai.client import Mistral
-from config import settings
-from utils.file_handler import get_file_as_base64
 import db.operations as db
+from utils.file_handler import get_file_as_base64
+from tools.pre_validator import PRE_VALIDATOR_TOOLS, get_file_metadata
+from platform_core.registry import ProviderRegistry
+from platform_core.prompts.manager import PromptManager
+from platform_core.agent_loop import _extract_text, _parse_json_response
 
 logger = logging.getLogger(__name__)
-client = Mistral(api_key=settings.MISTRAL_API_KEY)
-
-def _extract_text(content) -> str:
-    if isinstance(content, str):
-        return content
-    elif isinstance(content, list):
-        parts = []
-        for chunk in content:
-            if isinstance(chunk, str):
-                parts.append(chunk)
-            elif hasattr(chunk, "text") and chunk.text:
-                parts.append(chunk.text)
-            elif isinstance(chunk, dict) and "text" in chunk:
-                parts.append(chunk["text"])
-        return "".join(parts)
-    return str(content) if content is not None else ""
-
-from tools.pre_validator import PRE_VALIDATOR_TOOLS, get_file_metadata
-
+prompts = PromptManager()
 
 # DOCX files have no visual representation — auto-pass with a note
 DOCX_AUTO_PASS = {
@@ -37,51 +32,28 @@ DOCX_AUTO_PASS = {
 }
 
 
-def _parse_json_response(raw_text: str) -> dict:
-    """Parse JSON from agent response, stripping markdown fences if present."""
-    cleaned = raw_text.strip()
-    if cleaned.startswith("```"):
-        lines = cleaned.split("\n")
-        # Remove opening fence (e.g. ```json or ```)
-        cleaned = "\n".join(lines[1:])
-    if cleaned.endswith("```"):
-        lines = cleaned.split("\n")
-        cleaned = "\n".join(lines[:-1])
-    return json.loads(cleaned.strip())
-
-
-@workflows.activity()
 async def pre_validator_activity(document_id: str, file_path: str) -> dict:
     """
     Step 2 — Pre-Validation.
 
-    Sends the file check instructions to the Pre-Validation Agent.
-    The agent calls the `get_file_metadata` tool. If the file is visual,
-    the tool execution block reads the image/pdf and appends the base64 vision blocks
-    to the conversation, allowing the Pre-Validation Vision Agent to perform quality checks.
+    Sends file check instructions to the Pre-Validation Agent.
+    If the file is visual, sends base64 vision blocks for quality checks.
 
     Returns:
         {
             "passed": bool,
             "rejection_reason": str | None,
             "warnings": [str],
-            "checks": {
-                "blur":        {"passed": bool, "severity": str, "message": str},
-                "brightness":  {"passed": bool, "severity": str, "message": str},
-                "skew":        {"passed": bool, "severity": str, "message": str},
-                "readability": {"passed": bool, "severity": str, "message": str},
-                "watermark":   {"passed": bool, "severity": str, "message": str},
-                "orientation": {"passed": bool, "severity": str, "message": str},
-            }
+            "checks": { ... }
         }
     """
     try:
         logger.info(f"[Document {document_id}] Starting pre-validation activity")
 
-        if not settings.PRE_VALIDATOR_AGENT_ID:
-            raise ValueError("PRE_VALIDATOR_AGENT_ID is not configured in settings/environment.")
+        registry = ProviderRegistry.get()
+        llm = registry.get_llm()
+        system_prompt = prompts.get("pre_validator")
 
-        # Use imported tools schema
         tools = PRE_VALIDATOR_TOOLS
 
         user_prompt = (
@@ -90,47 +62,42 @@ async def pre_validator_activity(document_id: str, file_path: str) -> dict:
             f"If the file is visual, a base64 version will be analyzed."
         )
 
-        messages = [
-            {
-                "role": "user",
-                "content": user_prompt
-            }
-        ]
+        messages = [{"role": "user", "content": user_prompt}]
 
-        logger.info(f"[Document {document_id}] Calling Pre-Validator Agent ({settings.PRE_VALIDATOR_AGENT_ID})")
-        response = await client.agents.complete_async(
-            agent_id=settings.PRE_VALIDATOR_AGENT_ID,
+        logger.info(f"[Document {document_id}] Calling Pre-Validator Agent via registry LLM")
+        response = await llm.chat(
             messages=messages,
-            tools=tools
+            system_prompt=system_prompt,
+            tools=tools,
+            temperature=0.7,
         )
 
-        message = response.choices[0].message
-
-        if message.tool_calls:
-            logger.info(f"[Document {document_id}] Pre-Validator Agent requested tool calls: {message.tool_calls}")
+        if response.tool_calls:
+            logger.info(f"[Document {document_id}] Pre-Validator requested tool calls")
 
             assistant_msg = {
                 "role": "assistant",
-                "content": message.content or "",
+                "content": response.content or "",
                 "tool_calls": [
                     {
-                        "id": tc.id,
+                        "id": tc["id"],
                         "type": "function",
                         "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments
-                        }
-                    } for tc in message.tool_calls
-                ]
+                            "name": tc["function"]["name"],
+                            "arguments": tc["function"]["arguments"],
+                        },
+                    }
+                    for tc in response.tool_calls
+                ],
             }
             messages.append(assistant_msg)
 
             is_visual = False
             mime_type = None
 
-            for tool_call in message.tool_calls:
-                if tool_call.function.name == "get_file_metadata":
-                    args = json.loads(tool_call.function.arguments)
+            for tc in response.tool_calls:
+                if tc["function"]["name"] == "get_file_metadata":
+                    args = json.loads(tc["function"]["arguments"])
                     target_file_path = args.get("file_path", file_path)
 
                     tool_output = get_file_metadata(target_file_path)
@@ -141,9 +108,10 @@ async def pre_validator_activity(document_id: str, file_path: str) -> dict:
                         "role": "tool",
                         "name": "get_file_metadata",
                         "content": json.dumps(tool_output),
-                        "tool_call_id": tool_call.id
+                        "tool_call_id": tc["id"],
                     })
 
+            # If file is visual, send base64 image for visual analysis
             if is_visual and mime_type:
                 logger.info(f"[Document {document_id}] Encoding file as base64 (mime: {mime_type})")
                 b64 = get_file_as_base64(file_path)
@@ -165,27 +133,27 @@ async def pre_validator_activity(document_id: str, file_path: str) -> dict:
                     "content": [
                         {
                             "type": "text",
-                            "text": "Here is the visual representation of the document. Please run the quality checks on it now."
+                            "text": "Here is the visual representation of the document. Please run the quality checks on it now.",
                         },
-                        file_content_block
-                    ]
+                        file_content_block,
+                    ],
                 })
             else:
                 messages.append({
                     "role": "user",
-                    "content": "The document has been identified as non-visual (e.g. DOCX) or unsupported. Please complete the validation accordingly."
+                    "content": "The document has been identified as non-visual (e.g. DOCX) or unsupported. Please complete the validation accordingly.",
                 })
 
-            logger.info(f"[Document {document_id}] Resuming Pre-Validator Agent with tool result")
-            response = await client.agents.complete_async(
-                agent_id=settings.PRE_VALIDATOR_AGENT_ID,
+            logger.info(f"[Document {document_id}] Resuming Pre-Validator with tool result")
+            response = await llm.chat(
                 messages=messages,
-                response_format={"type": "json_object"}
+                system_prompt=system_prompt,
+                response_format={"type": "json_object"},
+                temperature=0.7,
             )
-            message = response.choices[0].message
 
         # Parse final response
-        raw_text = _extract_text(message.content).strip()
+        raw_text = _extract_text(response.content).strip()
         if not raw_text:
             raise ValueError("Pre-Validator Agent returned an empty response")
 

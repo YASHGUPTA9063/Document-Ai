@@ -43,61 +43,6 @@ def wrap_timing(func, category: str, name: str):
 def install_performance_hooks():
     logger.info("Initializing performance timing hooks...")
 
-    # 1. Wrap Mistral Agents Complete methods
-    try:
-        from mistralai.client.agents import Agents
-        original_complete = Agents.complete
-
-        def timed_complete(self, *args, **kwargs):
-            agent_id = kwargs.get("agent_id") or (args[0] if len(args) > 0 else "unknown")
-            start = time.perf_counter()
-            logger.info(f"[PERF] [AGENT_START] Agent completion for agent_id='{agent_id}' started")
-            try:
-                return original_complete(self, *args, **kwargs)
-            finally:
-                duration = time.perf_counter() - start
-                logger.info(f"[PERF] [AGENT_END] Agent completion for agent_id='{agent_id}' took {duration:.3f}s")
-
-        Agents.complete = timed_complete
-
-        original_complete_async = Agents.complete_async
-
-        async def timed_complete_async(self, *args, **kwargs):
-            agent_id = kwargs.get("agent_id") or (args[0] if len(args) > 0 else "unknown")
-            start = time.perf_counter()
-            logger.info(f"[PERF] [AGENT_START] Agent async completion for agent_id='{agent_id}' started")
-            try:
-                return await original_complete_async(self, *args, **kwargs)
-            finally:
-                duration = time.perf_counter() - start
-                logger.info(f"[PERF] [AGENT_END] Agent async completion for agent_id='{agent_id}' took {duration:.3f}s")
-
-        Agents.complete_async = timed_complete_async
-        logger.info("Successfully patched Mistral Agents API client methods")
-    except Exception as e:
-        logger.warning(f"Could not patch Mistral Agents client: {e}")
-
-    # 2. Wrap Workflows activity decorator
-    try:
-        import mistralai.workflows as workflows
-        original_activity_decorator = workflows.activity
-
-        def timing_activity_decorator(*args, **kwargs):
-            def decorator(func):
-                wrapped = wrap_timing(func, "activity", func.__name__)
-                return original_activity_decorator(*args, **kwargs)(wrapped)
-
-            if len(args) == 1 and callable(args[0]):
-                func = args[0]
-                args = ()
-                return decorator(func)
-            return decorator
-
-        workflows.activity = timing_activity_decorator
-        logger.info("Successfully patched mistralai.workflows activity decorator")
-    except Exception as e:
-        logger.warning(f"Could not patch mistralai.workflows activity decorator: {e}")
-
     # 3. Wrap Document validation tools
     try:
         import tools.preprocessor as tp

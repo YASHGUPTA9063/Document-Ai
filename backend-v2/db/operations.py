@@ -69,3 +69,38 @@ async def check_duplicate_hash(file_hash: str, exclude_id: str = None) -> str:
         if doc:
             return doc.id
     return None
+
+# ─── PIPELINE CHECKPOINT OPERATIONS ──────────────────────────────────────────
+
+from db.models import PipelineCheckpoint
+
+async def save_checkpoint(pipeline_id: str, data: str) -> None:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(PipelineCheckpoint).where(PipelineCheckpoint.pipeline_id == pipeline_id))
+        checkpoint = result.scalar_one_or_none()
+        if checkpoint:
+            checkpoint.data = data
+        else:
+            checkpoint = PipelineCheckpoint(pipeline_id=pipeline_id, data=data)
+            session.add(checkpoint)
+        await session.commit()
+
+async def load_checkpoint(pipeline_id: str) -> str:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(PipelineCheckpoint).where(PipelineCheckpoint.pipeline_id == pipeline_id))
+        checkpoint = result.scalar_one_or_none()
+        return checkpoint.data if checkpoint else None
+
+async def clear_checkpoint(pipeline_id: str) -> None:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(PipelineCheckpoint).where(PipelineCheckpoint.pipeline_id == pipeline_id))
+        checkpoint = result.scalar_one_or_none()
+        if checkpoint:
+            await session.delete(checkpoint)
+            await session.commit()
+
+async def list_checkpoints() -> list:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(PipelineCheckpoint))
+        checkpoints = result.scalars().all()
+        return [c.data for c in checkpoints]

@@ -1,37 +1,27 @@
-import os
+"""
+Extractor Activity
+===================
+Extracts structured fields from documents using OCR and LLM.
+
+MIGRATED from direct Mistral SDK to provider-agnostic ProviderRegistry + PromptManager.
+
+Note: Uses a custom conversation loop instead of run_agent_loop() because
+tool execution captures side-effect state (ocr_confidence, word_confidence_scores,
+kyc_image_result) that are needed for post-processing after the LLM returns.
+"""
+
 import json
 import logging
 import re
-import mistralai.workflows as workflows
-from mistralai.client import Mistral
-from config import settings
-from utils.norm_config import build_normalization_rules_prompt
 import db.operations as db
-
-from tools.extractor import (
-    EXTRACTOR_TOOLS,
-    extract_text_from_document,
-    crop_kyc_images
-)
+from utils.norm_config import build_normalization_rules_prompt
+from tools.extractor import EXTRACTOR_TOOLS, extract_text_from_document, crop_kyc_images
+from platform_core.registry import ProviderRegistry
+from platform_core.prompts.manager import PromptManager
+from platform_core.agent_loop import _extract_text, _parse_json_response
 
 logger = logging.getLogger(__name__)
-client = Mistral(api_key=settings.MISTRAL_API_KEY)
-
-
-def _extract_text(content) -> str:
-    if isinstance(content, str):
-        return content
-    elif isinstance(content, list):
-        parts = []
-        for chunk in content:
-            if isinstance(chunk, str):
-                parts.append(chunk)
-            elif hasattr(chunk, "text") and chunk.text:
-                parts.append(chunk.text)
-            elif isinstance(chunk, dict) and "text" in chunk:
-                parts.append(chunk["text"])
-        return "".join(parts)
-    return str(content) if content is not None else ""
+prompts = PromptManager()
 
 
 def _calculate_field_confidence(field_value, word_confidence_scores: list) -> float:
@@ -39,29 +29,26 @@ def _calculate_field_confidence(field_value, word_confidence_scores: list) -> fl
         field_str = str(field_value).strip() if field_value is not None else ""
     else:
         field_str = field_value.strip()
-        
+
     if not field_str:
         return 1.0
 
-    # Normalize and split field value into word tokens
     field_words = re.findall(r'\b\w+\b', field_str.lower())
     if not field_words:
         return 1.0
-    
+
     confidences = []
     for f_word in field_words:
-        # Search for this word in word_confidence_scores
         word_matches = [
             w["confidence"] for w in word_confidence_scores
             if w["text"].strip().lower() == f_word or f_word in w["text"].strip().lower()
         ]
         if word_matches:
-            # Take average of matching word confidences
             confidences.append(sum(word_matches) / len(word_matches))
-            
+
     if confidences:
         return sum(confidences) / len(confidences)
-    
+
     return 1.0
 
 
@@ -80,10 +67,6 @@ def _compute_confidences_recursive(data, word_confidence_scores):
         return _calculate_field_confidence(data, word_confidence_scores)
 
 
-
-
-
-@workflows.activity()
 async def extractor_activity(document_id: str, file_path: str, doc_type: str) -> dict:
     """
     Step 4 — Extractor.
@@ -92,19 +75,15 @@ async def extractor_activity(document_id: str, file_path: str, doc_type: str) ->
     try:
         logger.info(f"[Document {document_id}] Starting extractor activity for type: {doc_type}")
 
-        # Determine agent routing
-        agent_id = settings.GENERAL_EXTRACTOR_AGENT_ID
-        if not agent_id:
-            raise ValueError("GENERAL_EXTRACTOR_AGENT_ID is not configured in settings/environment.")
-        logger.info(f"[Document {document_id}] Routing to general extractor agent: {agent_id}")
+        registry = ProviderRegistry.get()
+        llm = registry.get_llm()
+        system_prompt = prompts.get("extractor")
 
-        # Use imported tools schema
         tools = EXTRACTOR_TOOLS
-
         normalization_rules = build_normalization_rules_prompt()
 
         prompt = (
-            f"You are the Extractor Agent. We need to extract structured data from the document "
+            f"We need to extract structured data from the document "
             f"at path '{file_path}' which has been classified as '{doc_type}'.\n"
             f"First, call the `extract_text_from_document` tool to get the text content and structured OCR extraction.\n"
             f"If the document type is a KYC or identity document, you must also call the `crop_kyc_images` tool to extract the signature and photo crops.\n\n"
@@ -117,57 +96,59 @@ async def extractor_activity(document_id: str, file_path: str, doc_type: str) ->
             f"Apply these standard normalization rules to the extracted fields:\n"
             f"{normalization_rules}\n\n"
             f"Based on the results, output a JSON response matching exactly this schema:\n"
-            f"{{\n"
-            f"  \"raw_extracted\": dict,\n"
-            f"  \"normalized_extracted\": dict\n"
-            f"}}"
+            f'{{\n  "raw_extracted": dict,\n  "normalized_extracted": dict\n}}'
         )
 
         messages = [{"role": "user", "content": prompt}]
 
-        logger.info(f"[Document {document_id}] Calling Extractor Agent ({agent_id})")
-        response = await client.agents.complete_async(
-            agent_id=agent_id,
-            messages=messages,
-            tools=tools
-        )
-
-        message = response.choices[0].message
-
-        # Saved state from tool execution to merge later
+        # State captured from tool execution for post-processing
         ocr_confidence = 0.0
         word_confidence_scores = []
         raw_text = ""
         kyc_image_result = None
 
-        while message.tool_calls:
-            logger.info(f"[Document {document_id}] Extractor Agent requested tool calls: {message.tool_calls}")
+        logger.info(f"[Document {document_id}] Calling Extractor Agent via registry LLM")
+        response = await llm.chat(
+            messages=messages,
+            system_prompt=system_prompt,
+            tools=tools,
+            temperature=0.13,
+        )
+
+        max_iterations = 10
+        for _ in range(max_iterations):
+            if not response.tool_calls:
+                break
+
+            logger.info(f"[Document {document_id}] Extractor requested tool calls")
 
             assistant_msg = {
                 "role": "assistant",
-                "content": message.content or "",
+                "content": response.content or "",
                 "tool_calls": [
                     {
-                        "id": tc.id,
+                        "id": tc["id"],
                         "type": "function",
                         "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments
-                        }
-                    } for tc in message.tool_calls
-                ]
+                            "name": tc["function"]["name"],
+                            "arguments": tc["function"]["arguments"],
+                        },
+                    }
+                    for tc in response.tool_calls
+                ],
             }
             messages.append(assistant_msg)
 
-            for tool_call in message.tool_calls:
-                if tool_call.function.name == "extract_text_from_document":
-                    args = json.loads(tool_call.function.arguments)
+            for tc in response.tool_calls:
+                tool_name = tc["function"]["name"]
+                args = json.loads(tc["function"]["arguments"])
+
+                if tool_name == "extract_text_from_document":
                     t_file_path = args.get("file_path", file_path)
                     t_doc_type = args.get("doc_type", doc_type)
+                    logger.info(f"[Document {document_id}] Executing extract_text_from_document for: {t_file_path}")
 
-                    logger.info(f"[Document {document_id}] Executing extract_text_from_document tool for file: {t_file_path}")
-
-                    res = extract_text_from_document(t_file_path, t_doc_type, document_id=document_id)
+                    res = await extract_text_from_document(t_file_path, t_doc_type, document_id=document_id)
                     raw_text = res["raw_text"]
                     ocr_confidence = res["confidence"]
                     word_confidence_scores = res["word_confidence_scores"]
@@ -176,50 +157,43 @@ async def extractor_activity(document_id: str, file_path: str, doc_type: str) ->
                         "role": "tool",
                         "name": "extract_text_from_document",
                         "content": json.dumps(res["tool_output"]),
-                        "tool_call_id": tool_call.id
+                        "tool_call_id": tc["id"],
                     })
 
-                elif tool_call.function.name == "crop_kyc_images":
-                    args = json.loads(tool_call.function.arguments)
+                elif tool_name == "crop_kyc_images":
                     t_file_path = args.get("file_path", file_path)
                     t_doc_type = args.get("doc_type", doc_type)
+                    logger.info(f"[Document {document_id}] Executing crop_kyc_images for: {t_file_path}")
 
-                    logger.info(f"[Document {document_id}] Executing crop_kyc_images tool for file: {t_file_path}")
-
-                    res = crop_kyc_images(t_file_path, t_doc_type, document_id)
+                    res = await crop_kyc_images(t_file_path, t_doc_type, document_id)
                     kyc_image_result = res["kyc_image_result"]
 
                     messages.append({
                         "role": "tool",
                         "name": "crop_kyc_images",
                         "content": json.dumps(res["tool_output"]),
-                        "tool_call_id": tool_call.id
+                        "tool_call_id": tc["id"],
                     })
 
-            logger.info(f"[Document {document_id}] Resuming Extractor Agent with tool result")
-            response = await client.agents.complete_async(
-                agent_id=agent_id,
+            logger.info(f"[Document {document_id}] Resuming Extractor with tool results")
+            response = await llm.chat(
                 messages=messages,
-                tools=tools
+                system_prompt=system_prompt,
+                tools=tools,
+                temperature=0.13,
             )
-            message = response.choices[0].message
 
         # Parse final response
-        content = _extract_text(message.content).strip()
         try:
-            parsed_response = json.loads(content)
+            parsed_response = _parse_json_response(response.content)
         except Exception as e:
-            logger.error(f"[Document {document_id}] Failed to parse agent JSON output: {content}")
-            match = re.search(r"\{.*\}", content, re.DOTALL)
-            if match:
-                parsed_response = json.loads(match.group(0))
-            else:
-                raise
+            logger.error(f"[Document {document_id}] Failed to parse agent JSON output: {e}")
+            raise
 
         raw_extracted = parsed_response.get("raw_extracted", {})
         normalized_extracted = parsed_response.get("normalized_extracted", {})
 
-        # Fallback if the agent returned a flat structure instead of nesting
+        # Fallback if the agent returned a flat structure
         if not raw_extracted and not normalized_extracted:
             raw_extracted = parsed_response
             normalized_extracted = parsed_response
@@ -227,7 +201,7 @@ async def extractor_activity(document_id: str, file_path: str, doc_type: str) ->
         # Calculate field confidences
         field_confidences = _compute_confidences_recursive(normalized_extracted, word_confidence_scores)
 
-        # Merge KYC image data into the extracted fields if cropped
+        # Merge KYC image data into the extracted fields
         if kyc_image_result:
             for f_dict in [normalized_extracted, raw_extracted]:
                 if kyc_image_result.get("signature_base64"):
@@ -245,7 +219,7 @@ async def extractor_activity(document_id: str, file_path: str, doc_type: str) ->
             "raw_extracted": raw_extracted,
             "raw_ocr": raw_text,
             "confidence": ocr_confidence,
-            "field_confidences": field_confidences
+            "field_confidences": field_confidences,
         }
 
     except Exception as e:

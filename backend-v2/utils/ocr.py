@@ -1,16 +1,14 @@
 import os
 import json
 import logging
-from mistralai.client import Mistral
 from config import settings
 from utils.file_handler import get_file_as_base64
 import docx
-import pypdf
+from platform_core.registry import ProviderRegistry
 
 logger = logging.getLogger(__name__)
-client = Mistral(api_key=settings.MISTRAL_API_KEY)
 
-def extract_with_ocr(
+async def extract_with_ocr(
     file_path: str, 
     doc_type: str, 
     pages: list = None,
@@ -18,7 +16,7 @@ def extract_with_ocr(
     document_annotation_prompt: str = None
 ) -> dict:
     """
-    Extract text using Mistral OCR or python-docx for DOCX files.
+    Extract text using ProviderRegistry OCR or python-docx for DOCX files.
     Supports structured document annotation via document_annotation_format/prompt.
     Returns: {"raw_text": str, "confidence": float, "pages": list, "document_annotation": dict, "blocks": list, ...}
     blocks: list of {page, content, type, top_left_x, top_left_y, bottom_right_x, bottom_right_y, page_width, page_height}
@@ -36,137 +34,34 @@ def extract_with_ocr(
             "confidence": 1.0, # 100% confidence for direct text extraction
             "pages": [{"markdown": "\n".join(full_text)}],
             "document_annotation": None,
-            "blocks": []  # DOCX has no spatial layout, citation not supported
+            "blocks": [],
+            "word_confidence_scores": []
         }
 
-    # Determine mime type for base64 data URL
-    mime_type = "application/pdf"
-    if ext in [".jpeg", ".jpg"]:
-        mime_type = "image/jpeg"
-    elif ext == ".png":
-        mime_type = "image/png"
-    elif ext == ".webp":
-        mime_type = "image/webp"
-    
-    base64_data = get_file_as_base64(file_path)
-    document_url = f"data:{mime_type};base64,{base64_data}"
-    
-    # Calculate page range if PDF
-    actual_pages = None
-    if ext == ".pdf" and pages is not None:
-        try:
-            reader = pypdf.PdfReader(file_path)
-            total_pages = len(reader.pages)
-            # Limit page indexes to the actual pages in the PDF (0-indexed)
-            actual_pages = [p for p in pages if 0 <= p < total_pages]
-            if not actual_pages:
-                actual_pages = [0]  # Fallback to the first page if range is empty
-            logger.info(f"PDF page range restricted from {pages} to valid range: {actual_pages} (total pages: {total_pages})")
-        except Exception as e:
-            logger.error(f"Failed to extract page count from PDF: {e}")
-            actual_pages = pages
+    # Call ProviderRegistry OCR
+    registry = ProviderRegistry.get()
+    ocr = registry.get_ocr()
 
-    # Call Mistral OCR
-    ocr_args = {
-        "model": "mistral-ocr-latest",
-        "document": {
-            "type": "document_url",
-            "document_url": document_url
-        },
-        "confidence_scores_granularity": "word",
-        # include_blocks returns paragraph-level bounding boxes for citation highlighting.
-        # Only effective for image/PDF files — DOCX is handled above before this point.
-        "include_blocks": True
-    }
-    
-    if actual_pages is not None:
-        ocr_args["pages"] = actual_pages
+    kwargs = {}
     if document_annotation_format is not None:
-        ocr_args["document_annotation_format"] = document_annotation_format
+        kwargs["document_annotation_format"] = document_annotation_format
     if document_annotation_prompt is not None:
-        ocr_args["document_annotation_prompt"] = document_annotation_prompt
+        kwargs["document_annotation_prompt"] = document_annotation_prompt
 
-    logger.info(f"Calling Mistral OCR with args: model={ocr_args['model']}, pages={ocr_args.get('pages')}, annotated={document_annotation_format is not None}")
-    ocr_response = client.ocr.process(**ocr_args)
-
-    # Parse response
-    raw_text = ""
-    pages_list = []
-    total_confidence = 0.0
-    valid_pages_count = 0
-    all_word_confidences = []
-    all_blocks = []  # bounding box blocks for citation highlighting
-
-    for page in ocr_response.pages:
-        page_index = getattr(page, "index", 0)
-        raw_text += page.markdown + "\n\n"
-        pages_list.append({
-            "markdown": page.markdown,
-            "index": page_index
-        })
-        # Extract confidence score if available
-        if hasattr(page, "confidence_scores") and page.confidence_scores:
-            if hasattr(page.confidence_scores, "average_page_confidence_score"):
-                total_confidence += page.confidence_scores.average_page_confidence_score
-                valid_pages_count += 1
-            if getattr(page.confidence_scores, "word_confidence_scores", None):
-                for w in page.confidence_scores.word_confidence_scores:
-                    all_word_confidences.append({
-                        "text": w.text,
-                        "confidence": w.confidence,
-                        "start_index": w.start_index
-                    })
-        # Extract bounding box blocks for citation highlighting
-        # Confirmed field names from live API: top_left_x/y, bottom_right_x/y, content, type
-        dims = getattr(page, "dimensions", None)
-        page_w = getattr(dims, "width", None)
-        page_h = getattr(dims, "height", None)
-        for block in getattr(page, "blocks", []) or []:
-            b_type = getattr(block, "type", "text")
-            if b_type == "image":
-                continue  # skip image placeholder blocks — they have no readable text
-            top_left_x     = getattr(block, "top_left_x", None)
-            top_left_y     = getattr(block, "top_left_y", None)
-            bottom_right_x = getattr(block, "bottom_right_x", None)
-            bottom_right_y = getattr(block, "bottom_right_y", None)
-            content        = getattr(block, "content", "") or ""
-            if top_left_x is None or bottom_right_x is None:
-                continue  # block has no spatial data, skip
-            all_blocks.append({
-                "page":           page_index,
-                "content":        content,
-                "type":           b_type,
-                "top_left_x":     top_left_x,
-                "top_left_y":     top_left_y,
-                "bottom_right_x": bottom_right_x,
-                "bottom_right_y": bottom_right_y,
-                "page_width":     page_w,
-                "page_height":    page_h,
-            })
+    logger.info(f"Calling OCR provider '{ocr.name}' with pages={pages}, annotated={document_annotation_format is not None}")
     
-    avg_confidence = (total_confidence / valid_pages_count) if valid_pages_count > 0 else 0.0
-    
-    # Extract document annotation if present
-    document_annotation = None
-    if hasattr(ocr_response, "document_annotation") and ocr_response.document_annotation:
-        annotation = ocr_response.document_annotation
-        if isinstance(annotation, str):
-            try:
-                document_annotation = json.loads(annotation)
-            except Exception:
-                document_annotation = annotation
-        elif hasattr(annotation, "to_dict"):
-            document_annotation = annotation.to_dict()
-        elif hasattr(annotation, "model_dump"):
-            document_annotation = annotation.model_dump()
-        else:
-            document_annotation = annotation
-            
+    ocr_response = await ocr.extract(
+        file_path=file_path,
+        pages=pages,
+        include_blocks=True,
+        **kwargs
+    )
+
     return {
-        "raw_text": raw_text.strip(),
-        "confidence": avg_confidence,
-        "pages": pages_list,
-        "word_confidence_scores": all_word_confidences,
-        "document_annotation": document_annotation,
-        "blocks": all_blocks,  # bounding box blocks for field citation highlighting
+        "raw_text": ocr_response.raw_text,
+        "confidence": ocr_response.confidence,
+        "pages": ocr_response.pages,
+        "word_confidence_scores": ocr_response.word_confidences,
+        "document_annotation": ocr_response.document_annotation,
+        "blocks": ocr_response.blocks,
     }

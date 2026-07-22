@@ -3,18 +3,14 @@ Signature Verification Pipeline
 ================================
 Runs two parallel processes:
   1. DINO Process  – Preprocesses both images and compares DINOv2 embeddings.
-     DINOv2 Preprocessing: Load Image -> Grayscale -> Binarization (Otsu/Sauvola)
-     -> Tight Crop -> Resize & Pad (224x224) -> RGB Stack -> PyTorch Normalize
-  2. Mistral Vision Process – Sends both raw images to a Mistral Agent (mistral-small-latest)
+  2. Vision LLM Process – Sends both raw images to a VisionProvider
      for a visual similarity assessment (no preprocessing).
 
-After both finish, a Mistral Judge Agent receives both outputs and returns a final JSON verdict.
+After both finish, a Judge LLM receives both outputs and returns a final JSON verdict.
 
-Adapted from the standalone advanced_latest_signature_verifier.py shared by the team.
-
-Requires:
-    - MISTRAL_API_KEY environment variable
-    - pip install mistralai torch torchvision transformers opencv-python-headless pillow scikit-image numpy
+MIGRATED from direct Mistral SDK to provider-agnostic ProviderRegistry.
+- client.beta.conversations.start_async() → registry.get_vision().analyze()
+- Mistral Judge Agent → registry.get_llm().chat() with signature_judge prompt
 """
 
 import os
@@ -26,18 +22,12 @@ import mimetypes
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
-import cv2
-import numpy as np
-from PIL import Image
-from skimage.filters import threshold_sauvola
-from torchvision import transforms
-import torch
-from transformers import AutoModel
-from mistralai.client import Mistral
-
-from config import settings
+from platform_core.registry import ProviderRegistry
+from platform_core.prompts.manager import PromptManager
+from platform_core.agent_loop import _parse_json_response, run_simple_completion
 
 logger = logging.getLogger(__name__)
+prompts = PromptManager()
 
 
 # ---------------------------------------------------------------------------
@@ -61,6 +51,8 @@ class DinoVerifier:
 
         # Load DINOv2 model once
         logger.info("[DinoVerifier] Loading DINOv2 model (facebook/dinov2-small)...")
+        from transformers import AutoModel
+        from torchvision import transforms
         self.model = AutoModel.from_pretrained("facebook/dinov2-small")
         self.model.eval()
         logger.info("[DinoVerifier] DINOv2 model loaded successfully.")
@@ -91,10 +83,16 @@ class DinoVerifier:
 
     def _save_debug(self, img, step, prefix=""):
         if self.debug_dir:
+            import cv2
             cv2.imwrite(os.path.join(self.debug_dir, f"{prefix}_{step}.png"), img)
 
     def _preprocess(self, path: str, prefix: str = ""):
         """Load, binarise, crop, resize → 224×224 RGB tensor."""
+        import cv2
+        import numpy as np
+        from skimage.filters import threshold_sauvola
+        from PIL import Image
+
         img = cv2.imread(path, cv2.IMREAD_COLOR)
         if img is None:
             raise ValueError(f"Cannot load image: {path}")
@@ -156,6 +154,7 @@ class DinoVerifier:
         tensor_doc, ar_doc = self._preprocess(doc_path, prefix="doc")
         tensor_ref, ar_ref = self._preprocess(ref_path, prefix="ref")
 
+        import torch
         with torch.no_grad():
             batch = torch.stack([tensor_doc, tensor_ref])
             embeddings = self.model(batch).last_hidden_state[:, 0, :]
@@ -180,7 +179,7 @@ class DinoVerifier:
 
 
 # ---------------------------------------------------------------------------
-# 2. MISTRAL VISION PROCESS
+# 2. VISION LLM PROCESS (provider-agnostic)
 # ---------------------------------------------------------------------------
 
 def _encode_image_base64(path: str) -> tuple:
@@ -193,122 +192,71 @@ def _encode_image_base64(path: str) -> tuple:
     return data, mime
 
 
-async def run_mistral_vision(client: Mistral, doc_path: str, ref_path: str) -> dict:
+async def run_vision_analysis(doc_path: str, ref_path: str) -> dict:
     """
-    Send both raw images to the pre-registered Signature Vision Agent
-    for a visual similarity assessment.
+    Send both raw images to the VisionProvider for a visual similarity assessment.
+    Replaces: client.beta.conversations.start_async(agent_id=SIGNATURE_VISION_AGENT_ID, ...)
     """
-    agent_id = settings.SIGNATURE_VISION_AGENT_ID
+    registry = ProviderRegistry.get()
+    vision = registry.get_vision()
+    system_prompt = prompts.get("signature_vision")
 
-    # Encode both images as base64 data URLs
     doc_b64, doc_mime = _encode_image_base64(doc_path)
     ref_b64, ref_mime = _encode_image_base64(ref_path)
 
-    # Build multimodal input
-    inputs = [
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": "Compare these two signatures:"},
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:{doc_mime};base64,{doc_b64}"},
-                },
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:{ref_mime};base64,{ref_b64}"},
-                },
-            ],
-        }
-    ]
-
-    # Start a conversation with the pre-registered agent
-    response = await client.beta.conversations.start_async(
-        agent_id=agent_id,
-        inputs=inputs,
+    response = await vision.analyze(
+        images=[
+            f"data:{ref_mime};base64,{ref_b64}",
+            f"data:{doc_mime};base64,{doc_b64}",
+        ],
+        prompt=f"Compare these two signatures:\n\n{system_prompt}",
+        response_format={"type": "json_object"},
     )
 
-    # Extract assistant reply
-    raw_text = ""
-    for entry in (response.outputs or []):
-        if hasattr(entry, "content") and entry.content:
-            raw_text = entry.content
-            break
-        if hasattr(entry, "text") and entry.text:
-            raw_text = entry.text
-            break
-
-    # Try to parse JSON from the response
     try:
-        # Strip markdown code fences if present
-        cleaned = raw_text.strip()
-        if cleaned.startswith("```"):
-            cleaned = "\n".join(cleaned.split("\n")[1:])
-        if cleaned.endswith("```"):
-            cleaned = "\n".join(cleaned.split("\n")[:-1])
-        result = json.loads(cleaned.strip())
-    except (json.JSONDecodeError, TypeError):
-        result = {"raw_response": raw_text}
-
+        result = _parse_json_response(response.content)
+    except (ValueError, Exception):
+        result = {"raw_response": response.content}
 
     return result
 
 
 # ---------------------------------------------------------------------------
-# 3. MISTRAL JUDGE PROCESS
+# 3. JUDGE PROCESS (provider-agnostic)
 # ---------------------------------------------------------------------------
 
-async def run_judge(client: Mistral, dino_result: dict, mistral_result: dict) -> dict:
+async def run_judge(dino_result: dict, vision_result: dict) -> dict:
     """
-    Send both DINO and Mistral Vision outputs to the pre-registered
-    Signature Judge Agent for a final JSON verdict.
+    Send both DINO and Vision outputs to the LLM for a final JSON verdict.
+    Replaces: client.beta.conversations.start_async(agent_id=SIGNATURE_JUDGE_AGENT_ID, ...)
     """
-    agent_id = settings.SIGNATURE_JUDGE_AGENT_ID
+    registry = ProviderRegistry.get()
+    llm = registry.get_llm()
+    system_prompt = prompts.get("signature_judge")
 
-    # Build the judge prompt with both results
     judge_input = (
         f"## DINO System Result\n```json\n{json.dumps(dino_result, indent=2)}\n```\n\n"
-        f"## Mistral Vision Agent Result\n```json\n{json.dumps(mistral_result, indent=2)}\n```\n\n"
+        f"## Vision Agent Result\n```json\n{json.dumps(vision_result, indent=2)}\n```\n\n"
         "Based on these two assessments, provide your final verdict."
     )
 
-    response = await client.beta.conversations.start_async(
-        agent_id=agent_id,
-        inputs=judge_input,
+    result = await run_simple_completion(
+        llm=llm,
+        system_prompt=system_prompt,
+        user_message=judge_input,
+        temperature=0.2,
     )
-
-    # Extract assistant reply
-    raw_text = ""
-    for entry in (response.outputs or []):
-        if hasattr(entry, "content") and entry.content:
-            raw_text = entry.content
-            break
-        if hasattr(entry, "text") and entry.text:
-            raw_text = entry.text
-            break
-
-    # Parse JSON
-    try:
-        cleaned = raw_text.strip()
-        if cleaned.startswith("```"):
-            cleaned = "\n".join(cleaned.split("\n")[1:])
-        if cleaned.endswith("```"):
-            cleaned = "\n".join(cleaned.split("\n")[:-1])
-        result = json.loads(cleaned.strip())
-    except (json.JSONDecodeError, TypeError):
-        result = {"raw_response": raw_text}
-
 
     return result
 
 
 # ---------------------------------------------------------------------------
-# 4. ORCHESTRATOR — runs DINO & Mistral Vision in parallel, then Judge
+# 4. ORCHESTRATOR — runs DINO & Vision in parallel, then Judge
 # ---------------------------------------------------------------------------
 
 async def run_verification_pipeline(doc_path: str, ref_path: str, debug_dir: str = None) -> dict:
     """
-    Main pipeline: DINO ∥ Mistral Vision → Judge.
+    Main pipeline: DINO ∥ Vision LLM → Judge.
     
     Args:
         doc_path: Path to the signature extracted from the document (test signature).
@@ -318,14 +266,12 @@ async def run_verification_pipeline(doc_path: str, ref_path: str, debug_dir: str
     Returns:
         {
             "dino": {...},
-            "mistral_vision": {...},
+            "vision_analysis": {...},
             "judge": {...},
             "output_code": 1|3|5,
             "verdict": "genuine"|"forged"|"uncertain"
         }
     """
-    client = Mistral(api_key=settings.MISTRAL_API_KEY)
-
     # -- Run DINO in a thread (it's CPU-bound / synchronous) ----------------
     loop = asyncio.get_running_loop()
     executor = ThreadPoolExecutor(max_workers=1)
@@ -336,24 +282,23 @@ async def run_verification_pipeline(doc_path: str, ref_path: str, debug_dir: str
 
     dino_task = loop.run_in_executor(executor, _dino_work)
 
-    # -- Run Mistral Vision as an async coroutine ---------------------------
-    logger.info("[Verification] Starting DINO ∥ Mistral Vision parallel processes...")
-    mistral_task = asyncio.ensure_future(run_mistral_vision(client, doc_path, ref_path))
+    # -- Run Vision LLM as an async coroutine ---------------------------
+    logger.info("[Verification] Starting DINO ∥ Vision LLM parallel processes...")
+    vision_task = asyncio.ensure_future(run_vision_analysis(doc_path, ref_path))
 
     # -- Await both concurrently --------------------------------------------
-    dino_result, mistral_result = await asyncio.gather(dino_task, mistral_task)
+    dino_result, vision_result = await asyncio.gather(dino_task, vision_task)
 
     logger.info(f"[Verification] DINO result: {json.dumps(dino_result)}")
-    logger.info(f"[Verification] Mistral Vision result keys: {list(mistral_result.keys())}")
+    logger.info(f"[Verification] Vision result keys: {list(vision_result.keys())}")
 
     # -- Run Judge (only after both are done) --------------------------------
-    logger.info("[Verification] Both processes complete. Running Judge agent...")
-    judge_result = await run_judge(client, dino_result, mistral_result)
+    logger.info("[Verification] Both processes complete. Running Judge...")
+    judge_result = await run_judge(dino_result, vision_result)
 
     logger.info(f"[Verification] Judge verdict: {judge_result.get('verdict', 'unknown')}")
 
-    # Determine simple output code for clients
-    # 1 = rejected (forged), 3 = review (uncertain), 5 = matching (genuine)
+    # Determine simple output code
     verdict = judge_result.get("verdict", "").lower()
     if "genuine" in verdict:
         output_code = 5
@@ -362,7 +307,6 @@ async def run_verification_pipeline(doc_path: str, ref_path: str, debug_dir: str
     elif "forged" in verdict:
         output_code = 1
     else:
-        # Fallback to recommendation or dino decision
         rec = judge_result.get("recommendation", "").lower()
         if "accept" in rec:
             output_code = 5
@@ -381,7 +325,7 @@ async def run_verification_pipeline(doc_path: str, ref_path: str, debug_dir: str
 
     return {
         "dino": dino_result,
-        "mistral_vision": mistral_result,
+        "vision_analysis": vision_result,
         "judge": judge_result,
         "output_code": output_code,
         "verdict": verdict or "unknown",
