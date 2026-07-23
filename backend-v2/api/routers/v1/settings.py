@@ -48,14 +48,14 @@ async def update_classification_settings(doc_types: list[str]):
 @router.get("/templates")
 async def get_templates():
     """Get all extraction templates."""
-    from main import load_templates # TODO: extract template operations to a dedicated module
+    from utils.templates import load_templates
     return load_templates()
 
 
 @router.put("/templates")
 async def save_templates_route(templates_data: dict):
     """Save extraction templates."""
-    from main import save_templates_to_file # TODO: extract to module
+    from utils.templates import save_templates_to_file
     save_templates_to_file(templates_data)
     return {"message": "Templates saved successfully"}
 
@@ -63,7 +63,7 @@ async def save_templates_route(templates_data: dict):
 @router.delete("/templates/{template_name}")
 async def delete_template(template_name: str):
     """Delete an extraction template."""
-    from main import load_templates, save_templates_to_file
+    from utils.templates import load_templates, save_templates_to_file
     templates = load_templates()
     if template_name not in templates:
         raise HTTPException(status_code=404, detail="Template not found")
@@ -74,7 +74,9 @@ async def delete_template(template_name: str):
 
 @router.post("/templates/generate")
 async def generate_template_from_sample(
-    doc_type: str,
+    template_name: str,
+    is_kyc: bool = False,
+    kyc_boxes: str | None = None,
     file: UploadFile = File(...)
 ):
     """
@@ -96,8 +98,18 @@ async def generate_template_from_sample(
             temp_file.write(content)
             temp_path = temp_file.name
 
-        base64_data = get_file_as_base64(temp_path)
-        mime_type = file.content_type
+        if file.content_type == "application/pdf":
+            import fitz
+            doc = fitz.open(temp_path)
+            page = doc.load_page(0)
+            pix = page.get_pixmap()
+            png_bytes = pix.tobytes("png")
+            import base64
+            base64_data = base64.b64encode(png_bytes).decode('utf-8')
+            mime_type = "image/png"
+        else:
+            base64_data = get_file_as_base64(temp_path)
+            mime_type = file.content_type
         
         # Use new ProviderRegistry
         from platform_core.registry import ProviderRegistry
@@ -105,7 +117,7 @@ async def generate_template_from_sample(
         llm = registry.get_llm_chain("template_generator")
         
         prompt = f"""
-        Analyze this sample document of type '{doc_type}'.
+        Analyze this sample document of type '{template_name}'.
         Generate a comprehensive list of all fields that can be extracted from this type of document.
         For each field, determine its logical name (snake_case) and data type (string, date, number, boolean, array).
         Also provide a concise description for the AI to understand what this field represents.
@@ -145,20 +157,35 @@ async def generate_template_from_sample(
                 
         # Format the result to match the expected template structure
         generated_template = {
-            "is_kyc": False,
-            "fields": {}
+            "is_kyc": is_kyc,
+            "fields": []
         }
+        
+        if kyc_boxes:
+            try:
+                generated_template["kyc_boxes"] = json.loads(kyc_boxes)
+            except json.JSONDecodeError:
+                pass
         
         for field in fields_list:
             if isinstance(field, dict) and "name" in field:
                 name = field["name"]
-                generated_template["fields"][name] = {
+                generated_template["fields"].append({
+                    "key": name,
+                    "label": name.replace("_", " ").title(),
                     "type": field.get("type", "string"),
-                    "description": field.get("description", f"Extracted {name}")
-                }
+                    "description": field.get("description", f"Extracted {name}"),
+                    "required": True
+                })
                 
+        from utils.templates import load_templates, save_templates_to_file
+        templates = load_templates()
+        templates[template_name] = generated_template
+        save_templates_to_file(templates)
+        
         return {
             "message": "Template generated successfully",
+            "template_name": template_name,
             "template": generated_template
         }
         

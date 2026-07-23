@@ -18,10 +18,15 @@ logger = logging.getLogger(__name__)
 prompts = PromptManager()
 
 
-async def reviewer_activity(document_id: str) -> dict:
+async def reviewer_activity(document_id: str, confidence_score: float = 0.0, validated_data: dict = None) -> dict:
     """
     Step 6 — Reviewer.
     Determines if a document needs manual review or can be auto-approved.
+
+    Args:
+        document_id: The document being reviewed.
+        confidence_score: OCR confidence score from the extractor.
+        validated_data: Validated data from the validator step.
     """
     try:
         logger.info(f"[Document {document_id}] Starting reviewer activity")
@@ -30,11 +35,14 @@ async def reviewer_activity(document_id: str) -> dict:
         llm = registry.get_llm()
         system_prompt = prompts.get("reviewer")
 
+        # Capture these from the pipeline context for the tool closure
+        _confidence = confidence_score
+        _validated = validated_data or {}
+
         async def execute_tool(name: str, args: dict):
             if name == "get_review_context":
-                t_doc_id = args.get("document_id", document_id)
-                logger.info(f"[Document {document_id}] Executing get_review_context for: {t_doc_id}")
-                return await get_review_context(t_doc_id)
+                logger.info(f"[Document {document_id}] Executing get_review_context")
+                return get_review_context(_confidence, _validated)
             else:
                 return {"error": f"Unknown tool: {name}"}
 

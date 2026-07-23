@@ -125,7 +125,7 @@ async def run_identity_proofing(file_path: str, document_id: str) -> dict:
             "Attempting fallback to local output.json mock file."
         )
 
-        workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         mock_file_path = os.path.join(workspace_root, "output.json")
 
         if not os.path.exists(mock_file_path):

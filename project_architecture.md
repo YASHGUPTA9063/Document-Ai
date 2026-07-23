@@ -45,24 +45,23 @@ flowchart TB
         direction TB
         WorkerManager["Worker Coordinator"]
         
-        subgraph Pipeline ["Processing Pipeline (Activities)"]
-            Intake["Intake & Preprocessor"]
-            Classifier["Document Classifier"]
-            Extractor["Data Extractor (LLM)"]
-            Validators["Pre-validator & Validator"]
-            Reviewer["AI Reviewer & Auto-Verifier"]
-            Fraud["Fraud Checker"]
-            ClaimLogic["Claim Specific Logic<br>(Medical, Litigation, etc.)"]
-            
-            Intake --> Classifier --> Extractor --> Validators --> Reviewer --> Fraud --> ClaimLogic
-        end
-        WorkerManager --> Pipeline
+        Intake["Intake & Preprocessor"]
+        Classifier["Document Classifier"]
+        Extractor["Data Extractor (LLM)"]
+        Validators["Pre-validator & Validator"]
+        Reviewer["AI Reviewer & Auto-Verifier"]
+        Fraud["Fraud Checker"]
+        ClaimLogic["Claim Specific Logic<br>(Medical, Litigation, etc.)"]
+        
+        WorkerManager --> Intake
+        Intake --> Classifier --> Extractor --> Validators --> Reviewer --> Fraud --> ClaimLogic
     end
     class ArqWorker worker
 
     %% DATABASES
     Postgres[("PostgreSQL<br>(Documents, Claims, Extracted Data)")]:::db
     Redis[("Redis<br>(Arq Task Queue)")]:::cache
+    ExternalLLM(("External LLM API<br>(OpenAI/Mistral)"))
 
     %% INTERACTIONS
     User -->|Interacts| UI
@@ -73,8 +72,10 @@ flowchart TB
     WorkflowRoute -->|Enqueues Task| Redis
     
     Redis -->|Pulls Task| WorkerManager
-    Pipeline -->|Updates Status/Data| Postgres
-    Pipeline -.->|Calls| ExternalLLM(("External LLM API<br>(OpenAI/Mistral)"))
+    
+    ClaimLogic -->|Updates Status/Data| Postgres
+    Extractor -.->|Calls| ExternalLLM
+    Reviewer -.->|Calls| ExternalLLM
 
 ```
 

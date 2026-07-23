@@ -279,8 +279,8 @@ async def _step_review(context: dict) -> dict:
 
     result = await reviewer_activity(
         document_id=context["document_id"],
-        validated_data=context["validator_result"]["validated_data"],
-        confidence_score=context["validator_result"]["confidence_score"],
+        confidence_score=context["extractor_result"].get("confidence", 0.0),
+        validated_data=context["validator_result"].get("validated_data", {}),
     )
 
     if result.get("auto_approved"):
@@ -300,19 +300,21 @@ async def _step_output(context: dict) -> dict:
     """Step 7: Final output generation."""
     from activities.output import output_activity
 
-    auto_verify = context.get("auto_verify_result")
+    # Build pipeline_context dict that output_activity expects
+    pipeline_context = {
+        "doc_type": context["doc_type"],
+        "validated_data": context["validator_result"].get("validated_data", {}),
+        "reviewer_result": context.get("final_reviewer_result", {}),
+        "confidence_score": context["extractor_result"].get("confidence", 0.0),
+        "field_confidences": context["extractor_result"].get("field_confidences"),
+        "fraud_check": context.get("fraud_check_result"),
+        "raw_extracted": context.get("raw_extracted"),
+        "auto_verify_result": context.get("auto_verify_result"),
+    }
 
     result = await output_activity(
         document_id=context["document_id"],
-        doc_type=context["doc_type"],
-        validated_data=context["validator_result"]["validated_data"],
-        reviewer_result=context["final_reviewer_result"],
-        confidence_score=context["validator_result"]["confidence_score"],
-        field_confidences=context["validator_result"].get("field_confidences"),
-        fraud_check=context.get("fraud_check_result"),
-        raw_extracted=context.get("raw_extracted"),
-        signature_verification=auto_verify.get("signature") if auto_verify else None,
-        photo_verification=auto_verify.get("photo") if auto_verify else None,
+        pipeline_context=pipeline_context,
     )
 
     return {"output_result": result, "status": "completed"}

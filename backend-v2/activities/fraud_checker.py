@@ -34,7 +34,7 @@ async def fraud_check_activity(document_id: str, file_path: str) -> dict:
             if name == "run_identity_proofing":
                 t_file_path = args.get("file_path", file_path)
                 logger.info(f"[Document {document_id}] Executing identity proofing for: {t_file_path}")
-                return await run_identity_proofing(t_file_path)
+                return await run_identity_proofing(t_file_path, document_id)
             else:
                 return {"error": f"Unknown tool: {name}"}
 

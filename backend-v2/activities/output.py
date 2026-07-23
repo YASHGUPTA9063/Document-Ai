@@ -33,7 +33,18 @@ async def output_activity(document_id: str, pipeline_context: dict) -> dict:
         async def execute_tool(name: str, args: dict):
             if name == "persist_final_extraction":
                 logger.info(f"[Document {document_id}] Executing persist_final_extraction")
-                return await persist_final_extraction(document_id, pipeline_context)
+                return await persist_final_extraction(
+                    document_id=document_id,
+                    doc_type=pipeline_context.get("doc_type", args.get("doc_type", "unknown")),
+                    raw_extracted=pipeline_context.get("raw_extracted", args.get("raw_extracted", {})),
+                    validated_data=pipeline_context.get("validated_data", args.get("validated_data", {})),
+                    confidence_score=pipeline_context.get("confidence_score", args.get("confidence_score", 0.0)),
+                    field_confidences=pipeline_context.get("field_confidences", args.get("field_confidences", {})),
+                    fraud_check=pipeline_context.get("fraud_check", args.get("fraud_check", {})),
+                    signature_verification=pipeline_context.get("signature_verification", args.get("signature_verification", {})),
+                    photo_verification=pipeline_context.get("photo_verification", args.get("photo_verification", {})),
+                    corrections=pipeline_context.get("corrections", args.get("corrections", {}))
+                )
             else:
                 return {"error": f"Unknown tool: {name}"}
 

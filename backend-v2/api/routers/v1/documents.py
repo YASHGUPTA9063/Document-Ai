@@ -362,18 +362,19 @@ async def get_document_file(document_id: str):
 @router.get("/{document_id}/ocr-blocks")
 async def get_ocr_blocks(document_id: str):
     """Get OCR bounding blocks for citation highlighting."""
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(ExtractedData).where(ExtractedData.document_id == document_id)
-        )
-        data = result.scalar_one_or_none()
-        if not data:
-            raise HTTPException(status_code=404, detail="Extracted data not found")
-
-        return {
-            "document_id": document_id,
-            "blocks": data.ocr_blocks or [],
-        }
+    blocks_path = os.path.join(
+        settings.STORAGE_DIR, "ocr_blocks", f"{document_id}_blocks.json"
+    )
+    if not os.path.exists(blocks_path):
+        return {"blocks": [], "available": False}
+    try:
+        import json
+        with open(blocks_path, "r") as f:
+            blocks = json.load(f)
+        return {"blocks": blocks, "available": True}
+    except Exception as e:
+        logger.warning(f"Failed to read OCR blocks for document {document_id}: {e}")
+        return {"blocks": [], "available": False}
 
 
 # ─── Retry & Delete ─────────────────────────────────────────────────────────

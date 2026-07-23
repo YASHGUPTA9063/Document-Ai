@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 prompts = PromptManager()
 
 
-async def validator_activity(document_id: str, extracted_data: dict, doc_type: str) -> dict:
+async def validator_activity(document_id: str, extracted_data: dict, doc_type: str, ocr_confidence: float = 0.0, field_confidences: dict = None) -> dict:
     """
     Step 5 — Validator.
     Validates extracted data against business rules.
@@ -41,6 +41,8 @@ async def validator_activity(document_id: str, extracted_data: dict, doc_type: s
         user_message = (
             f"Please validate the following extracted data for a '{doc_type}' document.\n\n"
             f"Extracted data:\n{json.dumps(extracted_data, indent=2)}\n\n"
+            f"OCR Confidence: {ocr_confidence}\n"
+            f"Field Confidences: {json.dumps(field_confidences or {}, indent=2)}\n\n"
             f"You can call the `get_template_fields` tool with doc_type='{doc_type}' to get "
             f"the expected field schema for this document type.\n\n"
             f"Validate the data against business rules, correct any obvious OCR errors, "

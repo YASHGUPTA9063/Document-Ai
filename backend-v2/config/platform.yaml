@@ -118,6 +118,11 @@ resilience:
 # ─── Pipeline Configuration ──────────────────────────────────────────────
 pipelines:
   document_processing:
+    # Workflow engine: "auto" | "mistral" | "local"
+    #   auto    = use Mistral Workflows SDK when llm.default is [mistral], else local
+    #   mistral = always use Mistral Workflows SDK
+    #   local   = always use the local PipelineEngine (arq + Redis)
+    workflow_engine: auto
     enable_pre_validation: true
     enable_preprocessing: false
     enable_fraud_check: true
