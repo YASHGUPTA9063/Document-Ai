@@ -86,15 +86,28 @@ async def startup(ctx):
 
 
 async def _start_mistral_worker():
-    """Start the Mistral Workflows worker in a background task."""
+    """Start the Mistral Workflows worker in a background task.
+
+    The SDK reads MISTRAL_API_KEY and DEPLOYMENT_NAME from os.environ
+    to connect to Mistral's managed cloud orchestration plane.
+    """
     try:
+        import os
         import mistralai.workflows as workflows
         from platform_core.pipeline.mistral_workflow import DocumentProcessingWorkflow
 
-        logger.info("[MistralWorker] Starting Mistral Workflows worker...")
+        # Ensure the SDK can find the managed-cloud credentials
+        os.environ.setdefault("MISTRAL_API_KEY", settings.MISTRAL_API_KEY)
+        os.environ.setdefault("DEPLOYMENT_NAME", settings.DEPLOYMENT_NAME)
+
+        logger.info(
+            "[MistralWorker] Starting Mistral Workflows worker "
+            f"(deployment={settings.DEPLOYMENT_NAME})..."
+        )
         await workflows.run_worker([DocumentProcessingWorkflow])
     except Exception as e:
         logger.error(f"[MistralWorker] Failed to start Mistral workflow worker: {e}")
+
 
 
 async def shutdown(ctx):
@@ -139,36 +152,63 @@ async def _run_mistral_document_pipeline(
     platform_config: dict,
     context_overrides: dict = None,
 ) -> dict:
-    """Execute the document pipeline using Mistral's native Workflows SDK."""
-    import mistralai.workflows as workflows
-    from platform_core.pipeline.mistral_workflow import DocumentProcessingWorkflow, DocumentInput
+    """Execute the document pipeline via Mistral's cloud REST API.
 
-    logger.info(f"[MistralWorkflow] Triggering workflow for document {document_id}")
+    Uses mistral_client.workflows.execute_workflow_async() to trigger the
+    workflow created in Mistral Studio. This dispatches execution to
+    Mistral's managed cloud, making it visible in the Studio dashboard.
+    """
+    from mistralai.client import Mistral
 
-    # Build input
+    workflow_id = settings.MISTRAL_WORKFLOW_ID
+    if not workflow_id:
+        raise RuntimeError(
+            "MISTRAL_WORKFLOW_ID is not set. "
+            "Copy the workflow ID from Mistral Studio and add it to .env"
+        )
+
+    mistral_client = Mistral(api_key=settings.MISTRAL_API_KEY)
+
     pipeline_config = platform_config.get("pipelines", {}).get("document_processing", {})
-    workflow_input = DocumentInput(
-        document_id=document_id,
-        filename=filename,
-        file_path=file_path,
-        enable_pre_validation=pipeline_config.get("enable_pre_validation", True),
-        enable_preprocessing=pipeline_config.get("enable_preprocessing", False),
+
+    workflow_input = {
+        "document_id": document_id,
+        "filename": filename,
+        "file_path": file_path,
+        "enable_pre_validation": pipeline_config.get("enable_pre_validation", True),
+        "enable_preprocessing": pipeline_config.get("enable_preprocessing", False),
+    }
+
+    logger.info(
+        f"[MistralWorkflow] Triggering cloud workflow {workflow_id} "
+        f"for document {document_id}"
     )
 
-    # Execute the workflow
-    result = await workflows.execute_workflow(
-        workflow=DocumentProcessingWorkflow,
-        params=workflow_input,
+    # Trigger the workflow on Mistral's cloud via REST API
+    run_response = await mistral_client.workflows.execute_workflow_async(
+        workflow_identifier=workflow_id,
+        input=workflow_input,
+        deployment_name=settings.DEPLOYMENT_NAME,
         execution_id=f"doc-pipeline-{document_id}",
     )
 
-    logger.info(f"[MistralWorkflow] Completed workflow for document {document_id}: status={result.status}")
+    run_id = (
+        run_response.execution_id
+        if hasattr(run_response, "execution_id")
+        else "unknown"
+    )
+
+    logger.info(
+        f"[MistralWorkflow] Workflow triggered on Mistral cloud — "
+        f"execution_id={run_id}, document={document_id}"
+    )
+
     return {
-        "document_id": result.document_id,
-        "status": result.status,
-        "doc_type": result.doc_type,
-        "error": result.error,
+        "document_id": document_id,
+        "status": "workflow_triggered",
+        "execution_id": run_id,
     }
+
 
 
 async def _run_local_document_pipeline(

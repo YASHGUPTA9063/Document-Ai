@@ -37,6 +37,16 @@ services:
     ports:
       - "8000:8000"
     env_file: .env
+    environment:
+      # Mistral Managed Workflows — these must be set at process level
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
+      - DEPLOYMENT_NAME=${DEPLOYMENT_NAME}
+      - MISTRAL_WORKFLOW_ID=${MISTRAL_WORKFLOW_ID}
+      # Temporal connection to Mistral's managed cloud (overrides localhost:7233 default)
+      - TEMPORAL_SERVER_URL=${TEMPORAL_SERVER_URL}
+      - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE}
+      - TEMPORAL_TLS=${TEMPORAL_TLS}
+      - TEMPORAL_API_KEY=${TEMPORAL_API_KEY}
     depends_on:
       postgres:
         condition: service_healthy
@@ -53,6 +63,16 @@ services:
     container_name: document_ai_worker
     command: arq worker.WorkerSettings
     env_file: .env
+    environment:
+      # Mistral Managed Workflows — these must be set at process level
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
+      - DEPLOYMENT_NAME=${DEPLOYMENT_NAME}
+      - MISTRAL_WORKFLOW_ID=${MISTRAL_WORKFLOW_ID}
+      # Temporal connection to Mistral's managed cloud (overrides localhost:7233 default)
+      - TEMPORAL_SERVER_URL=${TEMPORAL_SERVER_URL}
+      - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE}
+      - TEMPORAL_TLS=${TEMPORAL_TLS}
+      - TEMPORAL_API_KEY=${TEMPORAL_API_KEY}
     depends_on:
       postgres:
         condition: service_healthy

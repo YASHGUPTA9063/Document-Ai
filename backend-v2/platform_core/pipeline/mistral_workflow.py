@@ -1,18 +1,22 @@
 """
-Mistral Workflows Integration
-==============================
-Defines the document processing pipeline using Mistral's native Workflows SDK.
+Mistral Managed Workflows Integration
+======================================
+Defines the document processing pipeline using Mistral's native Workflows SDK,
+backed by Mistral's managed cloud orchestration (Temporal-as-a-Service).
 
-When the platform is configured with Mistral as the LLM provider, this module
-provides a durable, Temporal-backed workflow that replaces the local PipelineEngine.
+When the platform is configured with workflow_engine: "mistral", this module
+provides a durable workflow that replaces the local PipelineEngine. The SDK
+connects to Mistral's cloud using MISTRAL_API_KEY and DEPLOYMENT_NAME env vars,
+making all workflow executions visible in the Mistral Studio dashboard.
 
 Activities wrap the existing activity functions from activities/*.py.
 The workflow class orchestrates them in the correct sequence with conditional
 logic for optional steps (pre_validate, preprocess, fraud_check, auto_verify).
 
-For non-Mistral providers, the local PipelineEngine (engine.py + definitions.py)
-continues to be used.
+For non-Mistral providers or explicit "local" config, the local PipelineEngine
+(engine.py + definitions.py) continues to be used.
 """
+
 
 import logging
 from datetime import timedelta

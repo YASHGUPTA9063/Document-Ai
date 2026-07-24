@@ -120,9 +120,9 @@ pipelines:
   document_processing:
     # Workflow engine: "auto" | "mistral" | "local"
     #   auto    = use Mistral Workflows SDK when llm.default is [mistral], else local
-    #   mistral = always use Mistral Workflows SDK
+    #   mistral = always use Mistral Workflows SDK (managed cloud — visible in Mistral Studio)
     #   local   = always use the local PipelineEngine (arq + Redis)
-    workflow_engine: auto
+    workflow_engine: mistral
     enable_pre_validation: true
     enable_preprocessing: false
     enable_fraud_check: true

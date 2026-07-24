@@ -10,6 +10,11 @@ class Settings(BaseSettings):
     APP_PORT: int = Field(8000, description="FastAPI port")
     DEBUG: bool = Field(True, description="Enable debug mode")
 
+    # Mistral Managed Workflows
+    DEPLOYMENT_NAME: str = Field("document-ai-pipeline", description="Mistral Workflows deployment name — groups workers into a shared task queue")
+    MISTRAL_WORKFLOW_ID: str = Field(default="", description="Mistral Studio workflow ID — triggers the cloud-hosted workflow via REST API")
+
+
     # Agent IDs
     CLASSIFIER_AGENT_ID: str = Field(..., description="Classifier Agent ID from Mistral Studio")
     GENERAL_EXTRACTOR_AGENT_ID: str = Field(default="", description="General Extractor Agent ID from Mistral Studio")
