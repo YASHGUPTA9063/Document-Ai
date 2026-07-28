@@ -1,0 +1,179 @@
+# All Changes Made to RE_Document_AI (backend-v2)
+
+> [!NOTE]
+> 27 files modified, 1 file deleted, 2 files added — across the entire backend-v2 codebase.
+
+---
+
+## 1. Architecture — Removed FallbackChain, Switched to Direct Providers
+
+The biggest structural change: the entire **FallbackChain** abstraction was removed. Instead of routing calls through a chain-of-responsibility pattern (`chain.call("chat", ...)`), all providers are now called **directly** via their native methods (`.chat()`, `.extract()`, `.analyze()`, `.embed()`).
+
+### Files Changed
+
+#### [DELETE] [fallback.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/platform_core/resilience/fallback.py)
+- The entire `FallbackChain` class (83 lines) was deleted.
+
+#### [MODIFY] [registry.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/platform_core/registry.py)
+- Removed `_chains` dict and `_build_fallback_chains()` method.
+- Removed `get_llm_chain()`, `get_ocr_chain()`, `get_vision_chain()`, `get_embedding_chain()`.
+- Added `get_agent_llm(step_name)` — returns a `MistralAgentLLM` if an Agent ID is configured for that step, otherwise falls back to the generic `MistralLLM`.
+- Added `_agent_llms` dict for caching `MistralAgentLLM` instances per step.
+
+#### [MODIFY] [sandbox.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/platform_core/isolation/sandbox.py)
+- `llm()` → now calls `registry.get_agent_llm(step_name)` instead of `get_llm_chain()`.
+- `ocr()` → now calls `registry.get_ocr()` directly.
+- `vision()` → now calls `registry.get_vision()` directly.
+- `embedding()` → now calls `registry.get_embedding()` directly.
+
+#### [MODIFY] [agent_loop.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/platform_core/agent_loop.py)
+- `_call_llm()` simplified: removed the `if hasattr(llm, "call")` branch that handled `FallbackChain`. Now always calls `llm.chat(...)` directly.
+
+---
+
+## 2. New Provider — MistralAgentLLM (Mistral Studio Agents API)
+
+#### [NEW] [mistral_agent_llm.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/platform_core/providers/llm/mistral_agent_llm.py)
+- New `MistralAgentLLM` class (117 lines) that calls `client.agents.complete_async(agent_id=...)` instead of `client.chat.complete_async()`.
+- System prompt, tools, and conversation state are managed on the Mistral Studio side.
+- Returns identical `LLMResponse` so all existing activities work without changes.
+- Includes `health_check()` via a `ping` message.
+
+---
+
+## 3. Configuration — Step-to-Agent-ID Mapping & Env Var Renames
+
+#### [MODIFY] [config.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/config.py)
+- **Renamed env var aliases** to match Mistral Studio naming:
+  - `PREPROCESSOR_AGENT_ID` → `PREPROCESSING_AGENT_ID`
+  - `FRAUD_CHECKER_AGENT_ID` → `FRAUD_AGENT_ID`
+  - `EXTRACTOR_AGENT_ID` → `GENERAL_EXTRACTOR_AGENT_ID`
+- **Added `step_agent_map` property** — builds a `dict[str, str]` mapping all 22 pipeline step names to their Agent IDs (filtering out empty/unset ones).
+
+#### [DELETE] [platform.yaml](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/config/platform.yaml)
+- Removed the `fallback_chains` YAML config section (23 lines) — no longer needed.
+
+---
+
+## 4. Pipeline — Full 10-Step Mistral Workflow
+
+#### [MODIFY] [mistral_workflow.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/platform_core/pipeline/mistral_workflow.py)
+- **Added 4 missing activity wrappers**: `pre_validate_activity`, `preprocess_activity`, `fraud_check_activity`, `auto_verify_activity`.
+- **Updated `DocumentWorkflow.run()`** to include all 10 steps with conditional branching:
+  - `pre_validate` — runs if `enable_pre_validation` is true (default).
+  - `preprocess` — runs if `enable_preprocessing` is true (default).
+  - `fraud_check` — runs only for KYC document types.
+  - `auto_verify` — runs only for KYC document types.
+
+#### [MODIFY] [definitions.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/platform_core/pipeline/definitions.py)
+- Removed ~35 lines of FallbackChain-related setup from the local pipeline engine definitions.
+
+---
+
+## 5. Provider Import Fixes — Dual `mistralai` Import Pattern
+
+Applied to all Mistral provider classes to handle different SDK versions:
+
+```python
+# Before:
+from mistralai import Mistral
+
+# After:
+try:
+    from mistralai.client import Mistral
+except ImportError:
+    from mistralai import Mistral
+```
+
+#### Files Changed
+- [mistral_llm.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/platform_core/providers/llm/mistral_llm.py)
+- [mistral_ocr.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/platform_core/providers/ocr/mistral_ocr.py)
+- [mistral_vision.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/platform_core/providers/vision/mistral_vision.py)
+
+---
+
+## 6. Vision Provider — MIME Detection & PDF Guard
+
+#### [MODIFY] [mistral_vision.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/platform_core/providers/vision/mistral_vision.py)
+- **Added `_detect_mime()` function** — detects MIME type from file magic bytes (PNG, WEBP, GIF, BMP, TIFF, JPEG).
+- **Raises `ValueError` for PDFs** — prevents sending PDFs directly to Vision API.
+- Vision `analyze()` now sends `data:{mime};base64,...` instead of hardcoded `image/jpeg`.
+
+#### [MODIFY] [templates.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/utils/templates.py)
+- `generate_template()` now **renders PDF first page to PNG** (via PyMuPDF/fitz) before sending to Vision.
+- Changed from `vision.call("analyze", ...)` to `vision.analyze(...)`.
+
+---
+
+## 7. Duplicate Detection Fix — Self-Exclusion
+
+#### [MODIFY] [operations.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/db/operations.py)
+- `check_duplicate_filename()` and `check_duplicate_hash()` now accept `exclude_document_id` parameter.
+- Documents no longer flag themselves as duplicates during re-processing.
+
+#### [MODIFY] [intake.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/activities/intake.py) & [intake.py (tools)](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/tools/intake.py)
+- Pass `document_id` through tool execution to exclude current document from duplicate checks.
+
+---
+
+## 8. Removed Defensive Try/Except Fallbacks
+
+Across multiple files, removed `try/except` blocks that swallowed errors with hardcoded fallback values. Errors now propagate properly.
+
+#### Files Changed
+- [classifier.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/activities/classifier.py) — removed fallback to `{"doc_type": "invoice"}` on LLM failure.
+- [face_verifier.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/utils/face_verifier.py) — removed "vision provider unavailable" / "LLM judge unavailable" fallbacks.
+- [signature_verifier.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/utils/signature_verifier.py) — removed embedding-only fallback verdict when LLM judge fails.
+
+---
+
+## 9. Method Call Style — `.call("method", ...)` → Direct Methods
+
+All `chain.call("method", ...)` patterns replaced with direct provider method calls:
+
+| Old Pattern | New Pattern |
+|---|---|
+| `ocr_chain.call("extract", ...)` | `ocr.extract(...)` |
+| `vision_chain.call("analyze", ...)` | `vision.analyze(...)` |
+| `embedding_chain.call("embed", ...)` | `embedding.embed(...)` |
+| `llm.call("chat", ...)` | `llm.chat(...)` |
+
+#### Files Changed
+- [classifier.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/activities/classifier.py)
+- [face_verifier.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/utils/face_verifier.py)
+- [signature_verifier.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/utils/signature_verifier.py)
+- [ocr.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/utils/ocr.py)
+- [templates.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/utils/templates.py)
+
+---
+
+## 10. Docker & Dependencies
+
+#### [MODIFY] [Dockerfile](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/Dockerfile)
+- Removed `apt-get install libgl1 libglib2.0-0` — no longer needed since `opencv-python-headless` and `PyMuPDF` ship self-contained wheels.
+- Added `--extra-index-url https://download.pytorch.org/whl/cpu` to pip install for CPU-only PyTorch wheels.
+
+#### [MODIFY] [requirements.txt](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/requirements.txt)
+- `torch==2.5.1` → `torch==2.5.1+cpu` (CPU-only, ~200MB smaller image).
+- `torchvision==0.20.1` → `torchvision==0.20.1+cpu`.
+- `httpx==0.27.2` → `httpx>=0.28.1` (compatibility fix for `mistralai` SDK).
+
+---
+
+## 11. Minor Renames & Comment Updates
+
+| File | Change |
+|---|---|
+| [claim_report.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/activities/claim_report.py) | Cleaned up docstring referencing removed fallback pattern |
+| [interfaces.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/platform_core/providers/interfaces.py) | Updated comments removing FallbackChain references |
+| [mock_llm.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/platform_core/providers/llm/mock_llm.py) | Minor update |
+| [queue.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/api/queue.py) | Renamed "Fallback with no Redis" → "Inline execution when Redis is unavailable" |
+| [documents.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/api/routers/v1/documents.py) | Updated Section 18 comment |
+| [ocr.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/utils/ocr.py) | `_NO_MATCH_FALLBACK_SCORE` → `_NO_MATCH_DEFAULT_SCORE` |
+| [preprocessor.py](file:///c:/Users/MrYashGupta/Desktop/Re_DocumentAI/RE_Document_AI/backend-v2/utils/preprocessor.py) | "Pillow-only fallbacks" → "Pillow-only mode" |
+
+---
+
+## Summary
+
+The core theme of all changes: **simplify the provider layer by removing the FallbackChain abstraction and introducing Mistral Studio Agent routing**, making each pipeline step call the Mistral Agents API directly with its pre-configured Agent ID, while fixing duplicate detection, Docker build size, and provider compatibility along the way.

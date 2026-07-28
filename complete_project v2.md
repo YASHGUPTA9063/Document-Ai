@@ -4,6 +4,9 @@
 > Reverse-engineered specification for Frontend V2 + Backend V2.
 > This document is the single source of truth for recreating the entire project.
 
+> [!NOTE]
+> **2026-07-28 backend revision.** The provider layer was refactored: the `FallbackChain` abstraction was removed and providers are now called **directly** (`.chat()`, `.extract()`, `.analyze()`, `.embed()`), with per-step routing to Mistral Studio Agents via a new `MistralAgentLLM` provider and a `step_agent_map`. This also fixed duplicate-detection self-flagging, removed several silent error-swallowing fallbacks, and adjusted Docker/dependency pins. Every section below reflects the **current (post-refactor)** architecture; anywhere the old `FallbackChain`/`get_llm_chain()` pattern is still described, it is marked as superseded. Full change list: 27 files modified, 1 file deleted (`fallback.py`), 2 files added.
+
 ---
 
 # Table of Contents
@@ -131,17 +134,17 @@ This platform replaces manual processing with an AI-powered pipeline that:
 
 The platform was architectured with these principles:
 
-1. **Provider Agnosticism**: All AI capabilities (LLM, OCR, Vision, Embedding, Storage) are accessed through abstract interfaces. Switching from Mistral to OpenAI requires only a config change — no code modifications.
+1. **Provider Agnosticism**: All AI capabilities (LLM, OCR, Vision, Embedding, Storage) are accessed through abstract interfaces (`LLMProvider`, `OCRProvider`, etc.). Providers are called **directly** by their native methods (`.chat()`, `.extract()`, `.analyze()`, `.embed()`) — swapping a provider implementation is still a code-level substitution behind the same interface, but there is no runtime chain-of-responsibility routing between multiple providers of the same type anymore (see point 3, revised below).
 
 2. **Pipeline-as-Code**: Document and claim processing flows are defined as ordered step sequences (`PipelineDefinition`), not hardcoded in a monolithic function. Steps can be conditionally skipped, timed out, or paused.
 
-3. **Resilience First**: Every provider call goes through a `FallbackChain` with circuit breakers, automatic failover, and exponential backoff retries.
+3. **Direct Provider Calls with Mistral Studio Agent Routing** *(revised — supersedes the earlier "FallbackChain" design)*: The `FallbackChain` chain-of-responsibility abstraction was removed. Each pipeline step now resolves its LLM provider via `registry.get_agent_llm(step_name)`, which returns a `MistralAgentLLM` bound to that step's pre-configured Mistral Studio Agent ID (system prompt, tools, and conversation state live on the Mistral Studio side) if one is configured, or falls back to the generic `MistralLLM` otherwise. OCR/Vision/Embedding providers are resolved with plain `registry.get_ocr()` / `get_vision()` / `get_embedding()` calls — no chain, no automatic multi-provider failover. Circuit breaker / retry / health-check primitives still exist in `platform_core/resilience/` but are no longer wired into the provider call path now that their sole caller (`FallbackChain`) is gone.
 
 4. **Human-in-the-Loop Native**: The pipeline engine has first-class support for pausing execution and resuming after human input (duplicate decisions, manual review).
 
-5. **Dual Execution Engines**: The same pipeline can execute either locally (via `PipelineEngine` + arq/Redis) or on Mistral's managed cloud (via Mistral Workflows SDK), controlled by a single config flag.
+5. **Dual Execution Engines**: The same pipeline can execute either locally (via `PipelineEngine` + arq/Redis) or on Mistral's managed cloud (via Mistral Workflows SDK), controlled by a single config flag. The Mistral Workflows engine (`mistral_workflow.py`) now implements the **full 10-step document pipeline** (previously it was missing `pre_validate`, `preprocess`, `fraud_check`, and `auto_verify`), so both engines are feature-equivalent.
 
-6. **Separation of Concerns**: Activities contain business logic, tools define LLM-callable functions, the pipeline engine handles orchestration, and providers handle vendor communication.
+6. **Separation of Concerns**: Activities contain business logic, tools define LLM-callable functions, the pipeline engine handles orchestration, and providers handle vendor communication. **Errors now propagate**: several activities/utilities that previously swallowed provider failures behind a hardcoded fallback value (e.g. classifier defaulting to `"invoice"`, signature/face verifiers returning a degraded "provider unavailable" verdict) now let the exception surface to the pipeline engine instead of silently returning a wrong-but-plausible result.
 
 ---
 
@@ -165,19 +168,17 @@ graph TB
         Registry[Provider Registry<br/>Singleton]
     end
 
-    subgraph "Provider Layer"
-        LLM[LLM Provider<br/>Mistral / OpenAI]
+    subgraph "Provider Layer — direct calls, no chain"
+        AgentLLM[MistralAgentLLM<br/>per-step Mistral Studio Agent]
+        LLM[MistralLLM<br/>generic chat fallback]
         OCR[OCR Provider<br/>Mistral OCR]
         Vision[Vision Provider<br/>Pixtral]
         Embed[Embedding Provider<br/>DINOv2]
         Storage[Storage Provider<br/>Local / S3]
     end
 
-    subgraph "Resilience Layer"
-        Fallback[Fallback Chains]
-        CB[Circuit Breakers]
-        Retry[Retry Policies]
-        Health[Health Monitor]
+    subgraph "Health Layer"
+        Health[Health Monitor<br/>background checks]
     end
 
     subgraph "Data Layer"
@@ -188,6 +189,7 @@ graph TB
 
     subgraph "External Services"
         MistralAPI[Mistral AI API]
+        MistralStudio[Mistral Studio Agents]
         MistralWorkflows[Mistral Workflows<br/>Managed Cloud]
         GoogleDocAI[Google Document AI]
     end
@@ -202,15 +204,15 @@ graph TB
     Pipeline --> Activities
     Activities --> AgentLoop
     AgentLoop --> Registry
-    Registry --> Fallback
-    Fallback --> CB
-    Fallback --> LLM
-    Fallback --> OCR
-    Fallback --> Vision
+    Registry -->|get_agent_llm step_name| AgentLLM
+    Registry -->|generic fallback| LLM
+    Registry -->|get_ocr direct| OCR
+    Registry -->|get_vision direct| Vision
     Registry --> Embed
     Registry --> Storage
     Activities --> DB
     Pipeline --> DB
+    AgentLLM --> MistralStudio
     LLM --> MistralAPI
     OCR --> MistralAPI
     Vision --> MistralAPI
@@ -362,7 +364,10 @@ Document-AI/
 │   │   ├── providers/
 │   │   │   ├── __init__.py
 │   │   │   ├── interfaces.py       # Abstract base classes: LLMProvider, OCRProvider, etc.
-│   │   │   ├── llm/                # LLM implementations (MistralLLM, etc.)
+│   │   │   ├── llm/                # LLM implementations
+│   │   │   │   ├── mistral_llm.py       # MistralLLM — generic chat.complete_async()
+│   │   │   │   ├── mistral_agent_llm.py # MistralAgentLLM — agents.complete_async(agent_id=...), per-step routing (NEW)
+│   │   │   │   └── mock_llm.py          # Test/offline provider
 │   │   │   ├── ocr/                # OCR implementations (MistralOCR, etc.)
 │   │   │   ├── vision/             # Vision implementations (MistralVision, etc.)
 │   │   │   ├── embedding/          # Embedding implementations (DINOv2Embedding)
@@ -401,12 +406,11 @@ Document-AI/
 │   │   ├── isolation/
 │   │   │   ├── __init__.py
 │   │   │   └── sandbox.py          # StepSandbox: scoped provider access per step
-│   │   └── resilience/
+│   │   └── resilience/              # NOTE: `fallback.py` was DELETED — providers are now called directly (see note at top of doc)
 │   │       ├── __init__.py
-│   │       ├── circuit_breaker.py  # CircuitBreaker: CLOSED → OPEN → HALF_OPEN
-│   │       ├── fallback.py         # FallbackChain: tries providers in order
-│   │       ├── retry.py            # RetryPolicy: exponential backoff + jitter
-│   │       └── health.py           # HealthMonitor: background provider health checks
+│   │       ├── circuit_breaker.py  # CircuitBreaker: CLOSED → OPEN → HALF_OPEN (defined but no longer wired into any call path — its only caller was FallbackChain)
+│   │       ├── retry.py            # RetryPolicy: exponential backoff + jitter (same — currently orphaned)
+│   │       └── health.py           # HealthMonitor: background provider health checks (still active, runs independently of the call path)
 │   │
 │   ├── activities/                 # Business logic for each pipeline step
 │   │   ├── __init__.py
@@ -481,7 +485,7 @@ Document-AI/
 | `platform_core/` | Core platform abstractions — providers, pipelines, resilience | Everything |
 | `platform_core/pipeline/` | Pipeline orchestration engine with checkpointing | `activities/`, `db/`, `platform_core/resilience/` |
 | `platform_core/providers/` | Vendor-agnostic provider implementations | External APIs (Mistral, etc.) |
-| `platform_core/resilience/` | Circuit breakers, fallback chains, retries, health checks | `platform_core/providers/` |
+| `platform_core/resilience/` | Health checks (active); circuit breaker/retry primitives (defined, currently unused since `FallbackChain` was removed) | `platform_core/providers/` |
 | `platform_core/prompts/` | System prompt management (markdown files) | `activities/` |
 | `activities/` | Business logic for each pipeline step | `tools/`, `db/`, `platform_core/` |
 | `tools/` | LLM-callable function definitions and implementations | `utils/`, `db/` |
@@ -821,12 +825,11 @@ graph TB
     
     subgraph "Layer 4: Provider Registry"
         REG[ProviderRegistry]
-        FC[FallbackChain]
-        CB2[CircuitBreaker]
     end
     
-    subgraph "Layer 5: Providers"
-        P1[MistralLLM]
+    subgraph "Layer 5: Providers — called directly"
+        P0[MistralAgentLLM<br/>per-step Agent ID]
+        P1[MistralLLM<br/>generic fallback]
         P2[MistralOCR]
         P3[MistralVision]
         P4[DINOv2Embedding]
@@ -842,11 +845,14 @@ graph TB
     A9 --> AL & SC
     AL --> REG
     SC --> REG
-    REG --> FC
-    FC --> CB2
-    FC --> P1 & P2 & P3
+    REG -->|get_agent_llm step_name| P0
+    REG -->|get_llm default| P1
+    REG -->|get_ocr direct| P2
+    REG -->|get_vision direct| P3
     REG --> P4 & P5
 ```
+
+*(Layer 4 previously routed through `FallbackChain`/`CircuitBreaker` — that indirection was removed; `ProviderRegistry` now resolves a provider and the caller invokes it directly.)*
 
 ## API Layer
 
@@ -919,26 +925,27 @@ Singleton pattern. Initialized from `config/platform.yaml` at startup. Manages:
 - **Storage providers**: File storage (local, S3)
 
 Each provider type has:
-- Direct access: `registry.get_llm("mistral")`
-- Fallback chain access: `registry.get_llm_chain("classifier")` → tries providers in configured order
+- Direct access: `registry.get_llm("mistral")`, `registry.get_ocr()`, `registry.get_vision()`, `registry.get_embedding()` — call the provider directly, no chain/wrapper.
+- **`registry.get_agent_llm(step_name)`** *(replaces the old `get_llm_chain(purpose)` fallback-chain accessor)* — looks up `config.step_agent_map[step_name]`; if that pipeline step has a configured Mistral Studio Agent ID, returns a cached `MistralAgentLLM` bound to it (system prompt/tools/conversation live on the Mistral Studio side); otherwise returns the generic `MistralLLM`. Instances are cached per step in an `_agent_llms` dict so repeated calls for the same step reuse the same provider object.
+- `get_llm_chain()`, `get_ocr_chain()`, `get_vision_chain()`, `get_embedding_chain()` and the `_chains`/`set_fallback_chains()` machinery **no longer exist** — remove them if recreating this registry from an older version of this document.
 
 ## Resilience Layer
 
-### Circuit Breaker
+> **The `FallbackChain` abstraction that used to sit in front of every provider call has been removed.** `sandbox.py`'s `llm()`/`ocr()`/`vision()`/`embedding()` accessors now call `registry.get_agent_llm(step_name)` / `get_ocr()` / `get_vision()` / `get_embedding()` directly, and `agent_loop.py`'s `_call_llm()` was simplified to always call `llm.chat(...)` (the branch that special-cased a `FallbackChain`-shaped object via `hasattr(llm, "call")` was deleted). The primitives below still exist in the codebase but, with `FallbackChain` gone, only Health Monitor is actually exercised at runtime.
+
+### Circuit Breaker *(defined, currently unused)*
 Three states: CLOSED → OPEN → HALF_OPEN.
 - Opens after 5 consecutive failures (configurable)
 - Recovers after 60 seconds (configurable)
 - Half-open allows 1 probe call
+- Not currently wired into any call path — its only caller (`FallbackChain`) was deleted. Recreate this if you plan to re-add multi-provider failover; otherwise treat it as a future extension point.
 
-### Fallback Chain
-Wraps multiple providers of the same type. Tries in order, skipping providers with open circuit breakers.
-
-### Retry Policy
+### Retry Policy *(defined, currently unused)*
 Exponential backoff with jitter: `delay = min(base * 2^attempt + random(0,1), max_delay)`.
-Default: 3 retries, 1s base delay, 30s max delay.
+Default: 3 retries, 1s base delay, 30s max delay. Same status as Circuit Breaker — not called from the current direct-provider path.
 
-### Health Monitor
-Background asyncio task that checks all provider health every 30 seconds with a 15-second timeout.
+### Health Monitor *(active)*
+Background asyncio task that checks all provider health every 30 seconds with a 15-second timeout. Runs independently of the request/pipeline path and still reports into the `/health` endpoint and `ProviderRegistry`.
 
 ---
 
@@ -961,6 +968,8 @@ Background asyncio task that checks all provider health every 30 seconds with a 
 - **Key fields**: 25+ agent IDs, database URL, storage dir, Mistral API key, Google Doc AI credentials
 - **Design choice**: Uses Pydantic `BaseSettings` with `.env` file support. Exits on validation error to fail fast.
 - **Constants**: `SUPPORTED_DOCUMENT_TYPES` list of 11 document categories
+- **Renamed env vars** (to match Mistral Studio's own naming, aligning agent-config exports with the platform): `PREPROCESSOR_AGENT_ID` → `PREPROCESSING_AGENT_ID`, `FRAUD_CHECKER_AGENT_ID` → `FRAUD_AGENT_ID`, `EXTRACTOR_AGENT_ID` → `GENERAL_EXTRACTOR_AGENT_ID`
+- **Added `step_agent_map` property** — builds `dict[str, str]` mapping all 22 pipeline step names to their configured Agent IDs, filtering out any that are empty/unset. This is what `ProviderRegistry.get_agent_llm(step_name)` (see Section 5) looks up to decide whether a step should use a dedicated Mistral Studio Agent or fall back to the generic LLM.
 
 ### `worker.py`
 - **Purpose**: Background task processing via arq (Redis-based task queue)
@@ -973,10 +982,20 @@ Background asyncio task that checks all provider health every 30 seconds with a 
 
 ### `platform_core/registry.py`
 - **Purpose**: Singleton provider registry — central access point for all AI providers
-- **Responsibilities**: Registration, direct access, fallback chain construction, health checks
+- **Responsibilities**: Registration, direct access, per-step Mistral Studio Agent routing, health checks
 - **Factory method**: `from_config()` reads `platform.yaml`, instantiates provider classes, registers them
 - **Auto-discovery**: `_register_builtin_providers()` imports all known provider classes at startup
 - **Pattern**: Singleton via class variable `_instance`
+- **Changed**: `_chains` dict and `_build_fallback_chains()` removed, along with `get_llm_chain()`/`get_ocr_chain()`/`get_vision_chain()`/`get_embedding_chain()`. **Added** `get_agent_llm(step_name)` (returns a per-step `MistralAgentLLM` if an Agent ID is configured, else the generic `MistralLLM`) and an `_agent_llms` cache dict keyed by step name.
+
+### `platform_core/isolation/sandbox.py`
+- **Purpose**: `StepSandbox` — scoped provider access per pipeline step, so an activity only sees the providers relevant to it
+- **Changed**: `llm()` now calls `registry.get_agent_llm(step_name)` (was `get_llm_chain()`); `ocr()`, `vision()`, `embedding()` now call `registry.get_ocr()` / `get_vision()` / `get_embedding()` directly (were chain accessors)
+
+### `platform_core/providers/llm/mistral_agent_llm.py` *(new file, 117 lines)*
+- **Purpose**: `MistralAgentLLM` — an `LLMProvider` implementation that calls `client.agents.complete_async(agent_id=...)` instead of `client.chat.complete_async()`, delegating system prompt, tools, and conversation state to a pre-built Mistral Studio Agent
+- **Compatibility**: Returns the same `LLMResponse` shape as `MistralLLM`, so every existing activity works against it without changes — it's a drop-in replacement selected transparently by `registry.get_agent_llm(step_name)`
+- **Health check**: Implements `health_check()` via a lightweight `"ping"` message
 
 ### `platform_core/agent_loop.py`
 - **Purpose**: Reusable multi-turn LLM conversation loop with tool calling
@@ -987,6 +1006,7 @@ Background asyncio task that checks all provider health every 30 seconds with a 
   - `run_simple_completion()`: Single-turn completion without tools
   - `_parse_json_response()`: Robust JSON extraction from LLM output (handles code blocks, trailing text)
 - **JSON recovery**: Tries full text → markdown code block → first `{` to last `}` → first `[` to last `]`
+- **Changed**: `_call_llm()` was simplified — the branch that checked `hasattr(llm, "call")` to special-case a `FallbackChain` was removed; it now always calls `llm.chat(...)` directly (works identically for `MistralLLM` and `MistralAgentLLM` since both expose the same interface)
 
 ### `platform_core/pipeline/engine.py`
 - **Purpose**: Core pipeline orchestration engine
@@ -1006,7 +1026,8 @@ Background asyncio task that checks all provider health every 30 seconds with a 
   - `build_claim_pipeline(config)`: Returns 7-step claim pipeline
 - **Step handlers**: Each `_step_*` function is a thin wrapper that imports the activity, calls it, and returns results for context merging
 - **Helper**: `_is_kyc_document()` checks if doc_type is an identity document
-- **Fallback**: `_fallback_claim_suggestion()` generates rule-based report when LLM is unavailable
+- **Fallback**: `_fallback_claim_suggestion()` generates rule-based report when LLM is unavailable — this is a business-logic fallback (LLM produced no usable report) and is unrelated to, and unaffected by, the removal of the provider-level `FallbackChain`
+- **Changed**: ~35 lines of `FallbackChain`-related setup (building chains for the local pipeline engine) were removed; the local engine now resolves providers the same direct way as the Mistral Workflows engine
 
 ### `platform_core/pipeline/checkpoint.py`
 - **Purpose**: Pipeline state persistence for crash recovery
@@ -1019,12 +1040,31 @@ Background asyncio task that checks all provider health every 30 seconds with a 
 - **How it works**: Defines activities with `@workflows.activity` decorators and a workflow class with `@workflows.workflow.define`. Activities wrap existing functions from `activities/*.py`.
 - **Managed cloud**: Uses Mistral's Temporal-as-a-Service. Workflows appear in Mistral Studio dashboard.
 - **Trade-off**: More durable (managed cloud) but vendor-locked to Mistral
+- **Changed — now feature-complete with the local engine**: 4 previously-missing activity wrappers were added — `pre_validate_activity`, `preprocess_activity`, `fraud_check_activity`, `auto_verify_activity` — and `DocumentWorkflow.run()` was updated to run all **10** document-pipeline steps with the same conditional branching as `PipelineEngine`: `pre_validate` runs if `enable_pre_validation` (default true), `preprocess` runs if `enable_preprocessing` (default true), `fraud_check`/`auto_verify` run only for KYC document types. Previously this engine silently skipped those 4 steps, so documents processed via Mistral Workflows got a different (weaker) pipeline than documents processed locally — that discrepancy is now fixed.
 
 ### `platform_core/providers/interfaces.py`
 - **Purpose**: Abstract base classes defining provider contracts
 - **Provider types**: `LLMProvider`, `OCRProvider`, `StorageProvider`, `EmbeddingProvider`, `VisionProvider`
 - **Response types**: `LLMResponse`, `OCRResponse`, `EmbeddingResponse` — standardized dataclasses
 - **Health status**: `ProviderStatus` enum (HEALTHY, DEGRADED, DOWN)
+- **Changed**: doc-comments referencing the `FallbackChain` pattern were removed/updated to reflect direct provider calls
+
+### Mistral SDK Import Compatibility
+`mistral_llm.py`, `mistral_ocr.py`, and `mistral_vision.py` all now use a dual-import fallback to handle different `mistralai` SDK versions:
+```python
+try:
+    from mistralai.client import Mistral
+except ImportError:
+    from mistralai import Mistral
+```
+This replaced a single hardcoded `from mistralai import Mistral` import that broke on older/newer SDK releases with a different module layout.
+
+### `platform_core/providers/vision/mistral_vision.py`
+- **Changed**: Added `_detect_mime()` — sniffs the real MIME type from file magic bytes (PNG, WEBP, GIF, BMP, TIFF, JPEG) instead of assuming everything is JPEG. `analyze()` now sends `data:{detected_mime};base64,...` (was hardcoded to `image/jpeg`, which silently corrupted non-JPEG inputs sent to the Vision API).
+- **Guard added**: raises `ValueError` if asked to analyze a PDF directly — Vision (Pixtral) is an image API; PDFs must be rasterized first (see `utils/templates.py` below).
+
+### `utils/templates.py`
+- **Changed**: `generate_template()` now renders a PDF sample's first page to PNG via PyMuPDF (`fitz`) *before* sending it to the Vision provider, instead of passing the raw PDF through (which the Vision provider now rejects per the guard above). Also switched from the removed chain-call style `vision.call("analyze", ...)` to the direct `vision.analyze(...)`.
 
 ## Backend V2 — Database
 
@@ -1044,6 +1084,7 @@ Background asyncio task that checks all provider health every 30 seconds with a 
 ### `db/operations.py`
 - **Purpose**: Document CRUD and pipeline checkpoint operations
 - **Functions**: `update_status`, `update_doc_type`, `update_error`, `check_duplicate_filename`, `check_duplicate_hash`, `get_document`, `save_checkpoint`, `load_checkpoint`, `clear_checkpoint`
+- **Bug fix — duplicate self-flagging**: `check_duplicate_filename()` and `check_duplicate_hash()` now accept an `exclude_document_id` parameter. Previously, re-processing a document (e.g. via the `/documents/{id}/retry` endpoint) could match against its own already-saved row and incorrectly flag itself as a duplicate of itself, forcing an unnecessary HITL duplicate-decision pause. `activities/intake.py` and `tools/intake.py` now thread `document_id` through the duplicate-check tool call so the current document is excluded from its own duplicate search.
 
 ### `db/claim_operations.py`
 - **Purpose**: Claim-specific database operations
@@ -1085,6 +1126,41 @@ Background asyncio task that checks all provider health every 30 seconds with a 
 ### `src/hooks/useDocumentPoller.js` (62 lines) / `src/hooks/useDocumentList.js` (31 lines)
 - See "Custom Hooks" in Section 4 for exact polling interval (2500ms), backoff behavior (fixed 2× retry, not exponential), and terminal-status set
 
+## Backend V2 — Full Refactor Change Index (2026-07-28)
+
+*Every backend file touched by the FallbackChain-removal refactor, for traceability. Detail on each is inline in the relevant subsection above; this is the flat checklist.*
+
+| File | Change |
+|---|---|
+| `platform_core/resilience/fallback.py` | **Deleted** — `FallbackChain` class (83 lines) |
+| `platform_core/registry.py` | Removed chain accessors/`_chains`; added `get_agent_llm(step_name)` + `_agent_llms` cache |
+| `platform_core/isolation/sandbox.py` | `llm()`/`ocr()`/`vision()`/`embedding()` now call the registry directly |
+| `platform_core/agent_loop.py` | `_call_llm()` simplified — always calls `llm.chat(...)` |
+| `platform_core/providers/llm/mistral_agent_llm.py` | **New** — `MistralAgentLLM` (117 lines) |
+| `config.py` | Renamed 3 agent-ID env vars; added `step_agent_map` |
+| `config/platform.yaml` | Removed `fallback_chains` section (23 lines) |
+| `platform_core/pipeline/mistral_workflow.py` | Added 4 activity wrappers; `DocumentWorkflow.run()` now covers all 10 steps |
+| `platform_core/pipeline/definitions.py` | Removed ~35 lines of FallbackChain setup |
+| `platform_core/providers/llm/mistral_llm.py`, `providers/ocr/mistral_ocr.py`, `providers/vision/mistral_vision.py` | Dual `mistralai` import pattern |
+| `platform_core/providers/vision/mistral_vision.py` | Added `_detect_mime()`; rejects PDFs with `ValueError` |
+| `utils/templates.py` | Renders PDF→PNG before Vision call; `vision.call(...)` → `vision.analyze(...)` |
+| `db/operations.py` | `check_duplicate_filename()`/`check_duplicate_hash()` accept `exclude_document_id` |
+| `activities/intake.py`, `tools/intake.py` | Thread `document_id` through duplicate-check tool call |
+| `activities/classifier.py` | Removed fallback to `{"doc_type": "invoice"}` on LLM failure; `.call("chat", ...)` → `.chat(...)` |
+| `utils/face_verifier.py` | Removed "provider/LLM judge unavailable" fallback verdicts; direct method calls |
+| `utils/signature_verifier.py` | Removed embedding-only fallback verdict; direct method calls |
+| `utils/ocr.py` | `ocr_chain.call("extract", ...)` → `ocr.extract(...)`; `_NO_MATCH_FALLBACK_SCORE` → `_NO_MATCH_DEFAULT_SCORE` |
+| `Dockerfile` | Removed `libgl1`/`libglib2.0-0` apt install; added PyTorch CPU `--extra-index-url` |
+| `requirements.txt` | `torch`/`torchvision` → `+cpu` builds; `httpx` → `>=0.28.1` |
+| `activities/claim_report.py` | Docstring cleanup (removed stale FallbackChain reference) |
+| `platform_core/providers/interfaces.py` | Comment cleanup (removed FallbackChain references) |
+| `platform_core/providers/llm/mock_llm.py` | Minor update |
+| `api/queue.py` | Comment renamed: "Fallback with no Redis" → "Inline execution when Redis is unavailable" |
+| `api/routers/v1/documents.py` | Comment update |
+| `utils/preprocessor.py` | Comment renamed: "Pillow-only fallbacks" → "Pillow-only mode" |
+
+**Net effect**: 27 files modified, 1 deleted, 2 added. The unifying theme is removing the `FallbackChain` indirection in favor of direct provider calls plus per-step Mistral Studio Agent routing, while fixing duplicate self-flagging, tightening Vision's MIME handling, and trimming Docker image size.
+
 ---
 
 # 7. Function-Level Documentation
@@ -1107,13 +1183,14 @@ Background asyncio task that checks all provider health every 30 seconds with a 
 
 ### `ProviderRegistry.from_config(config)`
 - **Purpose**: Factory method to build a fully initialized registry from YAML config
-- **Side effects**: Registers builtin providers, instantiates configured providers, sets fallback chains, stores as singleton
+- **Side effects**: Registers builtin providers, instantiates configured providers, stores as singleton
 - **Error handling**: Logs warnings for unknown provider types or initialization failures (non-fatal)
+- **Changed**: no longer builds/sets fallback chains (that step was removed along with `FallbackChain`)
 
-### `FallbackChain.call(method, **kwargs)`
-- **Purpose**: Try each provider in order until one succeeds
-- **Flow**: For each provider: check circuit breaker → if open: skip → try call → on success: record_success → on failure: record_failure, try next
-- **Raises**: `AllProvidersFailedError` if every provider fails
+### `ProviderRegistry.get_agent_llm(step_name)` *(new — replaces `FallbackChain.call(method, **kwargs)`)*
+- **Purpose**: Resolve the correct LLM provider for one pipeline step, preferring a dedicated Mistral Studio Agent over the generic chat model
+- **Flow**: Look up `step_name` in `config.step_agent_map` → if an Agent ID exists, return a cached `MistralAgentLLM` for it (creating and caching one in `_agent_llms` on first use) → otherwise return the generic `MistralLLM`
+- **Contrast with the old `FallbackChain.call()`**: the old function tried multiple providers of the same type in order, skipping any behind an open circuit breaker, and raised `AllProvidersFailedError` if all failed. There is no equivalent multi-provider retry now — if the resolved provider's `.chat()` call fails, the exception propagates to the caller (`run_agent_loop`) directly.
 
 ---
 
@@ -1596,8 +1673,14 @@ See Section 24 (Improvement Suggestions) for recommended auth implementation.
 - **Purpose**: LLM chat completions, OCR, Vision analysis
 - **Auth**: API key via `MISTRAL_API_KEY` env var
 - **Models used**: `mistral-large-latest` (LLM), `mistral-ocr-latest` (OCR), `pixtral-12b-2409` (Vision)
-- **Retry**: Via FallbackChain + CircuitBreaker
+- **Retry**: No automatic retry/failover layer currently active — `FallbackChain` + `CircuitBreaker` were removed from the call path (see Section 5, Resilience Layer); a provider call failure now propagates directly to the calling activity
 - **Timeout**: 5-minute per activity
+
+### Mistral Studio Agents API *(new integration path, alongside the raw chat API above)*
+- **Purpose**: Per-pipeline-step LLM routing where the system prompt, tool definitions, and conversation handling are configured and hosted on Mistral Studio rather than in this codebase
+- **Provider**: `MistralAgentLLM` (`platform_core/providers/llm/mistral_agent_llm.py`) calls `client.agents.complete_async(agent_id=...)`
+- **Config**: `config.step_agent_map` maps each of the 22 pipeline step names to an Agent ID env var (e.g. `PREPROCESSING_AGENT_ID`, `FRAUD_AGENT_ID`, `GENERAL_EXTRACTOR_AGENT_ID`); steps without a configured Agent ID fall back to the plain `MistralLLM`
+- **Selection**: `ProviderRegistry.get_agent_llm(step_name)`, called from `StepSandbox.llm()`
 
 ### Mistral Workflows SDK
 - **Purpose**: Managed cloud workflow orchestration (Temporal-as-a-Service)
@@ -1644,15 +1727,20 @@ See Section 24 (Improvement Suggestions) for recommended auth implementation.
 | `REVIEWER_AGENT_ID` | Yes | — | Mistral Studio agent ID |
 | `SIGNATURE_VISION_AGENT_ID` | Yes | — | Mistral Studio agent ID |
 | `SIGNATURE_JUDGE_AGENT_ID` | Yes | — | Mistral Studio agent ID |
-| ... (25+ more agent IDs) | | | |
+| `PREPROCESSING_AGENT_ID` *(renamed from `PREPROCESSOR_AGENT_ID`)* | Yes | — | Mistral Studio agent ID |
+| `FRAUD_AGENT_ID` *(renamed from `FRAUD_CHECKER_AGENT_ID`)* | Yes | — | Mistral Studio agent ID |
+| `GENERAL_EXTRACTOR_AGENT_ID` *(renamed from `EXTRACTOR_AGENT_ID`)* | Yes | — | Mistral Studio agent ID |
+| ... (22+ more agent IDs, collectively exposed via `config.step_agent_map`) | | | |
+
+> **Renamed for consistency with Mistral Studio's own naming.** If recreating this project from an earlier version of this document, use the new names — the old `PREPROCESSOR_AGENT_ID`/`FRAUD_CHECKER_AGENT_ID`/`EXTRACTOR_AGENT_ID` names are no longer read by `config.py`.
 
 ### Platform YAML (`config/platform.yaml`)
 
 Master configuration file controlling all platform behavior:
 
 - **`providers`**: LLM, OCR, Storage, Embedding, Vision provider definitions
-- **`fallback_chains`**: Per-purpose provider ordering (e.g., `llm.classifier: [mistral]`)
-- **`resilience`**: Circuit breaker thresholds, retry policies, health check intervals
+- ~~`fallback_chains`~~ — **removed** (23 lines deleted); provider selection for LLM steps is now driven entirely by `config.step_agent_map` (env-var-based, not YAML), and OCR/Vision/Embedding are resolved with a single configured provider each, no ordered list
+- **`resilience`**: Circuit breaker thresholds, retry policies, health check intervals — definitions remain in YAML for when `platform_core/resilience/` is reconnected, but nothing currently reads them into an active call path (see Section 5)
 - **`pipelines`**: Document/claim processing settings (workflow_engine, step_timeout, confidence threshold)
 - **`cors`**: Allowed origins
 - **`database`**: Pool size, overflow settings
@@ -1722,15 +1810,17 @@ Five specialized agents evaluate a claim from different angles. Each returns a s
 - Each activity wraps its logic in try/except
 - On failure: calls `db.update_error(document_id, {...})` to persist error details
 - Re-raises exception for pipeline engine to handle
+- **Changed — silent fallback values removed**: `classifier.py`, `face_verifier.py`, and `signature_verifier.py` previously caught provider failures and returned a hardcoded "safe" result instead of failing (e.g. `classifier.py` defaulted to `{"doc_type": "invoice"}` when the LLM call failed; `face_verifier.py`/`signature_verifier.py` returned a "provider unavailable" / "embedding-only" degraded verdict when the Vision or LLM judge call failed). Those try/except-and-substitute blocks were removed — a provider failure during classification or verification now raises and is recorded via `db.update_error(...)` like any other activity failure, rather than silently producing a plausible-looking wrong answer. When recreating this project, do **not** add "helpful" default-value fallbacks to these three activities.
 
 ### Agent Loop
 - JSON parse failures: Attempts markdown code block extraction, brace matching
 - JSON reformat: If json_mode=True, asks LLM to reformat as valid JSON
 - Max iterations: Raises `AgentLoopError` after 10 iterations
 
-### Circuit Breaker
+### Circuit Breaker *(currently inert)*
 - Opens after 5 consecutive failures
 - Prevents cascade failures to unhealthy providers
+- Not presently reachable from any call path — it was only ever invoked from inside `FallbackChain`, which has been removed (see Section 5). A provider failure today is not retried or failed-over; it propagates as a normal exception.
 
 ## Frontend Error Handling
 
@@ -1764,7 +1854,7 @@ Five specialized agents evaluate a claim from different angles. Each returns a s
 
 - **Async throughout**: FastAPI + async SQLAlchemy + async provider calls
 - **Background processing**: Pipeline runs in arq workers, not in request thread
-- **Fallback with no Redis**: `asyncio.create_task()` for inline processing
+- **Inline execution when Redis is unavailable** *(renamed from "Fallback with no Redis" in `api/queue.py` — same behavior, clearer name that doesn't collide with the removed `FallbackChain` terminology)*: `asyncio.create_task()` runs the pipeline inline instead of enqueuing
 - **Database**: SQLite WAL mode for concurrent reads, NORMAL synchronous for speed
 - **DINOv2 preloading**: Model loaded at startup, not per-request
 - **Checkpoint optimization**: Context sanitized before JSON serialization
@@ -1779,7 +1869,7 @@ Custom Prometheus metrics tracked:
 - `pipeline_run_duration_seconds` — total pipeline time
 - `provider_call_duration_seconds` — provider call latency
 - `provider_call_total` — provider call counts
-- `circuit_breaker_state` — current breaker states
+- `circuit_breaker_state` — current breaker states *(metric definition remains, but with `CircuitBreaker` no longer wired into any call path, it will not be updated at runtime — treat as dormant until/unless the resilience layer is reconnected)*
 - `queue_depth` — background task queue size
 - `agent_loop_iterations` — LLM loop iterations per call
 - `agent_loop_tool_calls_total` — total tool calls
@@ -1800,9 +1890,10 @@ Custom Prometheus metrics tracked:
 - **Where**: `LLMProvider`, `OCRProvider`, `VisionProvider` abstract interfaces with multiple implementations
 - **Why**: Provider-agnostic design — swap Mistral for OpenAI via config
 
-## Chain of Responsibility
-- **Where**: `FallbackChain` tries providers in order
-- **Why**: Automatic failover without caller awareness
+## Chain of Responsibility *(removed)*
+- **Where it used to be**: `FallbackChain` tried providers of the same type in order, skipping any behind an open circuit breaker
+- **Why it existed**: Automatic failover without caller awareness
+- **Current status**: Deleted. Provider selection is now a single direct lookup (`registry.get_agent_llm(step_name)` / `get_ocr()` / `get_vision()` / `get_embedding()`) with no ordered fallback list — this pattern no longer applies to this codebase. Do not recreate `FallbackChain` when rebuilding from this document unless you specifically want to reintroduce multi-provider failover.
 
 ## Pipeline Pattern
 - **Where**: `PipelineDefinition` + `PipelineEngine`
@@ -1820,9 +1911,14 @@ Custom Prometheus metrics tracked:
 - **Where**: `db/operations.py` and `db/claim_operations.py` encapsulate all DB access
 - **Why**: Separates data access from business logic
 
-## Circuit Breaker Pattern
-- **Where**: `CircuitBreaker` class wrapping each provider
+## Circuit Breaker Pattern *(defined, currently unused)*
+- **Where**: `CircuitBreaker` class in `platform_core/resilience/circuit_breaker.py`
 - **Why**: Prevents cascade failures when a provider goes down
+- **Current status**: The class still exists but its only caller was `FallbackChain`, which was removed — it is not instantiated anywhere in the live call path today. Left in the codebase as a ready-to-wire building block, not an active pattern in production use.
+
+## Agent Routing Pattern *(new)*
+- **Where**: `ProviderRegistry.get_agent_llm(step_name)` + `config.step_agent_map` + `MistralAgentLLM`
+- **Why**: Lets each pipeline step be backed by its own pre-configured Mistral Studio Agent (own system prompt/tools, managed outside this codebase) while every step that doesn't have one configured transparently uses the same generic `MistralLLM` — callers (`StepSandbox.llm()`, activities) don't need to know or care which kind of provider they got, since both implement the same `LLMProvider` interface.
 
 ---
 
@@ -1895,6 +1991,11 @@ Volumes:
 - `./storage`: Shared file storage between app and worker
 - `./config`: Platform configuration
 - `./migrations`: Alembic migrations
+
+### Dockerfile / Dependency Changes
+
+- **`Dockerfile`**: Removed `apt-get install libgl1 libglib2.0-0` — no longer needed now that `opencv-python-headless` and `PyMuPDF` ship self-contained wheels that don't require system OpenGL/GLib. Added `--extra-index-url https://download.pytorch.org/whl/cpu` to the pip install step so PyTorch resolves to CPU-only wheels.
+- **`requirements.txt`**: `torch==2.5.1` → `torch==2.5.1+cpu`, `torchvision==0.20.1` → `torchvision==0.20.1+cpu` (CPU-only builds, roughly 200MB smaller image — this platform only runs DINOv2 embedding inference on CPU, it never needed CUDA wheels). `httpx==0.27.2` → `httpx>=0.28.1` (the pinned version was incompatible with the `mistralai` SDK).
 
 ## Production Considerations
 
@@ -2030,7 +2131,7 @@ python -m venv venv
 venv\Scripts\activate
 ```
 
-Create `requirements.txt` with these core packages:
+Create `requirements.txt` with these core packages (torch/torchvision/httpx pins updated post-refactor — see Section 21 "Dockerfile / Dependency Changes"):
 ```
 fastapi==0.119.1
 uvicorn[standard]==0.30.6
@@ -2052,18 +2153,20 @@ opentelemetry-sdk==1.39.1
 opentelemetry-instrumentation-fastapi
 prometheus-client
 transformers
-torch
-torchvision
+torch==2.5.1+cpu
+torchvision==0.20.1+cpu
+httpx>=0.28.1
 opencv-python-headless
 alembic
 ```
+Install torch/torchvision with `pip install --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt` (CPU-only wheels — this project only runs DINOv2 inference on CPU, no CUDA needed, and the `+cpu` build is ~200MB smaller).
 
 ### Step 2: Configuration Layer
 
-1. Create `config.py` with Pydantic `BaseSettings` — 25+ agent ID fields, database URL, storage dir, Mistral API key
-2. Create `config/platform.yaml` — master YAML config with providers, fallback chains, resilience, pipeline settings
+1. Create `config.py` with Pydantic `BaseSettings` — 25+ agent ID fields (use the current names: `PREPROCESSING_AGENT_ID`, `FRAUD_AGENT_ID`, `GENERAL_EXTRACTOR_AGENT_ID`, etc. — **not** the older `PREPROCESSOR_AGENT_ID`/`FRAUD_CHECKER_AGENT_ID`/`EXTRACTOR_AGENT_ID`), database URL, storage dir, Mistral API key; add a `step_agent_map` property that builds `dict[str, str]` mapping all 22 pipeline step names to their configured Agent IDs, dropping any that are empty
+2. Create `config/platform.yaml` — master YAML config with providers, pipeline settings, CORS (do **not** add a `fallback_chains` section — provider routing is driven by `step_agent_map`, not YAML)
 3. Create `platform_core/config.py` — YAML loader with `${ENV_VAR}` resolution from `.env`
-4. Create `.env.example` with all required variables
+4. Create `.env.example` with all required variables, using the current agent-ID env var names above
 
 ### Step 3: Database Layer
 
@@ -2076,29 +2179,31 @@ alembic
 
 1. Create `platform_core/providers/interfaces.py` — ABC classes: LLMProvider, OCRProvider, StorageProvider, EmbeddingProvider, VisionProvider
 2. Create response dataclasses: LLMResponse, OCRResponse, EmbeddingResponse
-3. Create provider implementations under `platform_core/providers/llm/`, `ocr/`, `vision/`, `embedding/`, `storage/`
+3. Create provider implementations under `platform_core/providers/llm/` (`mistral_llm.py` — generic chat; `mistral_agent_llm.py` — **new**, calls `client.agents.complete_async(agent_id=...)`, returns the same `LLMResponse` shape so it's a drop-in for any activity; `mock_llm.py`), `ocr/`, `vision/` (add `_detect_mime()` for real MIME sniffing + a `ValueError` guard rejecting PDFs), `embedding/`, `storage/`
+4. In `mistral_llm.py`, `mistral_ocr.py`, `mistral_vision.py`, use the dual-import pattern for SDK-version compatibility: `try: from mistralai.client import Mistral / except ImportError: from mistralai import Mistral`
 
-### Step 5: Resilience Layer
+### Step 5: Resilience Layer *(optional/deferred — not on the active call path)*
 
 1. Create `platform_core/resilience/circuit_breaker.py` — 3-state circuit breaker
-2. Create `platform_core/resilience/fallback.py` — FallbackChain with generic type parameter
-3. Create `platform_core/resilience/retry.py` — RetryPolicy with exponential backoff
-4. Create `platform_core/resilience/health.py` — HealthMonitor background task
+2. Create `platform_core/resilience/retry.py` — RetryPolicy with exponential backoff
+3. Create `platform_core/resilience/health.py` — HealthMonitor background task (this one **is** actively used, wire it into `main.py` startup)
+4. Do **not** create a `fallback.py`/`FallbackChain` — this codebase calls providers directly. If you want automatic multi-provider failover, that's a deliberate re-addition, not something to reconstruct from an older version of this document.
 
 ### Step 6: Provider Registry
 
-1. Create `platform_core/registry.py` — Singleton ProviderRegistry with registration, access, factory, and diagnostic methods
+1. Create `platform_core/registry.py` — Singleton ProviderRegistry with registration, direct-access methods (`get_llm`, `get_ocr`, `get_vision`, `get_embedding`), and `get_agent_llm(step_name)` (looks up `config.step_agent_map[step_name]`, returns a cached `MistralAgentLLM` if configured else the generic `MistralLLM`) — do not implement `get_llm_chain()`/`get_ocr_chain()`/etc.
+2. Create `platform_core/isolation/sandbox.py` — `StepSandbox` whose `llm()` calls `registry.get_agent_llm(step_name)` and whose `ocr()`/`vision()`/`embedding()` call the registry's direct accessors
 
 ### Step 7: Agent Loop
 
-1. Create `platform_core/agent_loop.py` — `run_agent_loop()` and `run_simple_completion()` with robust JSON parsing
+1. Create `platform_core/agent_loop.py` — `run_agent_loop()` and `run_simple_completion()` with robust JSON parsing; `_call_llm()` should call `llm.chat(...)` unconditionally (no branching on chain-vs-provider — both `MistralLLM` and `MistralAgentLLM` implement the same interface)
 
 ### Step 8: Pipeline Engine
 
 1. Create `platform_core/pipeline/engine.py` — PipelineEngine with checkpointing, HITL, and metrics
 2. Create `platform_core/pipeline/checkpoint.py` — CheckpointManager with DB or memory storage
-3. Create `platform_core/pipeline/definitions.py` — Document pipeline (10 steps) + Claim pipeline (7 steps)
-4. Create `platform_core/pipeline/mistral_workflow.py` — Mistral Workflows SDK integration
+3. Create `platform_core/pipeline/definitions.py` — Document pipeline (10 steps) + Claim pipeline (7 steps); do not add `FallbackChain` setup here
+4. Create `platform_core/pipeline/mistral_workflow.py` — Mistral Workflows SDK integration; implement **all 10** document-pipeline activities (`intake`, `pre_validate`, `preprocess`, `classify`, `fraud_check`, `extract`, `validate`, `auto_verify`, `review`, `output`) with the same conditional branching as the local engine (`pre_validate`/`preprocess` gated by config flags, `fraud_check`/`auto_verify` gated by KYC doc type) — this engine must stay feature-equivalent with `PipelineEngine`, not a reduced subset
 
 ### Step 9: Prompt Files
 
@@ -2115,12 +2220,12 @@ Create 23 markdown prompt files in `platform_core/prompts/`:
 ### Step 11: Utilities
 
 1. Create `utils/file_handler.py` — File save with SHA-256 hashing
-2. Create `utils/ocr.py` — OCR provider wrapper
-3. Create `utils/preprocessor.py` — OpenCV image preprocessing
+2. Create `utils/ocr.py` — OCR provider wrapper, calling `ocr.extract(...)` directly (not a chain); use a descriptive constant name for the "no OCR match" score default (e.g. `_NO_MATCH_DEFAULT_SCORE`, not `_NO_MATCH_FALLBACK_SCORE` — avoid "fallback" terminology now that there's no fallback chain concept in this codebase)
+3. Create `utils/preprocessor.py` — OpenCV image preprocessing (call this "Pillow-only mode" for the reduced-dependency code path, not "Pillow-only fallbacks")
 4. Create `utils/signature_extractor.py` — Signature region cropping
-5. Create `utils/signature_verifier.py` — DINOv2 + Vision verification
-6. Create `utils/face_verifier.py` — Multi-agent face verification
-7. Create `utils/norm_config.py`, `classification_config.py`, `templates.py`
+5. Create `utils/signature_verifier.py` — DINOv2 + Vision verification, calling `vision.analyze(...)`/`llm.chat(...)` directly; do **not** add a degraded "embedding-only" verdict path for when the LLM judge call fails — let it raise
+6. Create `utils/face_verifier.py` — Multi-agent face verification, calling providers directly; do **not** add "provider unavailable" fallback verdicts — let failures raise
+7. Create `utils/norm_config.py`, `classification_config.py`, `templates.py` — in `templates.py`, `generate_template()` must render a PDF sample's first page to PNG via PyMuPDF before calling `vision.analyze(...)` (the Vision provider rejects raw PDFs)
 
 ### Step 12: API Layer
 
@@ -2144,7 +2249,7 @@ Create 23 markdown prompt files in `platform_core/prompts/`:
 
 ### Step 15: Docker
 
-1. Create `Dockerfile` — Python 3.12-slim with pip install
+1. Create `Dockerfile` — Python 3.12-slim; pip install with `--extra-index-url https://download.pytorch.org/whl/cpu` for CPU-only PyTorch wheels; do **not** `apt-get install libgl1 libglib2.0-0` — `opencv-python-headless` and `PyMuPDF` ship self-contained wheels that don't need it
 2. Create `docker-compose.yml` — 4 services (app, worker, postgres, redis)
 
 ---
