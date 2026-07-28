@@ -494,42 +494,72 @@ Document-AI/
 
 # 4. Frontend V2 Architecture
 
+> **This section was verified line-by-line against the actual `frontend-v2/src` source in this repository (2026-07-28) so that rebuilding from this document reproduces the same UI.** Where the original spec's assumptions were wrong (e.g. dark-as-default theme, generic page descriptions), they are corrected below and called out explicitly.
+
 ## Routing
 
-The application uses **React Router 7** with `createBrowserRouter`. All 12 routes are nested under a root `<AppShell />` layout:
+React Router 7 (`react-router-dom` `^7.15.1`) via `createBrowserRouter` + `<RouterProvider>`. A single top-level route (`/`) renders `<AppShell />`; every page is a nested child rendered through `<Outlet />`. `App.jsx` wraps the router in `<AppProvider>` (the AppStore context provider).
 
-| Path | Component | Purpose |
-|------|-----------|---------|
-| `/` | `Dashboard` | Overview with stats, charts, recent documents |
-| `/upload` | `Upload` | Drag-and-drop file upload with batch support |
-| `/processing` | `Processing` | Real-time pipeline monitoring for in-progress docs |
-| `/extraction` | `Extraction` | Side-by-side document preview + extracted data editor |
-| `/validation` | `Validation` | Human review queue |
-| `/documents` | `Documents` | Paginated document list with search and filter |
-| `/agents` | `Agents` | AI agent status dashboard |
-| `/analytics` | `Analytics` | Processing metrics and charts |
-| `/settings` | `Settings` | System configuration UI |
-| `/templates` | `Templates` | Extraction template management |
-| `/claim-process` | `ClaimProcess` | Claim creation and document upload |
-| `/claim-workflow` | `ClaimWorkflow` | Claim processing and report viewing |
+| Path | Component | Sidebar Entry | Notes |
+|------|-----------|----------------|-------|
+| `/` (index) | `Dashboard` | Main → Dashboard | |
+| `/upload` | `Upload` | Main → Upload | |
+| `/processing` | `Processing` | Main → Processing | |
+| `/extraction` | `Extraction` | Data → Extraction | |
+| `/validation` | `Validation` | Data → Validation | |
+| `/documents` | `Documents` | Data → Documents | |
+| `/agents` | `Agents` | Intelligence → Agents | |
+| `/analytics` | `Analytics` | Intelligence → Analytics | |
+| `/templates` | `Templates` | Intelligence → Templates | |
+| `/settings` | `Settings` | System → Settings | |
+| `/claim-process` | `ClaimProcess` | Claims → Claim Process | |
+| `/claim-workflow` | `ClaimWorkflow` | **None** | Reached only by navigating from ClaimProcess (`/claim-workflow?claim_id=...`, optionally `&view_report=1`) — it has no sidebar link |
+
+12 routes total, but **only 11 appear in the sidebar** — `ClaimWorkflow` is a detail view, not a nav destination. Getting this wrong (adding a "Claim Workflow" sidebar item) is a common source of UI drift from the real app.
+
+## Sidebar (`components/layout/Sidebar.jsx`)
+
+Five nav sections, in this exact order, each item as `label — lucide-react icon — path`:
+
+| Section | Items |
+|---|---|
+| **Main** | Dashboard — `LayoutDashboard` — `/` · Upload — `Upload` — `/upload` · Processing — `Cpu` — `/processing` |
+| **Data** | Extraction — `FileSearch` — `/extraction` · Validation — `CheckCircle` — `/validation` · Documents — `FileText` — `/documents` |
+| **Intelligence** | Agents — `Bot` — `/agents` · Analytics — `BarChart2` — `/analytics` · Templates — `FileCode` — `/templates` |
+| **Claims** | Claim Process — `ClipboardList` — `/claim-process` |
+| **System** | Settings — `Settings` — `/settings` |
+
+- **Badges**: "Validation" shows `reviewDocs.length` (docs with status `awaiting_review`/`duplicate`); "Processing" shows `pendingDocs.length`. No other item ever shows a badge.
+- **Collapse**: toggled by a `ChevronLeft`/`ChevronRight` button, persisted to `localStorage['sidebar-collapsed']` (`'true'`/`'false'`). Expanded width `220px` (`--sidebar-w`), collapsed `64px` (`--sidebar-collapsed-w`).
+- **Mobile (< 768px)**: sidebar becomes a fixed off-canvas drawer (class `.mobile-open`) with a dimming `.sidebar-overlay`, opened by the TopBar hamburger; auto-closes on route change and on Escape.
+- **Logo block**: inline 20×20 SVG mark + two-line wordmark "Intelligent Document" / "Processing" + tagline "IDP Platform · v2.0".
+- **Footer**: static text "10 Agents Active" / "All systems nominal" with a pulsing dot — this is hardcoded, **not** derived from the live agent count.
+
+## TopBar (`components/layout/TopBar.jsx`)
+
+- Per-route breadcrumb title/sub from a static `PAGE_META` map: `/` → "Dashboard" / "Overview & live stats", `/upload` → "Upload" / "Add documents to the pipeline", `/processing` → "Processing" / "Live workflow orchestration", `/extraction` → "Extraction" / "AI-extracted structured data", `/validation` → "Validation" / "Human review queue", `/documents` → "Documents" / "All processed files", `/agents` → "Agents" / "Multi-agent system overview", `/analytics` → "Analytics" / "Processing metrics & trends", `/settings` → "Settings" / "Configure system preferences". Routes **not** in this map (`/templates`, `/claim-process`, `/claim-workflow`) fall back to the generic title "IDP Platform" with an empty subtitle — a known gap in the real app, not an oversight to "fix" when recreating it.
+- A spinning "syncing" indicator shows while `useDocumentList().loading` is true.
+- **Theme toggle** (`Sun` when dark / `Moon` when light) writes `document.documentElement.dataset.theme` and persists to `localStorage['idp-theme']`. `getInitialTheme()`/`applyTheme()` are exported and also called once at module load in `AppShell.jsx` (before first paint) to avoid a flash of the wrong theme; default follows OS `prefers-color-scheme` if nothing is stored.
+- **Notification bell** shows a dot badge when `reviewDocs.length > 0`; click opens a dropdown listing up to 5 pending-review documents (each click navigates to `/validation`), with a "View all N →" row if there are more than 5.
+- **User avatar**: a styled circle with a `User` icon — decorative only, not a functional menu (there is no authentication in this app; see Section 13).
 
 ## Component Hierarchy
 
 ```mermaid
 graph TB
-    App["App<br/>RouterProvider + AppProvider"]
+    App["App<br/>createBrowserRouter + AppProvider"]
     Shell["AppShell<br/>Layout wrapper"]
-    SB["Sidebar<br/>Collapsible nav"]
-    TB["TopBar<br/>Theme + breadcrumbs"]
-    Toast["ToastContainer<br/>Notifications"]
-    Outlet["Outlet<br/>Page content"]
-    
+    SB["Sidebar<br/>5 sections, collapsible, mobile drawer"]
+    TB["TopBar<br/>Theme toggle + breadcrumb + notifications"]
+    Toast["ToastContainer"]
+    Outlet["Outlet"]
+
     App --> Shell
     Shell --> SB
     Shell --> TB
     Shell --> Outlet
     Shell --> Toast
-    
+
     Outlet --> Dashboard
     Outlet --> Upload
     Outlet --> Processing
@@ -538,80 +568,217 @@ graph TB
     Outlet --> Documents
     Outlet --> Agents
     Outlet --> Analytics
-    Outlet --> Settings
     Outlet --> Templates
+    Outlet --> Settings
     Outlet --> ClaimProcess
     Outlet --> ClaimWorkflow
 ```
 
+`AppShell.jsx`'s exact JSX (order matters for CSS/z-index — reproduce verbatim):
+```jsx
+<>
+  <Sidebar mobileOpen={mobileOpen} onMobileClose={closeMobile} />
+  <div className="main-wrapper">
+    <TopBar onMobileMenuToggle={openMobile} />
+    <main className="main-content"><Outlet /></main>
+    <div className="sunset-stripe" aria-hidden="true" />
+  </div>
+  <ToastContainer />
+</>
+```
+
 ## Layout System
 
-The `AppShell` component defines the master layout:
-- **Sidebar** (left): Collapsible navigation with 5 sections (Main, Data, Intelligence, Claims, System). Shows badges for pending/review counts. Persists collapsed state in localStorage.
-- **TopBar** (top): Theme toggle (dark/light), breadcrumbs, search. Theme is applied immediately before first render via `applyTheme()`.
-- **Main Content** (center): `<Outlet />` renders the active page.
-- **Toast Container** (overlay): Renders toast notifications from AppStore.
-- **Sunset Stripe** (bottom): Decorative gradient stripe at page foot.
+- `#root { display:flex; height:100vh; overflow:hidden }` — sidebar + `.main-wrapper` as a flex row.
+- `.main-wrapper { flex:1; display:flex; flex-direction:column; min-width:0; overflow:hidden }`.
+- `.main-content { flex:1; overflow-y:auto; padding:24px }` (16px under 768px).
+- `.topbar { height:60px (--topbar-h); position:sticky; top:0; backdrop-filter:blur(16px) }`.
+- Responsive breakpoints: `1100px` (stat/grid rows collapse to 2 columns), `800px` (3-col grids → 2-col), `768px` (sidebar becomes the off-canvas drawer described above, hamburger appears), `600px` (grids collapse further to 1–2 columns).
 
 ## Design System
 
-The CSS design system is split into 4 files loaded in order by `main.jsx`:
+Four CSS files, loaded in this **exact order** by `main.jsx` — order matters because later files override earlier ones and nothing is scoped/modularized:
 
-1. **`tokens.css`** (~11KB): CSS custom properties for colors, spacing, typography, shadows, breakpoints, and theme variables. Supports both `:root` (dark theme default) and `[data-theme="light"]`.
+```js
+import './styles/tokens.css'
+import './styles/animations.css'
+import './styles/layout.css'
+import './styles/components.css'
+import App from './App.jsx'
+```
 
-2. **`animations.css`** (~5KB): Keyframe animations including fade-in, slide-in, scale-up, pulse, shimmer, gradient rotation, and skeleton loading.
+1. **`tokens.css`** (290 lines) — design tokens, font imports, both theme palettes.
+2. **`animations.css`** (169 lines) — keyframes + animation utility classes.
+3. **`layout.css`** (341 lines) — sidebar/topbar dimensions, `.main-wrapper`, grid utilities, responsive rules.
+4. **`components.css`** (2222 lines) — every card/button/form/table/badge/modal/chart/page-specific style.
 
-3. **`layout.css`** (~12KB): Structural layout — sidebar dimensions, main-wrapper, content grid, responsive breakpoints, mobile overlay.
+Two other CSS files exist but are **not part of the design system and should not be recreated as if they mattered**: `index.css` is intentionally near-empty (`body { margin: 0 }` — its own comment says imports are handled in `main.jsx`) and is not even imported by `main.jsx`; `App.css` is unused leftover `create-vite` scaffold CSS (`.hero`, `#docs`, `.ticks`, etc.) targeting markup that no longer exists in the app.
 
-4. **`components.css`** (~82KB): Component-level styles — cards, buttons, forms, tables, badges, modals, dropzones, charts, pipeline steps, and all page-specific styles.
+**Fonts** (Google Fonts `@import` in `tokens.css`): `Playfair Display` (serif — weights 400/500/700 + italic 400 — used for display headings via `.font-display`), `Inter` (variable weight — primary UI font, `--font-ui`), `JetBrains Mono` (`--font-mono` — code/JSON blocks). This 3-font pairing is a specific, deliberate choice — substituting generic system fonts will visibly change the app's character (the serif display font in particular is used for hero numbers/titles).
+
+**Theme model — corrected from the original spec**: **Light is the default theme** (`:root` selector), a warm palette internally named "Mistral Warm Sunset." Dark mode is the override, selected via `[data-theme="dark"]`. There is **no** `[data-theme="light"]` block — light IS `:root`. (The original version of this document incorrectly assumed dark-as-default; that produced a visibly wrong color scheme when rebuilt.)
+
+Key token values (light `:root` / dark `[data-theme="dark"]`):
+
+| Token | Light | Dark |
+|---|---|---|
+| `--bg` | `#fffaeb` | `#110a00` |
+| `--surface` | `#ffffff` | `#1a1008` |
+| `--card` | `#ffffff` | `#1e1306` |
+| `--border` | `#e6d5a8` | `#3a2810` |
+| `--text` | `#1f1f1f` | `#f5e8d0` |
+| `--text-dim` | `#4a4a4a` | `#b8956a` |
+| `--muted` | `#8a8a8a` | `#7a6040` |
+| `--accent` (brand) | `#fa520f` | `#fb6b2d` |
+| `--accent-hover` | `#cc3a05` | `#fa520f` |
+| `--accent2` | `#ff8105` | `#ff9420` |
+| `--accent3` | `#ffb83e` | `#ffc14a` |
+| `--accent4` | `#ffd900` | `#ffe050` |
+| `--success` | `#10b981` | `#10b981` |
+| `--warn` | `#f59e0b` | `#fbbf24` |
+| `--danger` | `#ef4444` | `#f87171` |
+| `--info` | `#3b82f6` | `#60a5fa` |
+| `--grad-brand` | `linear-gradient(135deg,#fa520f 0%,#ff8105 100%)` | `linear-gradient(135deg,#fb6b2d 0%,#ff9420 100%)` |
+| `--grad-sunset` | `linear-gradient(90deg,#fa520f 0%,#ffa110 30%,#ffb83e 60%,#ffd900 80%,#fff8e0 100%)` | same |
+
+Layout tokens (theme-independent): `--sidebar-w: 220px`, `--sidebar-collapsed-w: 64px`, `--topbar-h: 60px`, `--radius: 12px`, `--radius-sm: 8px`, `--radius-lg: 16px`, `--radius-xl: 20px`. Base font size `14px` on `<html>`. Motion: `--dur: 160ms`, `--dur-md: 240ms`, `--dur-lg: 360ms` with `cubic-bezier` easing curves.
+
+Keyframes defined in `animations.css`: `border-rotate`, `pulse`, `ping`, `spin`, `shimmer`, `shimmer-line`, `slide-in`, `slide-right`, `slide-up`, `fade-in`, `toast-in`, `progress-fill`, `glow-pulse`, `float`, `nav-indicator-in`, `count-pop`, plus a `prefers-reduced-motion: reduce` block that collapses every animation/transition to `0.01ms`.
 
 ## State Management
 
-State is managed through React Context API + `useReducer` in `AppStore.jsx`:
+Context API + `useReducer` in `store/AppStore.jsx`.
 
-### State Shape
+### State Shape (exact defaults)
 ```javascript
 {
-  documents: [],              // Array of document objects
-  activeDocId: null,          // Currently selected document ID
-  pollingIds: Set,            // Document IDs being polled
-  toasts: [],                 // Active toast notifications
-  loading: false,             // Global loading state
-  confidenceMode: 'word',     // 'word' | 'field' confidence display
-  fieldHighlightThreshold: 95,  // Below this → amber highlight
-  autoApproveThreshold: 80,     // Below this → review queue
-  confHighThreshold: 90,        // Green confidence badge
-  confMedThreshold: 70,         // Amber badge (below = red)
+  documents: [],
+  activeDocId: null,
+  pollingIds: new Set(),
+  toasts: [],
+  loading: false,
+  confidenceMode: localStorage.getItem('idp-confidence-mode') || 'word',  // 'word' | 'page' | 'both'
+  fieldHighlightThreshold: 95,   // localStorage key 'idp-field-highlight-threshold'
+  autoApproveThreshold: 80,      // localStorage key 'idp-auto-approve-threshold'
+  confHighThreshold: 90,         // localStorage key 'idp-conf-high-threshold'
+  confMedThreshold: 70,          // localStorage key 'idp-conf-med-threshold'
 }
 ```
+(`confidenceMode` supports a third value, `'both'`, not just `'word'`/`'field'` as previously documented — see Settings page below.)
 
-### Actions
-- `SET_DOCUMENTS` / `ADD_DOCUMENT` / `UPDATE_DOCUMENT` / `REMOVE_DOCUMENT`
-- `SET_ACTIVE_DOC` / `ADD_POLLING` / `REMOVE_POLLING`
-- `ADD_TOAST` / `REMOVE_TOAST` / `SET_LOADING`
-- `SET_CONFIDENCE_MODE` / `SET_FIELD_HIGHLIGHT_THRESHOLD` / `SET_AUTO_APPROVE_THRESHOLD`
-- `SET_CONF_HIGH_THRESHOLD` / `SET_CONF_MED_THRESHOLD`
+### Reducer Actions (exact type strings)
+`SET_DOCUMENTS`, `ADD_DOCUMENT`, `UPDATE_DOCUMENT`, `REMOVE_DOCUMENT`, `SET_ACTIVE_DOC`, `ADD_POLLING`, `REMOVE_POLLING`, `ADD_TOAST`, `REMOVE_TOAST`, `SET_LOADING`, `SET_CONFIDENCE_MODE`, `SET_FIELD_HIGHLIGHT_THRESHOLD`, `SET_AUTO_APPROVE_THRESHOLD`, `SET_CONF_HIGH_THRESHOLD`, `SET_CONF_MED_THRESHOLD`.
 
-### Derived State
-- `pendingDocs`: Documents in processing states
-- `reviewDocs`: Documents awaiting human review
-- `completedDocs`: Successfully processed documents
+### Exposed API (`useApp()` — throws `Error('useApp must be inside AppProvider')` if used outside `<AppProvider>`)
+`setDocuments`, `addDocument`, `updateDocument`, `removeDocument`, `setActiveDoc`, `addPolling`, `removePolling`, `toast(msg, type='info', duration=4000)` (module-level incrementing id, auto-dismisses via `setTimeout`), `dismissToast(id)`, `setConfidenceMode`, `setFieldHighlightThreshold`, `setAutoApproveThreshold`, `setConfHighThreshold`, `setConfMedThreshold`.
 
-Threshold values are persisted to `localStorage` and restored on page load.
+### Derived State (recomputed every render, not stored in reducer state)
+```js
+pendingDocs   = documents.filter(d => ['pending','pre_validating','processing','preprocessing','classifying','fraud_checking','extracting','validating'].includes(d.status))
+reviewDocs    = documents.filter(d => ['awaiting_review','duplicate'].includes(d.status))
+completedDocs = documents.filter(d => d.status === 'completed')
+```
+
+Only the 5 threshold/mode fields persist to `localStorage`; `documents`, `toasts`, and `pollingIds` are session-only.
 
 ## API Integration
 
-All backend communication happens through `api/client.js`, which:
-- Creates an Axios instance with base URL from `VITE_API_BASE_URL` env var (default: `http://localhost:8000/api/v1`)
-- Sets a 30-second default timeout
-- Normalizes error responses via response interceptor
-- Exports 30+ typed functions covering all API endpoints
+`src/api/client.js` — Axios instance, base URL `import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'`, 30s default timeout (longer per-call overrides: 300s for batch upload, 120s for template generation / signature verification / claim document upload). A response interceptor normalizes every error to `err.response.data.detail || err.response.data.message || err.message`.
+
+**Exactly 30 exported functions** (not "30+"):
+
+| Function | Method + Path |
+|---|---|
+| `uploadDocument(file, onProgress)` | `POST /documents/upload` |
+| `uploadDocumentsBatch(files, onProgress)` | `POST /documents/upload/batch` |
+| `getStatus(documentId)` | `GET /documents/{id}/status` |
+| `listDocuments(page=1, limit=50)` | `GET /documents` |
+| `getExtractedData(documentId)` | `GET /documents/{id}/extracted` |
+| `updateExtractedData(documentId, validatedData)` | `PUT /documents/{id}/extracted` |
+| `resumeDuplicate(workflowRunId, override)` | `POST /workflow/{id}/resume/duplicate` |
+| `resumeReview(workflowRunId, approved, corrections, rejectionReason)` | `POST /workflow/{id}/resume/review` |
+| `getAgents()` | `GET /agents` |
+| `deleteDocument(documentId)` | `DELETE /documents/{id}` |
+| `getDocumentFileUrl(documentId)` | URL builder only → `/documents/{id}/file` |
+| `getOcrBlocks(documentId)` | `GET /documents/{id}/ocr-blocks` |
+| `getTemplates()` | `GET /templates` |
+| `saveTemplates(templatesData)` | `PUT /templates` |
+| `generateTemplateFromSample(name, file, isKyc, kycBoxes)` | `POST /templates/generate` |
+| `deleteTemplate(name)` | `DELETE /templates/{name}` |
+| `getCropUrl(documentId, filename)` | URL builder only → `/documents/{id}/crops/{filename}` |
+| `verifySignature(documentId, referenceFile, verificationType='signature')` | `POST /documents/{id}/verify-signature` |
+| `getNormConfig()` | `GET /settings/normalization` |
+| `saveNormConfig(config)` | `PUT /settings/normalization` |
+| `getClassificationConfig()` | `GET /settings/classification` |
+| `saveClassificationConfig(docTypes)` | `PUT /settings/classification` |
+| `createClaim(payload)` | `POST /claims` |
+| `listClaims()` | `GET /claims` |
+| `getClaimStatus(claimId)` | `GET /claims/{id}/status` |
+| `runClaimWorkflow(claimId)` | `POST /claims/{id}/run` |
+| `getClaimReport(claimId)` | `GET /claims/{id}/report` |
+| `submitClaimDecision(claimId, decision, notes='')` | `POST /claims/{id}/decision` |
+| `deleteClaim(claimId)` | `DELETE /claims/{id}` |
+| `uploadClaimDocument(claimId, file, docType, onProgress)` | `POST /documents/upload?claim_id&doc_type` |
 
 ### Custom Hooks
 
-- **`useDocumentPoller(documentId)`**: Polls `/documents/{id}/status` every 2.5 seconds. Updates AppStore on each tick. Shows toasts on status transitions. Stops polling at terminal statuses (completed, rejected, error, deleted). Implements error backoff (doubles interval on failure).
+- **`useDocumentPoller(documentId)`** — on mount, registers via `addPolling(documentId)`, then polls `getStatus` every **2500ms**, pushing results into AppStore via `updateDocument`. Fires a toast only on a status *transition* (not on every poll): `completed` → success "Document processed successfully!"; `awaiting_review` → warn "Document needs human review."; `rejected` → error with the rejection reason; `error` → error with the message. Stops and calls `removePolling` at terminal statuses (`completed`, `rejected`, `error`, `deleted`). On a failed request it does **not** exponentially back off — it retries once at a fixed `2500ms × 2 = 5000ms`, then returns to normal cadence on the next successful poll. Returns nothing; it's a pure side-effect hook.
+- **`useDocumentList()`** — `refresh(page=1, limit=100)` calls `listDocuments`, writes results into AppStore via `setDocuments`, toasts on failure. No internal interval — callers (Dashboard, Analytics) set up their own `setInterval`. Returns `{ refresh, loading, error }`.
 
-- **`useDocumentList()`**: Wraps `listDocuments()` API call. Syncs results to AppStore via `setDocuments()`. Returns `{ refresh, loading, error }`.
+## Reusable UI Components (`components/ui/`)
+
+| Component | Props | Behavior |
+|---|---|---|
+| `ConfidenceBar` | `label`, `value` (0–1), `color?` | Labeled bar; auto-colors green ≥90%, amber ≥70%, else red, unless `color` overrides |
+| `DonutChart` | `data: {label,value}[]` | Canvas-drawn donut (120×120), 7-color fixed palette cycling by index, center total, legend list; shows a "No data yet" empty state when total is 0 |
+| `Modal` | `title`, `subtitle?`, `onClose?`, `children`, `footer?`, `wide?` | Overlay dialog, click-outside-to-close (only if `onClose` given), scrollable body capped at 70vh |
+| `PipelineSteps` | `status` (document status string) | 8-node tracker: Intake → Pre-Validate → Preprocess → Classify → Extract → Validate → Review → Output, each step `done`/`running`/pending based on a status→index map |
+| `RegionSelector` | `imageUrl`, `regions: {signature,photo}`, `onChange` | Percentage-based drag-to-draw box selector (min 2% w/h) for marking KYC signature/photo regions before template generation |
+| `StatCard` | `icon`, `iconVariant?`, `label`, `value`, `unit?`, `delta?`, `deltaType?` | Icon chip + label + big value + optional delta with trend icon |
+| `StatusBadge` | `status` | Maps 14 known document statuses (+ gray fallback) to a label/color-class/icon — see table below |
+| `ToastContainer` | — (reads AppStore) | Renders `toasts`, icon per type (`success`/`error`/`warn`/`info`), dismiss button |
+
+`StatusBadge` status map (exact): `pending`→"Pending" gray · `pre_validating`→"Pre-Validating" cyan (`Shield`) · `preprocessing`→"Preprocessing" purple (`Wand2`) · `processing`→"Intake" blue (`Upload`) · `classifying`→"Classifying" blue (`Bot`) · `fraud_checking`→"Fraud Checking" blue (`Shield`) · `extracting`→"Extracting" blue (`FileSearch`) · `validating`→"Validating" blue (`CheckCircle`) · `awaiting_review`→"Needs Review" yellow (`AlertTriangle`) · `duplicate`→"Duplicate" yellow (`AlertTriangle`) · `completed`→"Completed" green (`Check`) · `rejected`→"Rejected" red (`X`) · `failed`→"Failed" red (`AlertCircle`) · `error`→"Error" red (`AlertCircle`) · `deleted`→"Deleted" gray.
+
+## Pages — Exact Content
+
+*Each page's real headings, sections, and behavior — the previous one-line-per-page summary undershot enough detail to reproduce the actual UI. Reference implementation: `frontend-v2/src/pages/*.jsx`.*
+
+### `/` — Dashboard (300 lines)
+Hero eyebrow "IDP Platform · v2.0", live-computed title (`"{n} document(s) processed"`) and subtitle (`"{success%} success · {n} pending review · {n} errors"`). Sections: **Recent Documents** table (click row → `/extraction`), **Document Types** `DonutChart`, **Active Pipeline** (only rendered while a document is mid-processing — shows `PipelineSteps` + a pulsing "Live" chip), **Processing Status Breakdown** (4 `ConfidenceBar` rows: Completed/In Review/Processing/Errors), **Recent Activity** feed (last 8 docs, clickable). 4 `StatCard`s: Total Documents, Success Rate, Pending Review, Errors. Polls/refreshes every 10s via `setInterval`.
+
+### `/upload` — Upload (569 lines)
+No `<h1>` — the dropzone itself is the hero: "Drag & drop documents here or **browse files**" + description + a "Batch Ingestion Mode (Up to 20 files) · Concurrently Processed via Mistral AI" badge strip. Accepts PDF/JPG/PNG/WEBP/DOCX, hard cap `MAX_BATCH = 20`. On file selection, an **Upload Queue** card appears (per-file rows, batch progress bar with %, "Send N File(s) as Batch to AI Pipeline" button), followed post-upload by a **Batch Result** card (Submitted/Failed/Total stats, "View Processing →" / "Back to Dashboard" / conditional "Retry N Failed" buttons). When the queue is empty, a static **AI Processing Pipeline** info card lists the 6 stages: Intake, Classify, Extract, Validate, Review, Output (each with a one-line description). Uses `uploadDocumentsBatch`; mounts one `useDocumentPoller` per successfully uploaded id.
+
+### `/processing` — Processing (200 lines)
+**Live Processing Pipeline** card — `PipelineSteps` for the current "featured" active document, with an empty state ("No active processing… Upload Documents" button) when nothing is running. **Processing Queue** table — only pending/in-flight docs, with a "Refresh" button. **All Documents** mini table — first 10 documents with a "Full List →" link to `/documents`. Rejection/error/failed rows use an `ExpandableReason` component (80-char truncation + "Show more"/"Show less").
+
+### `/extraction` — Extraction (2076 lines, the most complex page)
+Document tabs across `completedDocs` (up to 8). Two-column **sticky** layout: **left** = `DocumentViewer` (PDF via `<object>`/iframe fallback, image, or unsupported-file placeholder; for images, a `<canvas>` overlay draws blue OCR bounding-box highlights for whichever field is currently hovered) plus a confidence banner (green "High Confidence" / amber "Review Recommended"); **right** = **Extracted Data** panel with Edit Fields / Copy JSON / Export actions, fields auto-grouped into collapsible sections (Vendor, Billing, Financial, Header, Other — grouped by key-name heuristics), and a **Raw Extraction (OCR)** JSON dump. For KYC documents, an **Identity Verification** section adds signature/photo crop cards with drag-drop reference-image upload and full forensic verdict panels: `SignatureVerdictPanel` (DINOv2 + LLM combined score, 5-dimension structural analysis, 4-dimension spatial analysis, 5 authenticity flags, unique-feature notes) and `FaceVerdictPanel` (3-module: geometry/eyes/nose, mouth/ears/jaw, age-variation analysis, plus a final accept/review/reject recommendation). A "full-screen" toggle expands the document viewer over the whole page. Table-shaped and array-shaped fields get specialized inline editors (add/remove row, add/remove chip) when editing.
+
+### `/validation` — Validation (652 lines)
+**Pending Human Review** — one `ReviewCard` per `reviewDocs` entry, each showing up to 8 extracted key/value pairs and action buttons: Approve / Reject / Edit & Approve (or Override Duplicate / Reject for duplicate-flagged docs). Reject opens a confirmation modal with an optional reason textarea. Edit & Approve opens `InlineCorrectionsEditor` — tracks only changed fields, shows a "reset" affordance per changed field and an "Original: {value}" hint. Empty state: "All clear! No documents are currently awaiting review." Sidebar cards: static **Validation Rules** checklist (4 rules) and a **How Review Works** explainer.
+
+### `/documents` — Documents (206 lines)
+Single card "All Documents", status filter pill bar (`all/pending/processing/awaiting_review/completed/rejected/failed/error`, each showing a live count), paginated table (20/page: `LIMIT=20`) with filename (click → `/extraction`) / type / status / truncated id / delete action (native `confirm()` + per-row spinner). Expandable long error/rejection reasons.
+
+### `/agents` — Agents (462 lines)
+Live-fetched (`GET /agents`) grid of `AgentCard`s (step badge, icon, name/role/description, tools rendered as `λ tool_name()`, and — for real Mistral agents — a deep link to the Mistral Studio playground). A skeleton grid shows while loading. Bottom section: **Agent Collaboration Graph** — a vertical 10-node pipeline built dynamically from whichever agent keys the backend actually returns (Intake → Pre-Validate → Preprocess(conditional) → Classify → Fraud Check(conditional, "KYC Only") → extractor group(conditional fan-out) → Validate → Auto-Verify(conditional, "KYC Only") → Review("‖ Human Review" tag) → Output).
+
+### `/analytics` — Analytics (119 lines)
+4 `StatCard`s (Total Documents, Success Rate %, Rejection Rate %, In Pipeline), side-by-side **Document Types** `DonutChart` and **Status Distribution** local bar chart, and a **Performance Breakdown** card with 4 `ConfidenceBar` rows (Success/Rejection/Review/Error rate). Everything is derived client-side from `documents` already in the store — there is no dedicated analytics API endpoint.
+
+### `/templates` — Templates (835 lines)
+Per-document-type tabs (label = Title-Cased key + " Template", KYC types get a "KYC" chip). Header stat pills: Total/Required/Optional field counts, "Create Template" button. Fields table (Field Name/Key, Type, Description, Highlight Threshold, Required, Actions) with a live search filter. **Add/Edit Extraction Field** modal: field key (snake_case validated, locked once editing), display label, data type select (`Text`/`Number`/`Date`/`Boolean`/`Array of Text`/`Array of Objects`), description, custom highlight threshold override, required checkbox. **Create Template from Sample Document** modal: template name, "KYC Identity Document" checkbox, sample file dropzone, and — only for KYC + image samples — a `RegionSelector` panel to draw signature/photo regions before calling `generateTemplateFromSample`.
+
+### `/settings` — Settings (1124 lines)
+`<h1>` "Settings" + "Reset defaults" button. Left nav, 4 sections (`NAV`, exact labels): **Confidence Scores** ("Granularity & display mode" — toggle cards for word-wise / page-wise, both can be active simultaneously — `confidenceMode` supports `'word' | 'page' | 'both'`), **Thresholds** ("Highlight & approval limits" — Auto-Approve Threshold slider [50–100, presets 70/75/80/85/90], Field Value Highlight slider [50–100, presets 80/85/90/95/100], High/Medium confidence-badge-color sliders with cross-validation that High > Medium), **Normalization Format** ("Date, number & name rules" — date format picker [ISO/US/EU/Keep Raw], number format [float/integer/string], name casing [Title/UPPER/Keep Raw], name order [6 options], custom rules textarea, live prompt preview — persisted via `/settings/normalization`, independent of AppStore), **Classification Types** ("Supported document types" — add/remove doc types with snake_case normalization, persisted via `/settings/classification`; default/reset list of 11: `invoice, pan_card, claim_form, policy_document, id_proof, medical_report, lab_reports, prescription_records, bills_invoices, disability_certificate, legal_letter`).
+
+### `/claim-process` — Claim Process (574 lines)
+Chip "Claims Dashboard", title "Claim Approval **Requests**" (gradient-styled word), "+ Create New Request" button. 4 stat tiles: Total Claims, Pending/Ready, Processing, Total Value (compact currency ₹). Claim cards (avatar, name, claim ID, priority dot, `{claim_type} · Policy {number} · {date}`, status pill with 14 status→label/icon mappings, expand/delete/process/view-report actions). Expanded panel lists per-document extraction status ("Documents (N/M extracted)"). **Create New Claim Request** modal: claimant name, priority select (Low/Medium/High/Urgent), description textarea, multi-file drag-drop upload (no manual doc-type picker — classification happens automatically server-side). Polls the claim list every **6000ms** while any claim is mid-pipeline, and the expanded claim's status every **5000ms**. This page does **not** use AppStore — it's entirely local component state.
+
+### `/claim-workflow` — Claim Workflow (806 lines, no sidebar entry)
+Reached via `?claim_id=...` (optionally `&view_report=1` to view a finished report directly). Renders the live 6-agent pipeline as a node graph (Claim Integrity → Medical Check → Treatment Review → Disability Check → Litigation Scan → Report Generation) with running/completed/waiting states and animated connectors, plus an **Agent Inspector** panel with 3 tabs (Agent Thought, Output, Metadata) and a step-jump dropdown. Polls claim status every **4000ms** until terminal. On completion, renders a **Claim Analysis Complete** summary: overall status badge (Approve/green, Reject/red, "Review Before Approval"/amber), an **Agent Results** accordion (PASS/FAIL/FLAG per agent), an **AI Suggestion** box, and an **Adjuster Decision** panel (Accept Claim / Reject Claim buttons → `submitClaimDecision`). This page also does not use AppStore. Note: it imports `INITIAL_STEPS`/`stepDuration` from `pages/claimData.js`, but those are unused mock/demo data left over from an earlier prototype — the real UI is entirely driven by live API responses (`getClaimStatus`, `getClaimReport`); do not recreate the fake step timings/output when rebuilding this page.
 
 ---
 
@@ -885,22 +1052,38 @@ Background asyncio task that checks all provider health every 30 seconds with a 
 
 ## Frontend V2 — Key Files
 
-### `src/App.jsx`
-- **Purpose**: Router definition
-- **12 routes** nested under `AppShell` layout
-- **State**: Wrapped in `AppProvider` for global context
+> Full per-page and per-component breakdown (exact headings, state, API calls, hardcoded lists) lives in Section 4 — this subsection covers the app-shell/infrastructure files only.
 
-### `src/api/client.js`
-- **Purpose**: Backend API client
-- **30+ exported functions** covering documents, claims, workflow, settings, templates
-- **Error normalization**: Extracts `detail` or `message` from error responses
-- **Key functions**: `uploadDocument`, `uploadDocumentsBatch`, `getStatus`, `listDocuments`, `getExtractedData`, `updateExtractedData`, `resumeDuplicate`, `resumeReview`, `createClaim`, `runClaimWorkflow`, `getClaimReport`, `submitClaimDecision`
+### `src/App.jsx` (44 lines)
+- **Purpose**: Router definition via `createBrowserRouter` + `<RouterProvider>`
+- **12 routes** nested under a single root route rendering `<AppShell />` (see routing table in Section 4)
+- **State**: Entire tree wrapped in `<AppProvider>` for global context
 
-### `src/store/AppStore.jsx`
-- **Purpose**: Global state management
-- **Pattern**: React Context + useReducer
-- **Persistence**: Confidence thresholds saved to localStorage
-- **Derived state**: `pendingDocs`, `reviewDocs`, `completedDocs` computed from documents array
+### `src/components/layout/AppShell.jsx` (37 lines)
+- **Purpose**: Master layout — `<Sidebar>` + `.main-wrapper` (`<TopBar>` + `<main><Outlet/></main>` + decorative `.sunset-stripe`) + `<ToastContainer>`
+- Calls `applyTheme(getInitialTheme())` once at module load, before first render, to avoid a flash of the wrong theme
+- Local `mobileOpen` state for the sidebar drawer; closes on Escape key
+
+### `src/components/layout/Sidebar.jsx` (171 lines)
+- **Purpose**: Collapsible left nav, 5 sections (Main/Data/Intelligence/Claims/System), 11 items total (see Section 4 for the exact list)
+- Collapse state in `localStorage['sidebar-collapsed']`; badges on Validation (`reviewDocs.length`) and Processing (`pendingDocs.length`) only
+
+### `src/components/layout/TopBar.jsx` (212 lines)
+- **Purpose**: Breadcrumb title/sub (static `PAGE_META` map, 9 of 12 routes covered), theme toggle (`localStorage['idp-theme']`), sync spinner, notification bell/dropdown (top 5 `reviewDocs`), decorative user avatar
+- Exports `applyTheme`/`getInitialTheme`, reused by `AppShell.jsx`
+
+### `src/api/client.js` (381 lines)
+- **Purpose**: Backend API client — single Axios instance, base URL `VITE_API_BASE_URL` (default `http://localhost:8000/api/v1`), 30s default timeout
+- **Exactly 30 exported functions** covering documents, claims, workflow, settings, templates (full method+path table in Section 4)
+- **Error normalization**: response interceptor extracts `detail` → `message` → generic Axios error, in that priority order
+
+### `src/store/AppStore.jsx` (165 lines)
+- **Purpose**: Global state management — React Context + `useReducer`, 10 initial-state fields, 15 action types (full list in Section 4)
+- **Persistence**: only the 5 confidence/threshold fields go to `localStorage`; `documents`/`toasts`/`pollingIds` are session-only
+- **Derived state**: `pendingDocs`, `reviewDocs`, `completedDocs` recomputed every render from `documents` (not stored in reducer state)
+
+### `src/hooks/useDocumentPoller.js` (62 lines) / `src/hooks/useDocumentList.js` (31 lines)
+- See "Custom Hooks" in Section 4 for exact polling interval (2500ms), backoff behavior (fixed 2× retry, not exponential), and terminal-status set
 
 ---
 
@@ -1978,45 +2161,49 @@ npm install axios react-router-dom lucide-react
 
 ### Step 2: Design System (CSS)
 
-1. Create `src/styles/tokens.css` — CSS custom properties for dark/light themes
-2. Create `src/styles/animations.css` — Keyframe animations
-3. Create `src/styles/layout.css` — Sidebar, main-wrapper, grid system
-4. Create `src/styles/components.css` — All component styles
+**Critical for matching the real UI — get this step wrong and the whole app looks different even if every component is structurally correct.**
+
+1. Create `src/styles/tokens.css` — CSS custom properties for **light-as-default** (`:root`) and dark override (`[data-theme="dark"]`, NOT `[data-theme="light"]`). Light theme is the "Mistral Warm Sunset" palette: `--bg:#fffaeb`, `--accent:#fa520f`, `--text:#1f1f1f`, warm cream/orange surfaces throughout (full token table in Section 4). Import 3 Google Fonts: `Playfair Display` (display headings), `Inter` (UI, variable weight), `JetBrains Mono` (code/JSON).
+2. Create `src/styles/animations.css` — 16 keyframes (`border-rotate`, `pulse`, `ping`, `spin`, `shimmer`, `shimmer-line`, `slide-in`, `slide-right`, `slide-up`, `fade-in`, `toast-in`, `progress-fill`, `glow-pulse`, `float`, `nav-indicator-in`, `count-pop`) + a `prefers-reduced-motion` override
+3. Create `src/styles/layout.css` — sidebar (220px expanded / 64px collapsed), `.main-wrapper`, 60px sticky topbar, grid utilities, breakpoints at 1100/800/768/600px
+4. Create `src/styles/components.css` — All component styles (~2200 lines in the reference app)
+5. Do **not** wire up `index.css` beyond `body { margin: 0 }`, and do not build on top of the default Vite `App.css` boilerplate — both are effectively unused in the reference app and importing them can leak stray styles
 
 ### Step 3: Entry Points
 
-1. Update `index.html` — Add meta tags, SVG favicon, theme-color
-2. Create `src/main.jsx` — Import CSS files in order, render `<App />`
+1. Update `index.html` — title "Intelligent Document Processing — IDP Platform", meta description, `theme-color` `#080b14`, an inline data-URI SVG favicon (document icon, blue→violet gradient with a cyan checkmark badge — not a separate favicon file)
+2. Create `src/main.jsx` — import CSS in this exact order (`tokens.css` → `animations.css` → `layout.css` → `components.css`), then render `<App />` inside `<StrictMode>`
 
 ### Step 4: State Management
 
-1. Create `src/store/AppStore.jsx` — Context + useReducer with localStorage persistence
+1. Create `src/store/AppStore.jsx` — Context + `useReducer`, 10-field initial state, 15 action types, 5 `localStorage`-persisted fields (confidence mode + 4 thresholds), 3 derived selectors (`pendingDocs`/`reviewDocs`/`completedDocs`) computed from `documents` on every render — see exact shape in Section 4
 
 ### Step 5: API Layer
 
-1. Create `src/api/client.js` — Axios instance + 30+ API functions
-2. Create `src/hooks/useDocumentPoller.js` — Status polling hook
-3. Create `src/hooks/useDocumentList.js` — Document list fetching hook
+1. Create `src/api/client.js` — Axios instance + exactly 30 typed API functions (see full table in Section 4), 30s default timeout with longer overrides for batch upload (300s) and template generation/signature verification/claim uploads (120s)
+2. Create `src/hooks/useDocumentPoller.js` — polls every 2500ms, fixed-2× (not exponential) backoff on failure, stops at 4 terminal statuses, toasts only on status transitions
+3. Create `src/hooks/useDocumentList.js` — one-shot `refresh(page, limit)`, no internal interval; callers own their own polling loop
 
 ### Step 6: Layout Components
 
-1. Create `src/components/layout/AppShell.jsx` — Sidebar + TopBar + Outlet + Toast
-2. Create `src/components/layout/Sidebar.jsx` — Collapsible nav with 5 sections
-3. Create `src/components/layout/TopBar.jsx` — Theme toggle, breadcrumbs, search
+1. Create `src/components/layout/AppShell.jsx` — exact JSX order: `Sidebar` → `.main-wrapper` (`TopBar` + `<main><Outlet/></main>` + `.sunset-stripe`) → `ToastContainer`; call `applyTheme(getInitialTheme())` at module load
+2. Create `src/components/layout/Sidebar.jsx` — 5 sections (Main/Data/Intelligence/Claims/System), 11 nav items (not 12 — `ClaimWorkflow` has no sidebar entry), badges only on Validation/Processing, `localStorage['sidebar-collapsed']`
+3. Create `src/components/layout/TopBar.jsx` — theme toggle (`localStorage['idp-theme']`), static `PAGE_META` breadcrumb map (only 9 routes covered — leave the rest falling back to "IDP Platform"), notification dropdown, decorative avatar
 
 ### Step 7: UI Components
 
-1. Create 8 reusable UI components in `src/components/ui/`:
-   - ConfidenceBar, DonutChart, Modal, PipelineSteps, RegionSelector, StatCard, StatusBadge, ToastContainer
+1. Create 8 reusable UI components in `src/components/ui/` with the exact props/behavior in Section 4's component table:
+   - `ConfidenceBar`, `DonutChart`, `Modal`, `PipelineSteps`, `RegionSelector`, `StatCard`, `StatusBadge` (14-status map), `ToastContainer`
 
 ### Step 8: Pages
 
-1. Create 12 page components in `src/pages/`:
+1. Create 12 page components in `src/pages/` matching the exact headings/sections/behaviors documented per-page in Section 4 ("Pages — Exact Content") — generic placeholder content per page will look and behave visibly differently from the reference app:
    - Dashboard, Upload, Processing, Extraction, Validation, Documents, Agents, Analytics, Settings, Templates, ClaimProcess, ClaimWorkflow
+2. `ClaimProcess.jsx` and `ClaimWorkflow.jsx` intentionally do **not** use the global `AppStore` — they're self-contained with local state and their own polling (6s claim list / 5s expanded claim / 4s workflow status)
 
 ### Step 9: Routing
 
-1. Create `src/App.jsx` — `createBrowserRouter` with 12 routes under AppShell
+1. Create `src/App.jsx` — `createBrowserRouter` with 12 routes under `AppShell`, but only 11 wired into the sidebar (see Step 6)
 
 ### Step 10: Build & Test
 
