@@ -2,7 +2,7 @@ import logging
 from sqlalchemy.future import select
 
 from db.database import AsyncSessionLocal
-from db.models import Document, ExtractedData
+from db.models import Document, ExtractedData, ClaimDocumentLink
 
 logger = logging.getLogger(__name__)
 
@@ -91,11 +91,20 @@ async def persist_final_extraction(
         if doc:
             doc.status = "completed"
             doc.doc_type = doc_type
-            
+
+        # Sync ClaimDocumentLink: update doc_type from 'classification_pending' → real type
+        links_result = await session.execute(
+            select(ClaimDocumentLink).where(ClaimDocumentLink.document_id == document_id)
+        )
+        for link in links_result.scalars().all():
+            if link.doc_type in ("classification_pending", "", None):
+                link.doc_type = doc_type
+            link.synced = "synced"
+
         await session.commit()
-        
+
     return {
-        "success": True, 
-        "document_id": document_id, 
+        "success": True,
+        "document_id": document_id,
         "final_data": final_data
     }

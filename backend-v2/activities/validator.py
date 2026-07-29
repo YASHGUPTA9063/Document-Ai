@@ -162,6 +162,18 @@ async def validator_activity(
             validated_data["signature_image"] = sig_img
         if photo_img is not None:
             validated_data["photo_image"] = photo_img
+
+        # Strictly enforce template fields on validated_data
+        template_fields = get_template_fields(doc_type)
+        if template_fields and isinstance(template_fields, list):
+            allowed_keys = set(
+                (f.get("key") or f.get("name") or str(f)) if isinstance(f, dict) else str(f)
+                for f in template_fields
+            ) | {"signature_image", "photo_image", "signature_detected", "photo_detected"}
+            
+            unwanted = [k for k in list(validated_data.keys()) if k not in allowed_keys]
+            for k in unwanted:
+                validated_data.pop(k, None)
         
         return {
             "is_valid": parsed.get("is_valid", False),

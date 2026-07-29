@@ -1231,6 +1231,7 @@ async def get_claim_status(claim_id: str):
 
     return {
         "claim_id": claim_id,
+        "claim_type": status_info.get("claim_type", claim.claim_type),
         "claim_status": claim.status,
         "agent_results": agent_results,
         "total_docs": status_info["total_docs"],
@@ -1238,6 +1239,9 @@ async def get_claim_status(claim_id: str):
         "failed_docs": status_info["failed_docs"],
         "ready_to_process": status_info["ready_to_process"],
         "doc_statuses": status_info["doc_statuses"],
+        "required_docs": status_info.get("required_docs", []),
+        "missing_required_count": status_info.get("missing_required_count", 0),
+        "all_required_completed": status_info.get("all_required_completed", False),
     }
 
 
@@ -1254,6 +1258,13 @@ async def run_claim_workflow(claim_id: str):
         raise HTTPException(
             status_code=409,
             detail=f"Claim is not ready to process. Current status: {claim.status}"
+        )
+
+    status_info = await claim_db.get_claim_extraction_status(claim_id)
+    if status_info.get("missing_required_count", 0) > 0 and claim.status != "failed":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot run claim processing. {status_info['missing_required_count']} required document(s) are missing or pending extraction."
         )
 
     try:
@@ -1281,6 +1292,60 @@ async def run_claim_workflow(claim_id: str):
         return {"claim_id": claim_id, "workflow_run_id": run_id, "status": "processing"}
     except Exception as e:
         logger.error(f"Failed to start claim workflow for {claim_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/claims/{claim_id}/rerun")
+async def rerun_claim_workflow(claim_id: str):
+    """
+    Resets a completed/approved/rejected/failed claim back to 'ready'
+    and re-fires the claim_processing_workflow.
+    Deletes the existing report so the workflow starts fresh.
+    """
+    from sqlalchemy.future import select as _sel
+    from db.models import Claim as _Claim, ClaimReport as _CR
+
+    claim = await claim_db.get_claim(claim_id)
+    if not claim:
+        raise HTTPException(status_code=404, detail=f"Claim {claim_id} not found")
+
+    async with AsyncSessionLocal() as session:
+        # Delete old report so the workflow can write a fresh one
+        res = await session.execute(_sel(_CR).where(_CR.claim_id == claim_id))
+        old_report = res.scalar_one_or_none()
+        if old_report:
+            await session.delete(old_report)
+
+        # Reset claim status to 'ready'
+        res2 = await session.execute(_sel(_Claim).where(_Claim.claim_id == claim_id))
+        c = res2.scalar_one_or_none()
+        if c:
+            c.status = "ready"
+            c.workflow_run_id = None
+        await session.commit()
+
+    try:
+        run_response = await mistral_client.workflows.execute_workflow_async(
+            workflow_identifier="claim_processing_workflow",
+            input={
+                "claim_id": claim_id,
+                "claimant_id": claim.claimant_id,
+                "policy_id": claim.policy_id,
+            }
+        )
+        run_id = run_response.execution_id if hasattr(run_response, "execution_id") else "unknown_run_id"
+
+        async with AsyncSessionLocal() as session:
+            res = await session.execute(_sel(_Claim).where(_Claim.claim_id == claim_id))
+            c = res.scalar_one_or_none()
+            if c:
+                c.workflow_run_id = run_id
+                c.status = "processing"
+                await session.commit()
+
+        return {"claim_id": claim_id, "workflow_run_id": run_id, "status": "processing"}
+    except Exception as e:
+        logger.error(f"Failed to rerun claim workflow for {claim_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

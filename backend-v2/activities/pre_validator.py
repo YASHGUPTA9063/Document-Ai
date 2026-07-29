@@ -37,6 +37,32 @@ DOCX_AUTO_PASS = {
 }
 
 
+def _is_password_protected(file_path: str) -> bool:
+    """Checks if a PDF file is password protected using pypdf."""
+    ext = os.path.splitext(file_path.lower())[1]
+    if ext != ".pdf":
+        return False
+    try:
+        import pypdf
+        reader = pypdf.PdfReader(file_path)
+        if reader.is_encrypted:
+            try:
+                res = reader.decrypt("")
+                if res == 0 or str(res) == "PasswordType.NOT_DECRYPTED":
+                    return True
+            except Exception:
+                return True
+        return False
+    except (pypdf.errors.FileNotDecryptedError, pypdf.errors.WrongPasswordError):
+        return True
+    except pypdf.errors.PdfReadError as e:
+        if "encrypted" in str(e).lower() or "password" in str(e).lower():
+            return True
+        return False
+    except Exception:
+        return False
+
+
 def _parse_json_response(raw_text: str) -> dict:
     """Parse JSON from agent response, stripping markdown fences if present."""
     cleaned = raw_text.strip()
@@ -72,11 +98,29 @@ async def pre_validator_activity(document_id: str, file_path: str) -> dict:
                 "readability": {"passed": bool, "severity": str, "message": str},
                 "watermark":   {"passed": bool, "severity": str, "message": str},
                 "orientation": {"passed": bool, "severity": str, "message": str},
+                "blank":       {"passed": bool, "severity": str, "message": str},
+                "password_protection": {"passed": bool, "severity": str, "message": str},
             }
         }
     """
     try:
         logger.info(f"[Document {document_id}] Starting pre-validation activity")
+
+        # 1. Password Protected Document Check (using pypdf)
+        if _is_password_protected(file_path):
+            logger.warning(f"[Document {document_id}] Pre-validation failed: Document is password protected.")
+            return {
+                "passed": False,
+                "rejection_reason": "Document is password protected.",
+                "warnings": [],
+                "checks": {
+                    "password_protection": {
+                        "passed": False,
+                        "severity": "high",
+                        "message": "Document is password protected."
+                    }
+                }
+            }
 
         if not settings.PRE_VALIDATOR_AGENT_ID:
             raise ValueError("PRE_VALIDATOR_AGENT_ID is not configured in settings/environment.")

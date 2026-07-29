@@ -78,7 +78,7 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
                 await _update_status_and_message(document_id, "processing", "")
 
         # Step 2 — Pre-Validation
-        # Checks blur, brightness, skew, readability, watermark (warning), orientation.
+        # Checks blur, brightness, skew, readability, watermark (warning), orientation, blank document, and password protection.
         # Skipped gracefully if PRE_VALIDATOR_AGENT_ID is not yet configured.
         if settings.PRE_VALIDATOR_AGENT_ID:
             await _update_status(document_id, "pre_validating")

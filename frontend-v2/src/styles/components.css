@@ -535,12 +535,23 @@ tbody tr:hover .row-arrow { opacity: 1; color: var(--accent); }
 .tabs {
   display: flex; gap: 2px; margin-bottom: 18px;
   border-bottom: 1px solid var(--border); padding-bottom: 0;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  max-width: 100%;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+}
+.tabs::-webkit-scrollbar {
+  display: none;
 }
 .tab {
   padding: 8px 16px; font-size: var(--text-base); font-weight: 500;
   color: var(--muted); border-bottom: 2px solid transparent;
   cursor: pointer; transition: all var(--dur) var(--ease);
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .tab:hover { color: var(--text-dim); background: var(--accent-dim2); }
 .tab.active { color: var(--accent); border-bottom-color: var(--accent); background: var(--accent-dim); }
@@ -771,7 +782,8 @@ tbody tr:hover .row-arrow { opacity: 1; color: var(--accent); }
 
 /* ─── Spin keyframe (for in-batch spinner) ───────── */
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 
 /* ─── Shimmer animation for progress panel header ── */

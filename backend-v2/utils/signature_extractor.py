@@ -211,26 +211,26 @@ def _locate_kyc_bboxes(
         )
 
     prompt = (
-        f"You are a precise KYC document analysis assistant. "
-        f"Look at this image carefully. "
-        f"The image dimensions are {width}x{height} pixels (width={width}, height={height}).\n"
+        f"You are a document analysis assistant specializing in locating handwritten elements.\n"
+        f"The image dimensions are {width}x{height} pixels.\n"
         f"{landmarks_str}"
         f"{hint_str}\n"
-        f"Your task: locate TWO regions in this KYC document image:\n\n"
-        f"1. **SIGNATURE** — the handwritten cursive name, mark, or scribble "
-        f"(typically written in blue or black ink). It is NOT printed text, NOT a logo, "
-        f"NOT a photograph. The signature is usually written directly above or next to "
-        f"the printed 'हस्ताक्षर / Signature' label. Do not include the printed label "
-        f"in your bounding box. Capture the full span of all handwriting strokes.\n\n"
-        f"2. **PHOTO** — the cardholder's passport-style face photograph. This is usually "
-        f"a rectangular region containing a person's head and shoulders. It is NOT an emblem, "
-        f"NOT a QR code, NOT text. Typically located on the right side or bottom-right of the card.\n\n"
+        f"Your task: locate up to TWO regions in this document image:\n\n"
+        f"1. **SIGNATURE** — any handwritten cursive mark, scrawl, initials, or name written "
+        f"by hand (typically in blue or black ink). It is NOT printed/typed text, NOT a stamp, "
+        f"NOT a logo. It may appear near words like 'Signature', 'Sign', 'Authorized by', "
+        f"'हस्ताक्षर', or at the bottom of the document near a date. "
+        f"Capture the full extent of all handwriting strokes. "
+        f"Do NOT include the printed label itself in the bounding box.\n\n"
+        f"2. **PHOTO** — a face photograph of a person (passport-style or otherwise). "
+        f"It is a rectangular image of a human head/shoulders. It is NOT an emblem, "
+        f"NOT a QR code, NOT text. If no photo is present, set photo_found to false.\n\n"
         f"Guidelines:\n"
-        f"- Use the OCR detected region coordinates listed above to calibrate your coordinate system.\n"
+        f"- Use the OCR region coordinates above to calibrate your coordinate space.\n"
         f"- Return x1 (left), y1 (top), x2 (right), y2 (bottom) as integer pixel coordinates "
         f"on the original {width}x{height} image.\n"
-        f"- Be extremely precise and crop tightly around each region.\n"
-        f"- If a region is not found, set its _found field to false and leave coordinates as null."
+        f"- Crop tightly — do not include surrounding whitespace or labels.\n"
+        f"- If a region is not present, set its _found field to false and coordinates to null."
     )
 
     try:
@@ -276,6 +276,23 @@ def _locate_kyc_bboxes(
 # ---------------------------------------------------------------------------
 # Main extraction function
 # ---------------------------------------------------------------------------
+
+def _resolve_raw_file_path(file_path: str) -> str:
+    """
+    If file_path is a preprocessed image (e.g. storage/preprocessed/{doc_id}/stem_preprocessed.png),
+    attempt to locate the original raw file in storage/ so that signature extraction operates
+    on original un-blurred, un-equalized ink strokes.
+    """
+    path = Path(file_path)
+    if "preprocessed" in path.parts:
+        original_stem = path.stem.replace("_preprocessed", "")
+        storage_dir = Path(settings.STORAGE_DIR)
+        for candidate in storage_dir.glob(f"{original_stem}.*"):
+            if candidate.is_file():
+                logger.info(f"Using original raw file for signature extraction: {candidate}")
+                return str(candidate)
+    return file_path
+
 
 def extract_signature_and_photo(
     file_path: str,
@@ -333,7 +350,8 @@ def extract_signature_and_photo(
 
     # ── Prepare Image ────────────────────────────────────────────────────
     try:
-        img, resolved_url = _prepare_image_and_url(file_path)
+        target_file_path = _resolve_raw_file_path(file_path)
+        img, resolved_url = _prepare_image_and_url(target_file_path)
         width, height = img.size
     except Exception as e:
         logger.error(f"[Document {document_id}] Failed to prepare image: {e}")
@@ -411,24 +429,11 @@ def extract_signature_and_photo(
                             logger.info(f"[Document {document_id}] Path 1: Photo successfully extracted from annotated image: ({px1}, {py1})->({px2}, {py2})")
                             break
 
-        if result["has_signature"] and result["has_photo"]:
-            logger.info(f"[Document {document_id}] Path 1 succeeded. Returning result.")
+        if result["has_signature"] or result["has_photo"]:
+            logger.info(f"[Document {document_id}] Path 1 succeeded (signature={result['has_signature']}, photo={result['has_photo']}). Returning result.")
             return result
         else:
-            logger.info(f"[Document {document_id}] Path 1 did not extract both signature and photo. Resetting result and falling back...")
-            # Reset result dict to clear any partial findings
-            result.update({
-                "has_signature": False,
-                "signature_crop_path": None,
-                "signature_base64": None,
-                "signature_bbox": None,
-                "has_photo": False,
-                "photo_crop_path": None,
-                "photo_base64": None,
-                "photo_bbox": None,
-                "confidence": "low",
-                "signer_name": None,
-            })
+            logger.info(f"[Document {document_id}] Path 1 found nothing. Falling back...")
             
     except Exception as e:
         logger.error(f"[Document {document_id}] Path 1 failed: {e}. Resetting result and falling back...")

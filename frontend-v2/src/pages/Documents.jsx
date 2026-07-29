@@ -164,7 +164,7 @@ export function Documents() {
                     <td>
                       {doc.doc_type
                         ? <span className="badge badge-cyan">{doc.doc_type}</span>
-                        : <span style={{ color: 'var(--muted)', fontSize: 11 }}>—</span>}
+                        : null}
                     </td>
                     <td style={{ whiteSpace: 'normal', overflow: 'visible' }}>
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>

@@ -75,7 +75,8 @@ export function ClaimProcess() {
   const fileInputRef = useRef(null);
 
   /* Per-claim doc status cache for expanded card */
-  const [docStatuses, setDocStatuses] = useState({});
+  const [docStatuses, setDocStatuses]     = useState({});
+  const [uploadingDocKey, setUploadingDocKey] = useState(null);
 
   const pollRef = useRef(null);
 
@@ -92,6 +93,27 @@ export function ClaimProcess() {
       setLoading(false);
     }
   }, []);
+
+  /* ── Direct Upload handler for required/extra docs ─────────────── */
+  const handleDirectUpload = useCallback(async (claimId, files, docType) => {
+    if (!files) return;
+    const fileList = Array.isArray(files) ? files : [files];
+    if (fileList.length === 0) return;
+    const key = `${claimId}_${docType || 'general'}`;
+    setUploadingDocKey(key);
+    try {
+      for (const file of fileList) {
+        await uploadClaimDocument(claimId, file, docType);
+      }
+      const data = await getClaimStatus(claimId);
+      setDocStatuses(prev => ({ ...prev, [claimId]: data }));
+      await loadClaims();
+    } catch (e) {
+      alert(`Failed to upload document: ${e.message}`);
+    } finally {
+      setUploadingDocKey(null);
+    }
+  }, [loadClaims]);
 
   useEffect(() => {
     loadClaims();
@@ -414,44 +436,187 @@ export function ClaimProcess() {
                   </div>
                 </div>
 
-                {/* Expanded doc panel */}
+                {/* Expanded doc panel with Warning Banner Above & 2 Columns Below */}
                 {expandedId === cid && (
                   <div className="claim-card-expand">
-                    <div className="claim-docs-grid">
-                      <div>
-                        <div style={{ fontSize: 'var(--text-xs)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', marginBottom: 10 }}>
-                          Documents {docStatus ? `(${docStatus.completed_docs}/${docStatus.total_docs} extracted)` : ''}
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                          {docStatus?.doc_statuses?.length > 0 ? docStatus.doc_statuses.map(doc => (
-                            <div key={doc.document_id} className={`claim-doc-item ${doc.status === 'completed' ? 'present' : 'missing'}`}>
-                              <FileText size={14} className="doc-status-icon" />
-                              <span className="doc-name">{doc.filename} <span style={{ color: 'var(--muted)', fontSize: 'var(--text-xs)' }}>({doc.doc_type?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())})</span></span>
-                              {doc.status === 'completed'
-                                ? <CheckCircle size={14} className="doc-status-icon" />
-                                : doc.status === 'failed'
-                                ? <X size={14} className="doc-status-icon" style={{ color: 'var(--error)' }} />
-                                : <Loader2 size={14} className="spin doc-status-icon" />
-                              }
+                    {/* Top Header Bar */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                      <div style={{ fontSize: 'var(--text-xs)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)' }}>
+                        Claim Requirements ({docStatus?.claim_type || claim.claim_type || 'General'})
+                      </div>
+                      <div style={{ display: 'flex', gap: 10 }}>
+                        <span style={{ fontSize: 'var(--text-xs)', fontWeight: 700, color: 'var(--success)', background: 'rgba(16,185,129,0.15)', padding: '3px 10px', borderRadius: 6 }}>
+                          {docStatus?.required_docs?.filter(d => d.is_completed)?.length || 0} Completed
+                        </span>
+                        {docStatus?.missing_required_count > 0 ? (
+                          <span style={{ fontSize: 'var(--text-xs)', fontWeight: 700, color: '#f59e0b', background: 'rgba(245,158,11,0.15)', padding: '3px 10px', borderRadius: 6 }}>
+                            {docStatus.missing_required_count} Pending
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: 'var(--text-xs)', fontWeight: 700, color: 'var(--success)', background: 'rgba(16,185,129,0.15)', padding: '3px 10px', borderRadius: 6 }}>
+                            All Complete
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Warning / Status Banner (ABOVE COLUMNS) */}
+                    <div style={{ marginBottom: 18 }}>
+                      {docStatus?.ready_to_process ? (
+                        <div className="claim-docs-verified" style={{ padding: '14px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                            <ShieldCheck size={22} color="var(--success)" />
+                            <div>
+                              <div className="claim-docs-verified-title">All required documents uploaded & extracted</div>
+                              <div className="claim-docs-verified-sub" style={{ marginTop: 2 }}>Ready for automated AI claim verification pipeline.</div>
                             </div>
-                          )) : (
-                            <div style={{ color: 'var(--muted)', fontSize: 'var(--text-sm)' }}>No documents uploaded yet.</div>
+                          </div>
+                          <label className="btn btn-ghost btn-sm" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                            <UploadCloud size={14} /> Upload Extra Document(s)
+                            <input
+                              type="file"
+                              multiple
+                              style={{ display: 'none' }}
+                              onChange={(e) => {
+                                if (e.target.files && e.target.files.length > 0) {
+                                  handleDirectUpload(cid, Array.from(e.target.files), 'general');
+                                }
+                              }}
+                            />
+                          </label>
+                        </div>
+                      ) : (
+                        <div className="claim-docs-verified" style={{ background: 'rgba(245,158,11,0.08)', borderColor: 'rgba(245,158,11,0.3)', padding: '14px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                            <AlertTriangle size={22} color="#f59e0b" />
+                            <div>
+                              <div className="claim-docs-verified-title" style={{ color: '#f59e0b' }}>
+                                {docStatus?.missing_required_count || 0} Compulsory Document(s) Pending Upload
+                              </div>
+                              <div className="claim-docs-verified-sub" style={{ marginTop: 2 }}>
+                                Please upload all pending compulsory documents below to enable AI claim evaluation.
+                              </div>
+                            </div>
+                          </div>
+                          <label className="btn btn-ghost btn-sm" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(245,158,11,0.12)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.3)', flexShrink: 0 }}>
+                            <UploadCloud size={14} /> Upload Extra Document(s)
+                            <input
+                              type="file"
+                              multiple
+                              style={{ display: 'none' }}
+                              onChange={(e) => {
+                                if (e.target.files && e.target.files.length > 0) {
+                                  handleDirectUpload(cid, Array.from(e.target.files), 'general');
+                                }
+                              }}
+                            />
+                          </label>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 2 Main Columns */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+                      
+                      {/* COLUMN 1: COMPLETED DOCUMENTS */}
+                      <div style={{ background: 'var(--surface)', padding: 14, borderRadius: 10, border: '1px solid var(--border)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                          <CheckCircle size={16} color="var(--success)" />
+                          <div style={{ fontSize: 'var(--text-sm)', fontWeight: 700, color: 'var(--text)' }}>
+                            Completed Documents ({docStatus?.required_docs?.filter(d => d.is_completed)?.length || 0})
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          {docStatus?.required_docs?.filter(d => d.is_completed).length > 0 ? (
+                            docStatus.required_docs.filter(d => d.is_completed).map((req, idx) => (
+                              <div key={idx} className="claim-doc-item present" style={{ justifyContent: 'space-between', padding: '10px 12px' }}>
+                                <div style={{ minWidth: 0 }}>
+                                  <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text)' }}>
+                                    {req.label}
+                                  </div>
+                                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    {req.filename}
+                                  </div>
+                                </div>
+                                <span style={{ fontSize: 'var(--text-xs)', fontWeight: 700, color: 'var(--success)', background: 'rgba(16,185,129,0.12)', padding: '3px 8px', borderRadius: 6, flexShrink: 0 }}>
+                                  Extracted
+                                </span>
+                              </div>
+                            ))
+                          ) : (
+                            <div style={{ color: 'var(--muted)', fontSize: 'var(--text-xs)', padding: '12px 0', textAlign: 'center' }}>
+                              No completed documents uploaded yet.
+                            </div>
                           )}
                         </div>
                       </div>
 
-                      {docStatus?.ready_to_process && (
-                        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                          <div className="claim-docs-verified">
-                            <ShieldCheck size={20} color="var(--success)" />
-                            <div>
-                              <div className="claim-docs-verified-title">All documents extracted</div>
-                              <div className="claim-docs-verified-sub">Ready for AI claim processing</div>
-                            </div>
+                      {/* COLUMN 2: PENDING DOCUMENTS */}
+                      <div style={{ background: 'var(--surface)', padding: 14, borderRadius: 10, border: '1px solid rgba(245,158,11,0.25)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                          <AlertTriangle size={16} color="#f59e0b" />
+                          <div style={{ fontSize: 'var(--text-sm)', fontWeight: 700, color: 'var(--text)' }}>
+                            Pending Documents ({docStatus?.required_docs?.filter(d => !d.is_completed)?.length || 0})
                           </div>
                         </div>
-                      )}
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          {docStatus?.required_docs?.filter(d => !d.is_completed).length > 0 ? (
+                            docStatus.required_docs.filter(d => !d.is_completed).map((req, idx) => {
+                              const uploadKey = `${cid}_${req.doc_type}`;
+                              const isUploading = uploadingDocKey === uploadKey;
+                              return (
+                                <div key={idx} className="claim-doc-item missing" style={{ justifyContent: 'space-between', padding: '10px 12px' }}>
+                                  <div style={{ minWidth: 0 }}>
+                                    <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text)' }}>
+                                      {req.label} <span style={{ color: '#dc2626' }}>*</span>
+                                    </div>
+                                    {req.is_uploaded ? (
+                                      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--accent)', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                        Uploaded: {req.filename}
+                                      </div>
+                                    ) : (
+                                      <div style={{ fontSize: 'var(--text-xs)', color: '#f59e0b', fontWeight: 500 }}>
+                                        Not uploaded yet
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {req.is_uploaded ? (
+                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 'var(--text-xs)', fontWeight: 700, color: 'var(--accent)', background: 'rgba(6,192,219,0.12)', padding: '4px 10px', borderRadius: 6, flexShrink: 0 }}>
+                                      <Loader2 size={13} className="spin" /> Processing…
+                                    </span>
+                                  ) : (
+                                    <label style={{ cursor: isUploading ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--accent)', background: 'rgba(6,192,219,0.1)', padding: '5px 12px', borderRadius: 6, border: '1px solid rgba(6,192,219,0.3)', flexShrink: 0 }}>
+                                      {isUploading ? <Loader2 size={13} className="spin" /> : <Upload size={13} />}
+                                      {isUploading ? 'Uploading…' : 'Upload'}
+                                      <input
+                                        type="file"
+                                        multiple
+                                        style={{ display: 'none' }}
+                                        disabled={isUploading}
+                                        onChange={(e) => {
+                                          if (e.target.files && e.target.files.length > 0) {
+                                            handleDirectUpload(cid, Array.from(e.target.files), req.doc_type);
+                                          }
+                                        }}
+                                      />
+                                    </label>
+                                  )}
+                                </div>
+                              );
+                            })
+                          ) : (
+                            <div style={{ color: 'var(--success)', fontSize: 'var(--text-xs)', padding: '12px 0', textAlign: 'center', fontWeight: 600 }}>
+                              🎉 All required documents uploaded!
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
                     </div>
+
                   </div>
                 )}
               </div>

@@ -604,6 +604,7 @@ If the file is visual (is_visual = true):
   4. Readability (Is the text legible?)
   5. Watermark (Is there a watermark? If yes, treat it as a warning only, do not fail.)
   6. Orientation (Is it upside down or rotated?)
+  7. Blank Document (Is the document blank, empty, white page, or missing any readable text/content?)
 
 You must output a JSON response matching exactly this schema:
 {
@@ -616,11 +617,12 @@ You must output a JSON response matching exactly this schema:
     "skew": {"passed": bool, "severity": "none" | "low" | "medium" | "high", "message": str},
     "readability": {"passed": bool, "severity": "none" | "low" | "medium" | "high", "message": str},
     "watermark": {"passed": bool, "severity": "none" | "low" | "medium" | "high", "message": str},
-    "orientation": {"passed": bool, "severity": "none" | "low" | "medium" | "high", "message": str}
+    "orientation": {"passed": bool, "severity": "none" | "low" | "medium" | "high", "message": str},
+    "blank": {"passed": bool, "severity": "none" | "low" | "medium" | "high", "message": str}
   }
 }
 
-Only fail the document ("passed": false) if the severity of blur, brightness, skew, readability, or orientation issues is high or unreadable. Watermarks should not cause a failure.""",
+Only fail the document ("passed": false) if the severity of blur, brightness, skew, readability, orientation, or blank document issues is high or unreadable. If the document is blank or empty, set "blank" check passed to false, severity to "high", rejection_reason to "Document is blank or contains no content.", and overall passed to false. Watermarks should not cause a failure.""",
         "model": "mistral-medium-latest",
         "completion_args": {'temperature': 0.7, 'top_p': 1.0, 'max_tokens': 2048, 'tool_choice': 'auto'},
     },
@@ -877,11 +879,11 @@ Call this tool to gather data:
 ## Checks to Perform
 Run ALL of the following checks:
 
-1. **Disability Certificate Present**: Verify that a disability_certificate document is present and contains an issuing doctor's name or a licensed physician's details. Mark FAIL if no certificate is found or the issuing authority is missing.
+1. **Disability Certificate Present**: Verify that a disability_certificate document is present and contains any of: `issuing_doctor`, `issuing_medical_board`, or a licensed authority/physician name. Mark PASS if the certificate is found with at least one issuing authority field populated. Mark FAIL only if the certificate is entirely absent from the claim.
 
-2. **Severity Mentioned**: Verify that the disability severity (e.g., mild, moderate, severe, partial, total) is explicitly stated in the disability_certificate. Mark FAIL if severity is absent.
+2. **Severity Mentioned**: Verify that the disability severity is indicated in the disability_certificate. Accept any of: `severity`, `disability_nature` (Permanent/Temporary), `percentage_of_disability`, or a severity keyword in `disability_type`. Mark FAIL only if none of these fields carry any severity information at all.
 
-3. **Limitations Consistent with Diagnosis**: Cross-reference the functional limitations described in the disability_certificate against the medical_report diagnosis. Assess whether the claimed disability type and level are medically consistent with the diagnosis. Mark FAIL if there is a clear inconsistency (e.g., claiming full limb paralysis for a minor soft tissue injury).
+3. **Limitations Consistent with Diagnosis**: Cross-reference the disability information (`disability_type`, `functional_limitations`, or `disability_nature`) against the medical_report diagnosis. Assess whether the claimed disability type and level are medically plausible given the diagnosis. Mark FAIL only if there is a clear and direct contradiction (e.g., claiming full limb paralysis for a minor soft tissue injury). If functional_limitations is absent but disability_type is consistent with the diagnosis, mark PASS.
 
 ## Output Format
 Return ONLY a valid JSON object in this exact structure — no extra text, no markdown:

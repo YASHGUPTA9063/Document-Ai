@@ -147,9 +147,9 @@ function InlineCorrectionsEditor({ validatedData, onChange }) {
                 id={`correction-field-${key}`}
                 type="text"
                 className="styled-input"
-                value={edits[key] ?? ''}
+                value={(edits[key] === 'null' || edits[key] === 'NULL') ? '' : (edits[key] ?? '')}
                 onChange={(e) => handleChange(key, e.target.value)}
-                placeholder={String(originalVal)}
+                placeholder={originalVal == null || originalVal === 'null' || originalVal === 'NULL' ? '' : String(originalVal)}
                 style={{
                   borderColor: isModified ? 'var(--accent)' : undefined,
                   boxShadow: isModified ? '0 0 0 3px var(--accent-dim)' : undefined,
@@ -176,7 +176,7 @@ function InlineCorrectionsEditor({ validatedData, onChange }) {
             </div>
             {isModified && (
               <div style={{ fontSize: 11, color: 'var(--muted)', paddingLeft: 2 }}>
-                Original: <span style={{ fontFamily: 'monospace', color: 'var(--text-dim)' }}>{String(originalVal)}</span>
+                Original: <span style={{ fontFamily: 'monospace', color: 'var(--text-dim)' }}>{originalVal == null || originalVal === 'null' || originalVal === 'NULL' ? '' : String(originalVal)}</span>
               </div>
             )}
           </div>
@@ -409,7 +409,7 @@ function ReviewCard({ doc, onAction }) {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
               {Object.entries(extracted.validated_data)
                 .filter(([k, v]) => {
-                  if (v == null) return false;
+                  if (v == null || v === 'null' || v === 'NULL') return false;
                   if (typeof v !== 'object') return true;
                   return parseArrayOfText(v) !== null;
                 })

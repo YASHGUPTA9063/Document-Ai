@@ -81,6 +81,23 @@ def _compute_confidences_recursive(data, word_confidence_scores):
 
 
 
+def _normalize_rate_fields(normalized: dict, raw: dict) -> dict:
+    if not isinstance(normalized, dict):
+        return normalized
+    res = dict(normalized)
+    for k, v in res.items():
+        if v is None:
+            continue
+        key_lower = k.lower()
+        raw_val = raw.get(k) if isinstance(raw, dict) else None
+        raw_has_pct = isinstance(raw_val, str) and "%" in raw_val
+        is_rate_key = any(t in key_lower for t in ["rate", "percent", "pct", "withholding"])
+
+        if (is_rate_key or raw_has_pct) and isinstance(v, (str, int, float)):
+            val_str = str(v).strip()
+            if val_str and not val_str.endswith("%") and val_str.lower() not in ("null", "none", "—"):
+                res[k] = f"{val_str}%"
+    return res
 
 
 @workflows.activity()
@@ -98,6 +115,11 @@ async def extractor_activity(document_id: str, file_path: str, doc_type: str) ->
             raise ValueError("GENERAL_EXTRACTOR_AGENT_ID is not configured in settings/environment.")
         logger.info(f"[Document {document_id}] Routing to general extractor agent: {agent_id}")
 
+        # Check template metadata for KYC flag
+        from tools.extractor import get_template_metadata
+        template_meta = get_template_metadata(doc_type)
+        is_kyc = template_meta.get("is_kyc", False)
+
         # Use imported tools schema
         tools = EXTRACTOR_TOOLS
 
@@ -107,7 +129,7 @@ async def extractor_activity(document_id: str, file_path: str, doc_type: str) ->
             f"You are the Extractor Agent. We need to extract structured data from the document "
             f"at path '{file_path}' which has been classified as '{doc_type}'.\n"
             f"First, call the `extract_text_from_document` tool to get the text content and structured OCR extraction.\n"
-            f"If the document type is a KYC or identity document, you must also call the `crop_kyc_images` tool to extract the signature and photo crops.\n\n"
+            f"{('You MUST also call the `crop_kyc_images` tool to extract the signature and photo crops — this template is marked as KYC.' if is_kyc else '')}\n"
             f"CRITICAL: If the `structured_ocr_extraction` returned by the tool contains generic placeholder fields "
             f"(such as `document_title`, `summary`, `full_ocr_text`), it indicates that no predefined template "
             f"exists for '{doc_type}'. In this case, do NOT output those generic fields. Instead, read the full "
@@ -224,8 +246,21 @@ async def extractor_activity(document_id: str, file_path: str, doc_type: str) ->
             raw_extracted = parsed_response
             normalized_extracted = parsed_response
 
+        # Post-process rate fields to ensure '%' sign is preserved
+        normalized_extracted = _normalize_rate_fields(normalized_extracted, raw_extracted)
+
         # Calculate field confidences
         field_confidences = _compute_confidences_recursive(normalized_extracted, word_confidence_scores)
+
+        # Check if template_fields are specified for this document type
+        from tools.extractor import get_template_fields
+        template_fields = get_template_fields(doc_type)
+        template_field_keys = None
+        if template_fields and isinstance(template_fields, list):
+            template_field_keys = set(
+                (f.get("key") or f.get("name") or str(f)) if isinstance(f, dict) else str(f)
+                for f in template_fields
+            )
 
         # Merge KYC image data into the extracted fields if cropped
         if kyc_image_result:
@@ -236,8 +271,19 @@ async def extractor_activity(document_id: str, file_path: str, doc_type: str) ->
                 if kyc_image_result.get("photo_base64"):
                     f_dict["photo_image"] = kyc_image_result["photo_base64"]
                 f_dict["photo_detected"] = kyc_image_result.get("has_photo", False)
-                if kyc_image_result.get("signer_name"):
+                if kyc_image_result.get("signer_name") and (template_field_keys is None or "signer_name" in template_field_keys):
                     f_dict["signer_name"] = kyc_image_result["signer_name"]
+
+        # System KYC image fields allowed automatically
+        SYSTEM_KYC_KEYS = {"signature_image", "photo_image", "signature_detected", "photo_detected"}
+
+        # If a template is configured for this document type, strictly enforce template fields
+        if template_field_keys is not None:
+            allowed_keys = template_field_keys | SYSTEM_KYC_KEYS
+            for f_dict in [normalized_extracted, raw_extracted]:
+                extra_keys = [k for k in list(f_dict.keys()) if k not in allowed_keys]
+                for k in extra_keys:
+                    f_dict.pop(k, None)
 
         logger.info(f"[Document {document_id}] Normalized fields from extractor: {normalized_extracted}")
         return {

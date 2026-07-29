@@ -71,9 +71,12 @@ except ValidationError as e:
 SUPPORTED_DOCUMENT_TYPES = [
     "invoice",
     "pan_card",
+    "id_proof",
+    "driving_licence",
+    "driving_license",
     "claim_form",
     "policy_document",
-    "id_proof",
+    "tax_form",
     "medical_report",
     "lab_reports",
     "prescription_records",

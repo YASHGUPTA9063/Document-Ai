@@ -6,7 +6,7 @@ import {
   ThumbsUp, ThumbsDown, ShieldCheck, ShieldOff, Scale, Gavel, FileText, FileCode, ClipboardList,
 } from 'lucide-react';
 import { INITIAL_STEPS, stepDuration } from './claimData';
-import { runClaimWorkflow, getClaimStatus, getClaimReport, submitClaimDecision } from '../api/client';
+import { runClaimWorkflow, rerunClaimWorkflow, getClaimStatus, getClaimReport, submitClaimDecision } from '../api/client';
 
 /* ─── JSON syntax highlighter ─── */
 function highlightJson(json) {
@@ -396,6 +396,22 @@ export function ClaimWorkflow() {
 
   const restart = useCallback(() => navigate('/claim-process'), [navigate]);
 
+  const rerun = useCallback(() => {
+    if (!claimId) return;
+    clearInterval(pollRef.current);
+    setSteps(CLAIM_STEPS.map(s => ({ ...s, state: 'waiting', duration: undefined })));
+    setRunning(true);
+    setDone(false);
+    setReport(null);
+    setError(null);
+    setDecisionSent(false);
+    setDecisionResult(null);
+    setActive(CLAIM_STEPS[0].id);
+    rerunClaimWorkflow(claimId)
+      .catch((e) => setError(`Failed to rerun: ${e?.response?.data?.detail || e.message}`))
+      .finally(() => startPolling());
+  }, [claimId, startPolling]);
+
   const handleDecision = useCallback(async (decision) => {
     if (!claimId || decisionSent) return;
     setDecisionSent(true);
@@ -457,8 +473,8 @@ export function ClaimWorkflow() {
               <button className="btn btn-ghost btn-sm" onClick={() => document.getElementById('completion-summary')?.scrollIntoView({ behavior: 'smooth' })}>
                 <ChevronDown size={14} /> View results
               </button>
-              <button className="btn btn-ghost btn-sm" onClick={restart}>
-                <RotateCcw size={14} /> Back
+              <button className="btn btn-ghost btn-sm" onClick={rerun} title="Rerun workflow">
+                <RotateCcw size={14} /> Rerun
               </button>
             </div>
           )}

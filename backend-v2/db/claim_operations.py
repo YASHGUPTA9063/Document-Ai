@@ -81,12 +81,45 @@ async def get_claim_with_docs(claim_id: str) -> Optional[Claim]:
         return result.scalar_one_or_none()
 
 
+def _match_doc_type(doc_type_str: str, req_type_str: str, filename: str = None) -> bool:
+    if not req_type_str:
+        return False
+    d = (doc_type_str or "").lower().strip().replace(" ", "_")
+    r = req_type_str.lower().strip().replace(" ", "_")
+    if d and d == r:
+        return True
+    aliases = {
+        "medical_report": ["medical_record", "discharge_summary", "lab_reports"],
+        "bills_invoices": ["invoice", "bill", "medical_bills"],
+        "pan_card": ["kyc", "identity_proof", "id_proof", "aadhaar_card", "driving_licence", "driving_license", "driver_license", "state_driver_license"],
+        "id_proof": ["kyc", "identity_proof", "pan_card", "aadhaar_card", "driving_licence", "driving_license", "driver_license", "state_driver_license"],
+        "driving_licence": ["kyc", "identity_proof", "id_proof", "pan_card", "aadhaar_card", "driving_license", "driver_license", "state_driver_license"],
+        "policy_document": ["policy"],
+    }
+    if r in aliases and d in aliases[r]:
+        return True
+    if d in aliases and r in aliases[d]:
+        return True
+    if r in ("pan_card", "id_proof", "driving_licence") and filename:
+        fn = filename.lower()
+        if any(kw in fn for kw in ["id proof", "id_proof", "driver", "driving", "license", "licence", "pan", "kyc"]):
+            return True
+    return False
+
+
 async def get_claim_extraction_status(claim_id: str) -> dict:
     """
-    Checks how many documents linked to this claim have finished OCR.
-    Returns total, completed, failed, and whether all are done (ready_to_process).
+    Checks how many documents linked to this claim have finished OCR and
+    cross-references against predefined required document checklist for the claim type.
     """
+    from utils.claim_requirements import get_requirements_for_claim_type
+
     async with AsyncSessionLocal() as session:
+        claim_result = await session.execute(select(Claim).where(Claim.claim_id == claim_id))
+        claim = claim_result.scalar_one_or_none()
+        claim_type = claim.claim_type if claim else "default"
+        requirements = get_requirements_for_claim_type(claim_type)
+
         # Get all document links for this claim
         links_result = await session.execute(
             select(ClaimDocumentLink).where(ClaimDocumentLink.claim_id == claim_id)
@@ -94,13 +127,31 @@ async def get_claim_extraction_status(claim_id: str) -> dict:
         links = links_result.scalars().all()
 
         if not links:
+            required_docs = [
+                {
+                    "doc_type": req["doc_type"],
+                    "label": req["label"],
+                    "required": req.get("required", True),
+                    "is_uploaded": False,
+                    "is_completed": False,
+                    "status": "missing",
+                    "filename": None,
+                    "document_id": None
+                }
+                for req in requirements
+            ]
+            missing_count = sum(1 for item in required_docs if item["required"])
             return {
                 "claim_id": claim_id,
+                "claim_type": claim_type,
                 "total_docs": 0,
                 "completed_docs": 0,
                 "failed_docs": 0,
                 "ready_to_process": False,
-                "doc_statuses": []
+                "doc_statuses": [],
+                "required_docs": required_docs,
+                "missing_required_count": missing_count,
+                "all_required_completed": False
             }
 
         doc_statuses = []
@@ -122,57 +173,109 @@ async def get_claim_extraction_status(claim_id: str) -> dict:
 
             doc_statuses.append({
                 "document_id": link.document_id,
-                "doc_type": doc.doc_type if doc else link.doc_type,
+                "doc_type": doc.doc_type if (doc and doc.doc_type and doc.doc_type != "others") else link.doc_type,
+                "link_doc_type": link.doc_type,
+                "ocr_doc_type": doc.doc_type if doc else None,
                 "filename": filename,
                 "status": status,
                 "extracted": link.synced == "synced"
             })
 
         total = len(links)
-        ready = (completed + failed) == total and completed > 0
 
-        if ready:
-            claim_result = await session.execute(select(Claim).where(Claim.claim_id == claim_id))
-            claim = claim_result.scalar_one_or_none()
-            if claim and claim.status == "extracting":
-                claim.status = "ready"
-                
-                # Fetch claim_form data to populate top level fields
-                for link in links:
-                    doc_res = await session.execute(select(Document).where(Document.id == link.document_id))
-                    doc = doc_res.scalar_one_or_none()
-                    if doc and doc.doc_type in ("claim_form", "policy_document"):
-                        ed_res = await session.execute(select(ExtractedData).where(ExtractedData.document_id == link.document_id))
-                        extracted = ed_res.scalar_one_or_none()
-                        if extracted and extracted.validated_data:
-                            fields = extracted.validated_data
-                            if doc.doc_type == "claim_form":
-                                claimant_name = fields.get("claimant_name") or fields.get("name")
-                                if claimant_name:
-                                    claim.claimant_name = str(claimant_name)
-                                claim_type = fields.get("claim_type") or fields.get("type")
-                                if claim_type:
-                                    claim.claim_type = str(claim_type)
-                                amount = fields.get("amount") or fields.get("claim_amount") or fields.get("billed_amount")
-                                if amount is not None:
-                                    try:
-                                        claim.amount = float(amount)
-                                    except (ValueError, TypeError):
-                                        pass
-                            if doc.doc_type in ("claim_form", "policy_document"):
-                                policy_num = fields.get("policy_number") or fields.get("policy_id") or fields.get("policy_num")
-                                if policy_num:
-                                    claim.policy_id = str(policy_num)
-                await session.commit()
-                logger.info(f"[Claim {claim_id}] All docs extracted — status → ready")
+        # Evaluate required checklist
+        required_docs = []
+        used_doc_ids = set()
+
+        for req in requirements:
+            req_type = req["doc_type"]
+            matched = None
+            for d in doc_statuses:
+                fn = d.get("filename")
+                if d["document_id"] not in used_doc_ids and (
+                    _match_doc_type(d.get("doc_type"), req_type, fn)
+                    or _match_doc_type(d.get("link_doc_type"), req_type, fn)
+                    or _match_doc_type(d.get("ocr_doc_type"), req_type, fn)
+                ):
+                    matched = d
+                    used_doc_ids.add(d["document_id"])
+                    break
+
+
+
+            if matched:
+                required_docs.append({
+                    "doc_type": req_type,
+                    "label": req["label"],
+                    "required": req.get("required", True),
+                    "is_uploaded": True,
+                    "is_completed": (matched["status"] == "completed"),
+                    "status": matched["status"],
+                    "filename": matched["filename"],
+                    "document_id": matched["document_id"]
+                })
+            else:
+                required_docs.append({
+                    "doc_type": req_type,
+                    "label": req["label"],
+                    "required": req.get("required", True),
+                    "is_uploaded": False,
+                    "is_completed": False,
+                    "status": "missing",
+                    "filename": None,
+                    "document_id": None
+                })
+
+        missing_required_count = sum(
+            1 for item in required_docs if item["required"] and not item["is_completed"]
+        )
+        all_required_completed = (missing_required_count == 0)
+
+        ready = (completed + failed) == total and completed > 0 and all_required_completed
+
+        if ready and claim and claim.status == "extracting":
+            claim.status = "ready"
+            
+            # Fetch claim_form data to populate top level fields
+            for link in links:
+                doc_res = await session.execute(select(Document).where(Document.id == link.document_id))
+                doc = doc_res.scalar_one_or_none()
+                if doc and doc.doc_type in ("claim_form", "policy_document"):
+                    ed_res = await session.execute(select(ExtractedData).where(ExtractedData.document_id == link.document_id))
+                    extracted = ed_res.scalar_one_or_none()
+                    if extracted and extracted.validated_data:
+                        fields = extracted.validated_data
+                        if doc.doc_type == "claim_form":
+                            claimant_name = fields.get("claimant_name") or fields.get("name")
+                            if claimant_name:
+                                claim.claimant_name = str(claimant_name)
+                            claim_type_extracted = fields.get("claim_type") or fields.get("type")
+                            if claim_type_extracted:
+                                claim.claim_type = str(claim_type_extracted)
+                            amount = fields.get("amount") or fields.get("claim_amount") or fields.get("billed_amount")
+                            if amount is not None:
+                                try:
+                                    claim.amount = float(amount)
+                                except (ValueError, TypeError):
+                                    pass
+                        if doc.doc_type in ("claim_form", "policy_document"):
+                            policy_num = fields.get("policy_number") or fields.get("policy_id") or fields.get("policy_num")
+                            if policy_num:
+                                claim.policy_id = str(policy_num)
+            await session.commit()
+            logger.info(f"[Claim {claim_id}] All required docs extracted — status → ready")
 
         return {
             "claim_id": claim_id,
+            "claim_type": claim_type,
             "total_docs": total,
             "completed_docs": completed,
             "failed_docs": failed,
             "ready_to_process": ready,
-            "doc_statuses": doc_statuses
+            "doc_statuses": doc_statuses,
+            "required_docs": required_docs,
+            "missing_required_count": missing_required_count,
+            "all_required_completed": all_required_completed,
         }
 
 
@@ -214,26 +317,41 @@ async def get_claim_documents_data(claim_id: str, doc_types: list[str]) -> dict:
     """
     Fetches the OCR field-value pairs for the specified document types belonging to a claim.
     Returns a dict keyed by doc_type, each containing the extracted fields.
+
+    Matching strategy (first hit wins for each requested type):
+      1. ClaimDocumentLink.doc_type  — user-declared intent at upload time
+      2. Document.doc_type           — OCR-classified type
+      3. Both sides checked via _match_doc_type aliases
+    Single batch query eliminates N-query overhead and scalar_one_or_none
+    blowups caused by duplicate link rows.
     """
-    result_data = {}
+    result_data = {dt: None for dt in doc_types}
+
     async with AsyncSessionLocal() as session:
-        for doc_type in doc_types:
-            query = (
-                select(ExtractedData.validated_data)
-                .join(Document, Document.id == ExtractedData.document_id)
-                .join(ClaimDocumentLink, ClaimDocumentLink.document_id == Document.id)
-                .where(
-                    ClaimDocumentLink.claim_id == claim_id,
-                    Document.doc_type == doc_type
-                )
+        rows = (await session.execute(
+            select(
+                ClaimDocumentLink.doc_type.label("link_type"),
+                Document.doc_type.label("ocr_type"),
+                ExtractedData.validated_data,
             )
-            result = await session.execute(query)
-            fields = result.scalar_one_or_none()
-            if fields:
-                result_data[doc_type] = fields
-            else:
-                result_data[doc_type] = None
-                logger.warning(f"[Claim {claim_id}] No document found for doc_type='{doc_type}'")
+            .join(Document, Document.id == ExtractedData.document_id)
+            .join(ClaimDocumentLink, ClaimDocumentLink.document_id == Document.id)
+            .where(ClaimDocumentLink.claim_id == claim_id)
+        )).all()
+
+    for doc_type in doc_types:
+        for row in rows:
+            link_type = row.link_type or ""
+            ocr_type  = row.ocr_type  or ""
+            if (
+                _match_doc_type(link_type, doc_type)
+                or _match_doc_type(ocr_type, doc_type)
+            ) and row.validated_data:
+                result_data[doc_type] = row.validated_data
+                break
+        if result_data[doc_type] is None:
+            logger.warning(f"[Claim {claim_id}] No document found for doc_type='{doc_type}'")
+
     return result_data
 
 

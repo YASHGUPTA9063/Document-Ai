@@ -108,7 +108,12 @@
   border-radius: var(--radius-sm);
 }
 
-.spin { animation: spin 0.8s linear infinite; }
+.spin, .spin-icon, .animate-spin {
+  animation: spin 0.8s linear infinite !important;
+  transform-origin: center !important;
+  transform-box: fill-box !important;
+  display: inline-block !important;
+}
 
 /* ─── Pulse dot (live indicator) ─────────────────── */
 .pulse-dot {

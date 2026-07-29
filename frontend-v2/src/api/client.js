@@ -326,6 +326,11 @@ export async function runClaimWorkflow(claimId) {
   return data;
 }
 
+export async function rerunClaimWorkflow(claimId) {
+  const { data } = await api.post(`/claims/${claimId}/rerun`);
+  return data;
+}
+
 /**
  * Get the final claim report (after workflow completes).
  * @param {string} claimId
