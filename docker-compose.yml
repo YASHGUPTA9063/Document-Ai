@@ -1,0 +1,42 @@
+services:
+  backend:
+    build:
+      context: ./backend-v2
+      dockerfile: Dockerfile
+    env_file:
+      - ./backend-v2/.env
+    environment:
+      DATABASE_URL: sqlite+aiosqlite:////app/data/doc_workflow.db
+      STORAGE_DIR: /app/storage
+    ports:
+      - "8000:8000"
+    volumes:
+      - backend_storage:/app/storage
+      - backend_db:/app/data
+      # Uncomment if GOOGLE_APPLICATION_CREDENTIALS is set in backend-v2/.env,
+      # and drop your service-account key at backend-v2/gcp-key.json:
+      # - ./backend-v2/gcp-key.json:/app/gcp-key.json:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend-v2
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  backend_storage:
+  backend_db:
