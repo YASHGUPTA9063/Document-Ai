@@ -60,8 +60,12 @@ WORKDIR /app
 COPY --from=builder --chown=appuser:appuser /root/.local /home/appuser/.local
 COPY --chown=appuser:appuser . .
 
-RUN mkdir -p /app/storage/crops /app/storage/ocr_blocks /app/storage/.cache/huggingface \
-    && chown -R appuser:appuser /app/storage
+# /app/storage and /app/data are named-volume mountpoints. Docker seeds an empty
+# volume with the ownership of the image directory it covers, so both must exist
+# and be owned by appuser here — otherwise they mount root-owned and the non-root
+# process can't write (SQLite fails with "unable to open database file").
+RUN mkdir -p /app/storage/crops /app/storage/ocr_blocks /app/storage/.cache/huggingface /app/data \
+    && chown -R appuser:appuser /app/storage /app/data
 
 USER appuser
 
