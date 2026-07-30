@@ -44,14 +44,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     STORAGE_DIR=/app/storage
 
 # Shared runtime libs needed by opencv-python-headless (libgl1/libglib2.0-0),
-# torch/scipy/scikit-image OpenMP kernels (libgomp1), and curl for the
-# healthcheck. No compilers, no dev headers.
+# torch/scipy/scikit-image OpenMP kernels (libgomp1), curl for the healthcheck,
+# and gosu so the entrypoint can drop root. No compilers, no dev headers.
 RUN sed -i 's/URIs: http:/URIs: https:/' /etc/apt/sources.list.d/debian.sources
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libgl1 \
         libglib2.0-0 \
         libgomp1 \
         curl \
+        gosu \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --create-home --uid 1000 appuser
@@ -64,15 +65,21 @@ COPY --chown=appuser:appuser . .
 # volume with the ownership of the image directory it covers, so both must exist
 # and be owned by appuser here — otherwise they mount root-owned and the non-root
 # process can't write (SQLite fails with "unable to open database file").
+# Volumes created before this existed are repaired at boot by the entrypoint.
 RUN mkdir -p /app/storage/crops /app/storage/ocr_blocks /app/storage/.cache/huggingface /app/data \
     && chown -R appuser:appuser /app/storage /app/data
 
-USER appuser
+# sed strips CRs in case the script was checked out with Windows line endings —
+# /bin/sh\r is not a valid interpreter.
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8000/docs || exit 1
+
+# Stays root only long enough to fix volume ownership, then execs as appuser.
+ENTRYPOINT ["/app/entrypoint.sh"]
 
 # Single process only: startup preloads the DINOv2 model and spins up the
 # Mistral workflow worker as an in-process asyncio task (see main.py's
