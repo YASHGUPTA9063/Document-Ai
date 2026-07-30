@@ -6,9 +6,8 @@ __pycache__/
 venv/
 
 # Local env / secrets — pass these in via docker-compose env_file / secrets instead
-.env
-.env.*
-!.env.example
+
+
 
 # Local data — mount as volumes instead of baking into the image
 *.db
