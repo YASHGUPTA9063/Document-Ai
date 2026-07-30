@@ -1,6 +1,8 @@
 import axios from 'axios';
 
-const BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+// Relative by default — nginx (Docker) and the Vite dev server both proxy
+// /api to the backend, so no hostname is baked into the bundle.
+const BASE = import.meta.env.VITE_API_BASE_URL || '/api';
 
 const api = axios.create({ baseURL: BASE, timeout: 30000 });
 

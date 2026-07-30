@@ -29,7 +29,9 @@ services:
       context: ./frontend-v2
       dockerfile: Dockerfile
       args:
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://172.200.163.232:8000}
+        # Relative — nginx in the frontend image proxies /api to backend:8000,
+        # so the browser only needs port 5173 reachable.
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api}
     ports:
       - "5173:80"
     depends_on:

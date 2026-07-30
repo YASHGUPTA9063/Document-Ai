@@ -13,9 +13,11 @@ RUN npm ci
 COPY . .
 
 # Vite bakes VITE_* vars into the JS bundle at build time — must be supplied
-# as a build arg, not a runtime env var. Point it at the URL the browser can
-# reach the backend on (not the internal docker-compose service name).
-ARG VITE_API_BASE_URL=http://172.200.163.232:8000
+# as a build arg, not a runtime env var. Relative by default: nginx proxies
+# /api to the backend (see nginx.conf), so the bundle carries no hostname and
+# works from any IP or DNS name the VM is reached on. Override with an
+# absolute URL only when the backend is served from a different origin.
+ARG VITE_API_BASE_URL=/api
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 
 RUN npm run build
