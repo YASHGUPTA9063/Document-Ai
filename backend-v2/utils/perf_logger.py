@@ -8,9 +8,16 @@ logger = logging.getLogger("perf_logger")
 logger.setLevel(logging.INFO)
 logger.propagate = False  # Prevent performance logs from going to stdout/stderr (terminal)
 
-# Configure file logging handler
-log_file = "performance.log"
-file_handler = logging.FileHandler(log_file, mode="a", encoding="utf-8")
+# Configure file logging handler — write to STORAGE_DIR (writable in Docker)
+# or fall back to /tmp if the default path is not writable.
+import os
+_storage = os.environ.get("STORAGE_DIR", ".")
+log_file = os.path.join(_storage, "performance.log")
+try:
+    file_handler = logging.FileHandler(log_file, mode="a", encoding="utf-8")
+except PermissionError:
+    log_file = os.path.join("/tmp", "performance.log")
+    file_handler = logging.FileHandler(log_file, mode="a", encoding="utf-8")
 formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 file_handler.setFormatter(formatter)
 logger.addHandler(file_handler)
