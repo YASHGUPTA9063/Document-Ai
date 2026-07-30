@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 
 # ─────────────────────────────────────────────────────────────────────────
 # Builder stage — compiles/installs Python deps into an isolated prefix.
@@ -28,8 +27,7 @@ COPY requirements.txt .
 # torch/torchvision default to the CUDA build off PyPI (multi-GB). This app
 # only ever runs DINOv2 inference on CPU (see utils/signature_verifier.py),
 # so pull the dedicated CPU wheels instead and let the rest resolve normally.
-RUN --mount=type=cache,target=/root/.cache/pip \
-    grep -viE '^(torch|torchvision)==' requirements.txt > requirements.cpu.txt && \
+RUN grep -viE '^(torch|torchvision)==' requirements.txt > requirements.cpu.txt && \
     pip install --user --extra-index-url https://download.pytorch.org/whl/cpu \
         torch==2.12.1+cpu torchvision==0.27.1+cpu && \
     pip install --user -r requirements.cpu.txt

@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 
 # ─────────────────────────────────────────────────────────────────────────
 # Build stage — installs deps and produces a static Vite build.
@@ -9,8 +8,7 @@ WORKDIR /app
 
 # Copy lockfile first so this layer only invalidates when deps actually change.
 COPY package.json package-lock.json ./
-RUN --mount=type=cache,target=/root/.npm \
-    npm ci
+RUN npm ci
 
 COPY . .
 
