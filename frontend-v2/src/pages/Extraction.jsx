@@ -108,6 +108,114 @@ const getDefaultHeaders = (key) => {
   return ['description', 'quantity', 'unit_price', 'total'];
 };
 
+function parseObjectData(value) {
+  if (value === null || value === undefined) return null;
+  let parsed = value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch (e) {
+        return null;
+      }
+    } else {
+      return null;
+    }
+  }
+
+  if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    return parsed;
+  }
+  return null;
+}
+
+function DictRender({ data, isEditing, onSubChange }) {
+  if (!data || typeof data !== 'object') return null;
+
+  return (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+      gap: '10px 16px',
+      width: '100%'
+    }}>
+      {Object.entries(data).map(([subKey, subVal]) => {
+        const nestedObj = parseObjectData(subVal);
+        const formattedKey = subKey.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+
+        if (nestedObj) {
+          return (
+            <div key={subKey} style={{
+              gridColumn: '1 / -1',
+              background: 'var(--card-alt)',
+              border: '1px solid var(--border)',
+              borderRadius: 6,
+              padding: '10px 12px',
+              marginTop: 4
+            }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', marginBottom: 8, letterSpacing: '0.04em' }}>
+                {formattedKey}
+              </div>
+              <DictRender
+                data={nestedObj}
+                isEditing={isEditing}
+                onSubChange={(childKey, childVal) => {
+                  const updatedChild = { ...nestedObj, [childKey]: childVal };
+                  onSubChange(subKey, updatedChild);
+                }}
+              />
+            </div>
+          );
+        }
+
+        const isNull = isNullOrEmpty(subVal);
+
+        return (
+          <div key={subKey} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-dim)' }}>
+              {formattedKey}
+            </div>
+            {isEditing ? (
+              <input
+                type="text"
+                className="styled-input"
+                value={isNull ? '' : String(subVal)}
+                onChange={(e) => onSubChange(subKey, e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '4px 8px',
+                  fontSize: 12,
+                  background: 'var(--surface-sunken)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 4
+                }}
+              />
+            ) : (
+              <div style={{ fontSize: 13, color: isNull ? 'var(--muted)' : 'var(--text)', fontWeight: 500, wordBreak: 'break-word' }}>
+                {isNull ? (
+                  <span style={{ fontStyle: 'italic', color: 'var(--muted)' }}>—</span>
+                ) : typeof subVal === 'boolean' ? (
+                  <span style={{
+                    fontSize: 11,
+                    padding: '2px 6px',
+                    borderRadius: 4,
+                    background: subVal ? 'rgba(16, 185, 129, 0.15)' : 'rgba(156, 163, 175, 0.15)',
+                    color: subVal ? 'var(--success)' : 'var(--muted)',
+                    fontWeight: 600
+                  }}>
+                    {subVal ? 'True' : 'False'}
+                  </span>
+                ) : String(subVal)}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighThreshold = 90, confMedThreshold = 70, fieldHighlightThreshold = 95, rawVal, onFieldHover }) {
   const [newInputVal, setNewInputVal] = useState('');
   // conf may be a nested structure for table/array fields — flatten to a single average number
@@ -118,6 +226,7 @@ function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighT
 
   const tableData = parseTableData(value, fieldKey);
   const stringArray = parseArrayOfText(value);
+  const objectData = parseObjectData(value);
 
   if (tableData) {
     let headers = getTableHeaders(tableData);
@@ -405,6 +514,48 @@ function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighT
             </button>
           </div>
         )}
+      </div>
+    );
+  }
+
+  if (objectData) {
+    const handleObjectChange = (subKey, subVal) => {
+      const updatedData = { ...objectData, [subKey]: subVal };
+      if (typeof value === 'string') {
+        onChange(fieldKey, JSON.stringify(updatedData));
+      } else {
+        onChange(fieldKey, updatedData);
+      }
+    };
+
+    const isLowConf = !isEditing && pct != null && pct < fieldHighlightThreshold;
+
+    return (
+      <div
+        className="field-row-object-container"
+        style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '12px 0', borderBottom: '1px solid var(--border)', cursor: onFieldHover ? 'crosshair' : 'default' }}
+        onMouseEnter={() => onFieldHover?.(fieldKey)}
+        onMouseLeave={() => onFieldHover?.(null)}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div className="field-key" style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-dim)' }}>{label}</div>
+          {!isEditing && pct != null && (
+            <div className="field-conf" style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 'var(--text-sm)' }}>
+              <div className={`conf-dot ${confClass}`} />
+              <span style={{ color: confColor }}>{pct}%</span>
+            </div>
+          )}
+        </div>
+
+        <div style={{
+          background: isLowConf ? 'rgba(245, 158, 11, 0.05)' : 'var(--surface-sunken)',
+          border: isLowConf ? '1px solid rgba(245, 158, 11, 0.3)' : '1px solid var(--border)',
+          borderRadius: 'var(--radius-sm)',
+          padding: '12px 14px',
+          marginTop: 2
+        }}>
+          <DictRender data={objectData} isEditing={isEditing} onSubChange={handleObjectChange} />
+        </div>
       </div>
     );
   }

@@ -34,6 +34,28 @@ function parseArrayOfText(value) {
   return null;
 }
 
+function parseObjectData(value) {
+  if (value === null || value === undefined) return null;
+  let parsed = value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch (e) {
+        return null;
+      }
+    } else {
+      return null;
+    }
+  }
+
+  if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    return parsed;
+  }
+  return null;
+}
+
 /**
  * Inline field-level corrections editor.
  * Renders extracted fields as styled inputs so reviewers can correct
@@ -410,13 +432,17 @@ function ReviewCard({ doc, onAction }) {
               {Object.entries(extracted.validated_data)
                 .filter(([k, v]) => {
                   if (v == null || v === 'null' || v === 'NULL') return false;
-                  if (typeof v !== 'object') return true;
-                  return parseArrayOfText(v) !== null;
+                  return true;
                 })
                 .slice(0, 8)
                 .map(([k, v]) => {
                   const arr = parseArrayOfText(v);
-                  const displayVal = arr ? arr.join(', ') : String(v);
+                  const obj = parseObjectData(v);
+                  const displayVal = arr
+                    ? arr.join(', ')
+                    : obj
+                      ? Object.entries(obj).map(([sk, sv]) => `${sk.replace(/_/g, ' ')}: ${sv ?? '—'}`).join(' | ')
+                      : String(v);
                   return (
                     <div key={k}>
                       <span style={{ color: 'var(--muted)' }}>{k.replace(/_/g, ' ')}: </span>
