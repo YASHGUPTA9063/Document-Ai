@@ -31,6 +31,21 @@ __pycache__/
 .env
 *.db
 
+# SQLite runtime sidecar files — regenerated on every run, conflict on every merge
+*.db-shm
+*.db-wal
+*.db-journal
+
+# Runtime logs and debug dumps
+*.log
+app_logs.txt
+ocr_debug.txt
+config_code.txt
+
+# OCR output dumps — may contain real document/PII data, never commit
+output.json
+backend-v2/output.json
+
 # Document storage (uploaded files — never commit real document data)
 storage/
 

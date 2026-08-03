@@ -2,44 +2,58 @@
 Claims Routes (v1)
 ==================
 Handles claim creation, listing, status, execution, and decisions.
+
+Response shapes mirror the legacy monolith (main_legacy.py) — that is the
+contract frontend-v2 was written against. Execution goes through the v2
+PipelineEngine (or the Redis worker queue) rather than Mistral Workflows.
 """
 
 import logging
 from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy.future import select
-from sqlalchemy.orm import selectinload
-from typing import List
 
 from db.database import AsyncSessionLocal
-from db.models import Claim
+from db.models import Claim, ClaimReport
 import db.claim_operations as claim_db
-from schemas.claims import (
-    CreateClaimRequest,
-    ClaimResponse,
-    ClaimStatusResponse,
-    ClaimReportResponse,
-    ClaimDecisionRequest,
-)
+from schemas.claims import CreateClaimRequest, ClaimDecisionRequest
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/claims", tags=["Claims"])
 
 
-@router.post("", response_model=ClaimResponse)
+def _serialize_claim(c: Claim) -> dict:
+    """Common claim representation used by create and list."""
+    return {
+        "claim_id": c.claim_id,
+        "claimant_name": c.claimant_name,
+        "claim_type": c.claim_type,
+        "policy_number": c.policy_id,
+        "priority": c.priority,
+        "amount": c.amount,
+        "description": c.description,
+        "status": c.status,
+        "submitted_at": c.submitted_at.isoformat() if c.submitted_at else None,
+        "workflow_run_id": c.workflow_run_id,
+    }
+
+
+@router.post("")
 async def create_claim(request: CreateClaimRequest):
-    """Create a new empty claim."""
+    """
+    Create a new claim record.
+    Returns the generated claim_id — the frontend uses this to link subsequent uploads.
+    """
     try:
-        claim_id = await claim_db.create_claim(
-            customer_id=request.customer_id,
+        claim = await claim_db.create_claim(
+            claimant_name=request.claimant_name,
             claim_type=request.claim_type,
-            metadata=request.metadata,
+            policy_number=request.policy_number,
+            description=request.description,
+            priority=request.priority or "medium",
+            amount=request.amount or 0.0,
         )
-        return ClaimResponse(
-            id=claim_id,
-            status="pending",
-            message="Claim created successfully. You can now upload documents linked to this claim.",
-        )
+        return _serialize_claim(claim)
     except Exception as e:
         logger.error(f"Error creating claim: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -47,152 +61,199 @@ async def create_claim(request: CreateClaimRequest):
 
 @router.get("")
 async def list_claims():
-    """List all claims."""
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Claim).order_by(Claim.created_at.desc())
-        )
-        claims = result.scalars().all()
-        return [
-            {
-                "id": c.id,
-                "customer_id": c.customer_id,
-                "claim_type": c.claim_type,
-                "status": c.status,
-                "created_at": c.created_at,
-                "workflow_run_id": c.workflow_run_id,
-                "message": c.error_details.get("error", "") if c.error_details else "",
-            }
-            for c in claims
-        ]
+    """Return all claims, newest first."""
+    claims = await claim_db.get_all_claims()
+    return [_serialize_claim(c) for c in claims]
 
 
-@router.get("/{claim_id}/status", response_model=ClaimStatusResponse)
+@router.get("/{claim_id}/status")
 async def get_claim_status(claim_id: str):
-    """Get the overall status of a claim and all its linked documents."""
+    """
+    Returns processing status, the required-document checklist, and any agent
+    results written so far. agent_results is populated incrementally as each
+    agent finishes, so the frontend can show live reasoning without waiting
+    for the full workflow.
+    """
+    claim = await claim_db.get_claim(claim_id)
+    if not claim:
+        raise HTTPException(status_code=404, detail=f"Claim {claim_id} not found")
+
+    status_info = await claim_db.get_claim_extraction_status(claim_id)
+
+    # Partial agent results written incrementally by the workflow
+    agent_results = {}
     async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Claim).options(selectinload(Claim.documents)).where(Claim.id == claim_id)
-        )
-        claim = result.scalar_one_or_none()
-        if not claim:
-            raise HTTPException(status_code=404, detail="Claim not found")
+        res = await session.execute(select(ClaimReport).where(ClaimReport.claim_id == claim_id))
+        partial_report = res.scalar_one_or_none()
+        if partial_report:
+            agent_results = partial_report.agent_results or {}
 
-        docs_status = []
-        for d in claim.documents:
-            docs_status.append(
-                {
-                    "document_id": d.id,
-                    "filename": d.filename,
-                    "doc_type": d.doc_type,
-                    "status": d.status,
-                }
-            )
+    return {
+        "claim_id": claim_id,
+        "claim_type": status_info.get("claim_type", claim.claim_type),
+        "claim_status": claim.status,
+        "agent_results": agent_results,
+        "total_docs": status_info["total_docs"],
+        "completed_docs": status_info["completed_docs"],
+        "failed_docs": status_info["failed_docs"],
+        "ready_to_process": status_info["ready_to_process"],
+        "doc_statuses": status_info["doc_statuses"],
+        "required_docs": status_info.get("required_docs", []),
+        "missing_required_count": status_info.get("missing_required_count", 0),
+        "all_required_completed": status_info.get("all_required_completed", False),
+    }
 
-        return ClaimStatusResponse(
-            claim_id=claim.id,
-            status=claim.status,
-            documents=docs_status,
-            workflow_run_id=claim.workflow_run_id,
-            message=claim.error_details.get("error", "") if claim.error_details else "",
+
+async def _assert_required_docs_present(claim: Claim):
+    """
+    Block claim processing when the claim type's required document checklist is
+    not satisfied. A claim already in 'failed' is allowed through so it can be retried.
+    """
+    status_info = await claim_db.get_claim_extraction_status(claim.claim_id)
+    if status_info.get("missing_required_count", 0) > 0 and claim.status != "failed":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Cannot run claim processing. {status_info['missing_required_count']} "
+                f"required document(s) are missing or pending extraction."
+            ),
         )
+
+
+async def _start_claim_pipeline(request: Request, claim: Claim):
+    """Enqueue the claim pipeline, or run it in-process when no Redis pool is configured."""
+    import asyncio
+    from platform_core.pipeline.definitions import build_claim_pipeline
+    from platform_core.pipeline.engine import PipelineEngine
+    from platform_core.pipeline.checkpoint import CheckpointManager
+    from platform_core.config import load_config
+
+    context = {
+        "claim_id": claim.claim_id,
+        "claimant_id": claim.claimant_id,
+        "policy_id": claim.policy_id,
+    }
+
+    redis_pool = getattr(request.app.state, "redis_pool", None)
+    if redis_pool:
+        await redis_pool.enqueue_job("run_claim_pipeline", **context)
+    else:
+        config = load_config()
+        pipeline = build_claim_pipeline(config)
+        engine = PipelineEngine(checkpoint_mgr=CheckpointManager())
+        asyncio.create_task(engine.run(pipeline=pipeline, context=context))
+
 
 @router.post("/{claim_id}/run")
 async def run_claim_workflow(request: Request, claim_id: str):
     """Trigger the claim-level AI workflow."""
+    claim = await claim_db.get_claim(claim_id)
+    if not claim:
+        raise HTTPException(status_code=404, detail=f"Claim {claim_id} not found")
+
+    if claim.status in ("processing", "evaluating"):
+        raise HTTPException(status_code=409, detail="Claim workflow is already running")
+
+    # Gate before taking a write session — get_claim_extraction_status opens its own.
+    await _assert_required_docs_present(claim)
+
+    await claim_db.update_claim_status(claim_id, "processing")
+
+    try:
+        await _start_claim_pipeline(request, claim)
+        return {"message": "Claim workflow started", "claim_id": claim.claim_id, "status": "processing"}
+    except Exception as e:
+        logger.error(f"Failed to start claim workflow: {e}")
+        await claim_db.update_claim_status(claim_id, "failed")
+        raise HTTPException(status_code=500, detail=f"Failed to start workflow: {e}")
+
+
+@router.post("/{claim_id}/rerun")
+async def rerun_claim_workflow(request: Request, claim_id: str):
+    """
+    Reset a completed/approved/rejected/failed claim back to 'ready' and re-fire
+    the claim pipeline. The existing report is deleted so the run starts fresh.
+    """
+    claim = await claim_db.get_claim(claim_id)
+    if not claim:
+        raise HTTPException(status_code=404, detail=f"Claim {claim_id} not found")
+
+    await _assert_required_docs_present(claim)
+
     async with AsyncSessionLocal() as session:
-        result = await session.execute(select(Claim).where(Claim.id == claim_id))
-        claim = result.scalar_one_or_none()
-        if not claim:
-            raise HTTPException(status_code=404, detail="Claim not found")
+        # Delete the old report so the workflow can write a fresh one
+        res = await session.execute(select(ClaimReport).where(ClaimReport.claim_id == claim_id))
+        old_report = res.scalar_one_or_none()
+        if old_report:
+            await session.delete(old_report)
 
-        if claim.status in ("processing", "evaluating"):
-            raise HTTPException(status_code=409, detail="Claim workflow is already running")
-
-        claim.status = "processing"
-        claim.error_details = None
+        res2 = await session.execute(select(Claim).where(Claim.claim_id == claim_id))
+        c = res2.scalar_one_or_none()
+        if c:
+            c.status = "ready"
+            c.workflow_run_id = None
         await session.commit()
 
-        # Start claim pipeline in background
-        import asyncio
-        from platform_core.pipeline.definitions import build_claim_pipeline
-        from platform_core.pipeline.engine import PipelineEngine
-        from platform_core.pipeline.checkpoint import CheckpointManager
-        from platform_core.config import load_config
-
-        try:
-            redis_pool = getattr(request.app.state, "redis_pool", None)
-            if redis_pool:
-                await redis_pool.enqueue_job(
-                    "run_claim_pipeline",
-                    claim_id=claim.id,
-                    claimant_id=claim.claimant_id,
-                    policy_id=claim.policy_id,
-                )
-            else:
-                config = load_config()
-                pipeline = build_claim_pipeline(config)
-                engine = PipelineEngine(checkpoint_mgr=CheckpointManager())
-                asyncio.create_task(
-                    engine.run(
-                        pipeline=pipeline,
-                        context={"claim_id": claim.id, "claimant_id": claim.claimant_id, "policy_id": claim.policy_id},
-                    )
-                )
-            return {"message": "Claim workflow started", "claim_id": claim.id}
-        except Exception as e:
-            logger.error(f"Failed to start claim workflow: {e}")
-            raise HTTPException(status_code=500, detail=f"Failed to start workflow: {e}")
+    try:
+        await _start_claim_pipeline(request, claim)
+        await claim_db.update_claim_status(claim_id, "processing")
+        return {"claim_id": claim_id, "status": "processing"}
+    except Exception as e:
+        logger.error(f"Failed to rerun claim workflow for {claim_id}: {e}")
+        await claim_db.update_claim_status(claim_id, "failed")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/{claim_id}/report")
 async def get_claim_report(claim_id: str):
-    """Get the final structured report and suggestion for a claim."""
+    """
+    Returns the final ClaimReport for a completed claim.
+    Contains all agent results and the suggestion paragraph.
+    """
     async with AsyncSessionLocal() as session:
-        result = await session.execute(select(Claim).where(Claim.id == claim_id))
-        claim = result.scalar_one_or_none()
-        if not claim:
-            raise HTTPException(status_code=404, detail="Claim not found")
+        result = await session.execute(select(ClaimReport).where(ClaimReport.claim_id == claim_id))
+        report = result.scalar_one_or_none()
 
-        return {
-            "claim_id": claim.id,
-            "status": claim.status,
-            "extracted_claim_data": claim.extracted_claim_data,
-            "discrepancies": claim.discrepancies,
-            "final_suggestion": claim.final_suggestion,
-            "reviewer_decision": claim.reviewer_decision,
-        }
+    if not report:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No report found for claim {claim_id}. Has the workflow completed?",
+        )
+
+    return {
+        "claim_id": report.claim_id,
+        "claimant_name": report.claimant_name,
+        "overall_status": report.overall_status,
+        "suggestion": report.suggestion,
+        "agent_results": report.agent_results,
+        "processed_at": report.processed_at.isoformat() if report.processed_at else None,
+    }
 
 
 @router.post("/{claim_id}/decision")
 async def submit_claim_decision(claim_id: str, request: ClaimDecisionRequest):
-    """Submit the final human decision (Approve/Reject) for a claim."""
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(select(Claim).where(Claim.id == claim_id))
-        claim = result.scalar_one_or_none()
-        if not claim:
-            raise HTTPException(status_code=404, detail="Claim not found")
+    """Record the adjuster's final decision on a claim (approve or reject)."""
+    if request.decision not in ("approve", "reject"):
+        raise HTTPException(status_code=400, detail="decision must be 'approve' or 'reject'")
 
-        claim.reviewer_decision = {
-            "decision": request.decision,
-            "reason": request.reason,
-            "timestamp": "now", # Ideally use actual timestamp
-        }
-        claim.status = "completed" if request.decision.lower() == "approve" else "rejected"
-        await session.commit()
+    claim = await claim_db.get_claim(claim_id)
+    if not claim:
+        raise HTTPException(status_code=404, detail=f"Claim {claim_id} not found")
 
-        return {"message": f"Decision '{request.decision}' recorded successfully"}
+    new_status = "approved" if request.decision == "approve" else "rejected"
+    await claim_db.update_claim_status(claim_id, new_status)
+
+    logger.info(f"[Claim {claim_id}] Decision: {new_status}. Notes: {request.notes}")
+    return {"claim_id": claim_id, "decision": new_status, "notes": request.notes}
 
 
 @router.delete("/{claim_id}")
 async def delete_claim(claim_id: str):
-    """Soft-delete a claim."""
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(select(Claim).where(Claim.id == claim_id))
-        claim = result.scalar_one_or_none()
-        if not claim:
-            raise HTTPException(status_code=404, detail="Claim not found")
-
-        claim.status = "deleted"
-        await session.commit()
-        return {"message": f"Claim {claim_id} deleted"}
+    """
+    Permanently delete a claim and all its linked document associations.
+    Does NOT delete the underlying document files from storage.
+    """
+    deleted = await claim_db.delete_claim(claim_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Claim {claim_id} not found")
+    return {"claim_id": claim_id, "deleted": True}

@@ -1,16 +1,43 @@
+# Python bytecode / caches
 __pycache__/
+**/__pycache__/
 *.pyc
 *.pyo
-.env
-.env.*
-storage/
-doc_workflow.db*
-*.log
-.git/
-.gitignore
-*.md
-tests/
 *.egg-info/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+.venv/
+venv/
+
+# Secrets — injected at runtime via env_file / environment
+.env
+.env.*
+
+# Local state that must never be baked into the image
+storage/
+doc_workflow.db*
+*.log
+app_logs.txt
+performance.log
+output.json
+config_code.txt
+
+# VCS
+.git/
+.gitignore
+
+# Docs — but keep platform_core/prompts/*.md, they are loaded at runtime
+# by platform_core/prompts/manager.py
+*.md
+!platform_core/prompts/*.md
+
+# Tests and superseded code
+tests/
+archive/
+main_legacy.py
+
+# Docker files themselves
+Dockerfile
+.dockerignore
+docker-compose*.yml

@@ -9,11 +9,11 @@ Call this tool to gather data:
 ## Checks to Perform
 Run ALL of the following checks:
 
-1. **Disability Certificate Present**: Verify that a disability_certificate document is present and contains an issuing doctor's name or a licensed physician's details. Mark FAIL if no certificate is found or the issuing authority is missing.
+1. **Disability Certificate Present**: Verify that a disability_certificate document is present and contains any of: `issuing_doctor`, `issuing_medical_board`, or a licensed authority/physician name. Mark PASS if the certificate is found with at least one issuing authority field populated. Mark FAIL only if the certificate is entirely absent from the claim.
 
-2. **Severity Mentioned**: Verify that the disability severity (e.g., mild, moderate, severe, partial, total) is explicitly stated in the disability_certificate. Mark FAIL if severity is absent.
+2. **Severity Mentioned**: Verify that the disability severity is indicated in the disability_certificate. Accept any of: `severity`, `disability_nature` (Permanent/Temporary), `percentage_of_disability`, or a severity keyword in `disability_type`. Mark FAIL only if none of these fields carry any severity information at all.
 
-3. **Limitations Consistent with Diagnosis**: Cross-reference the functional limitations described in the disability_certificate against the medical_report diagnosis. Assess whether the claimed disability type and level are medically consistent with the diagnosis. Mark FAIL if there is a clear inconsistency (e.g., claiming full limb paralysis for a minor soft tissue injury).
+3. **Limitations Consistent with Diagnosis**: Cross-reference the disability information (`disability_type`, `functional_limitations`, or `disability_nature`) against the medical_report diagnosis. Assess whether the claimed disability type and level are medically plausible given the diagnosis. Mark FAIL only if there is a clear and direct contradiction (e.g., claiming full limb paralysis for a minor soft tissue injury). If functional_limitations is absent but disability_type is consistent with the diagnosis, mark PASS.
 
 ## Output Format
 Return ONLY a valid JSON object in this exact structure — no extra text, no markdown:

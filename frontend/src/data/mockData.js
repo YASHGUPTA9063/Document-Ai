@@ -1,11 +1,12 @@
 // ─── Pipeline Steps ───────────────────────────────────────
 export const pipelineSteps = [
-  { icon: '📥', label: 'Intake', time: '0.1s' },
-  { icon: '🔍', label: 'OCR/Parse', time: '0.3s' },
-  { icon: '🏷️', label: 'Classify', time: '0.2s' },
-  { icon: '🤖', label: 'Extract', time: '0.8s' },
-  { icon: '✅', label: 'Validate', time: '0.4s' },
-  { icon: '🔄', label: 'Enrich', time: '0.2s' },
+  { icon: '📥', label: 'Ingestion', time: '0.1s' },
+  { icon: '🛡️', label: 'Quality Check', time: '0.2s' },
+  { icon: '⚙️', label: 'Pre Processing', time: '0.3s' },
+  { icon: '🏷️', label: 'Classification', time: '0.2s' },
+  { icon: '🤖', label: 'Extraction', time: '0.8s' },
+  { icon: '✅', label: 'Validation', time: '0.4s' },
+  { icon: '🔄', label: 'Human Review', time: '0.2s' },
   { icon: '📤', label: 'Output', time: '0.1s' },
 ];
 

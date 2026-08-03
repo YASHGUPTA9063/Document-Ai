@@ -1,22 +1,51 @@
-version: '3.8'
+# Document AI Platform — local / single-host stack
+#
+# Secrets and agent IDs come from .env (see .env.example). Compose auto-loads
+# that file, so it feeds both `env_file` below and ${VAR} interpolation.
+
+x-backend-env: &backend-env
+  # Container-network overrides. These intentionally take precedence over the
+  # values in .env, which point at localhost for running outside Docker.
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-document_ai}
+  REDIS_URL: redis://redis:6379/0
+  STORAGE_DIR: /app/storage
+
+x-backend-base: &backend-base
+  build:
+    context: .
+  image: document-ai-backend:latest
+  env_file: .env
+  environment: *backend-env
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  volumes:
+    - app_storage:/app/storage
+    - ./config:/app/config:ro
+    - ./migrations:/app/migrations:ro
+  restart: unless-stopped
 
 services:
   postgres:
     image: postgres:15-alpine
     container_name: document_ai_postgres
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: document_ai
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-document_ai}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      # -d matters: without it pg_isready reports ready before the DB is created
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-document_ai}"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
@@ -30,60 +59,35 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   app:
-    build: .
+    <<: *backend-base
     container_name: document_ai_app
     ports:
       - "8000:8000"
-    env_file: .env
-    environment:
-      # Mistral Managed Workflows — these must be set at process level
-      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
-      - DEPLOYMENT_NAME=${DEPLOYMENT_NAME}
-      - MISTRAL_WORKFLOW_ID=${MISTRAL_WORKFLOW_ID}
-      # Temporal connection to Mistral's managed cloud (overrides localhost:7233 default)
-      - TEMPORAL_SERVER_URL=${TEMPORAL_SERVER_URL}
-      - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE}
-      - TEMPORAL_TLS=${TEMPORAL_TLS}
-      - TEMPORAL_API_KEY=${TEMPORAL_API_KEY}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./storage:/app/storage
-      - ./config:/app/config
-      - ./migrations:/app/migrations
-    restart: unless-stopped
 
   worker:
-    build: .
+    <<: *backend-base
     container_name: document_ai_worker
-    command: arq worker.WorkerSettings
-    env_file: .env
-    environment:
-      # Mistral Managed Workflows — these must be set at process level
-      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
-      - DEPLOYMENT_NAME=${DEPLOYMENT_NAME}
-      - MISTRAL_WORKFLOW_ID=${MISTRAL_WORKFLOW_ID}
-      # Temporal connection to Mistral's managed cloud (overrides localhost:7233 default)
-      - TEMPORAL_SERVER_URL=${TEMPORAL_SERVER_URL}
-      - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE}
-      - TEMPORAL_TLS=${TEMPORAL_TLS}
-      - TEMPORAL_API_KEY=${TEMPORAL_API_KEY}
+    command: ["arq", "worker.WorkerSettings"]
+
+  frontend:
+    build:
+      context: ../frontend-v2
+      args:
+        # Relative path — nginx proxies /api/ to the app service, so the browser
+        # never issues a cross-origin request and no host is baked into the bundle.
+        VITE_API_BASE_URL: /api/v1
+    image: document-ai-frontend:latest
+    container_name: document_ai_frontend
+    ports:
+      - "3000:80"
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./storage:/app/storage
-      - ./config:/app/config
-      - ./migrations:/app/migrations
+      - app
     restart: unless-stopped
 
 volumes:
   postgres_data:
   redis_data:
+  app_storage:

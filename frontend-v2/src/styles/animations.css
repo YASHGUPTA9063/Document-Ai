@@ -5,8 +5,8 @@
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 0 rgba(250, 82, 15, 0.2); }
-  50%       { opacity: 0.75; transform: scale(0.94); box-shadow: 0 0 0 6px rgba(250, 82, 15, 0); }
+  0%, 100% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 0 var(--pulse-glow-1); }
+  50%       { opacity: 0.75; transform: scale(0.94); box-shadow: 0 0 0 6px var(--pulse-glow-2); }
 }
 
 @keyframes ping {
@@ -58,8 +58,8 @@
 }
 
 @keyframes glow-pulse {
-  0%, 100% { box-shadow: 0 0 16px rgba(250, 82, 15, 0.3); }
-  50%       { box-shadow: 0 0 28px rgba(250, 82, 15, 0.6); }
+  0%, 100% { box-shadow: var(--glow-pulse-1); }
+  50%       { box-shadow: var(--glow-pulse-2); }
 }
 
 @keyframes float {
@@ -108,7 +108,12 @@
   border-radius: var(--radius-sm);
 }
 
-.spin { animation: spin 0.8s linear infinite; }
+.spin, .spin-icon, .animate-spin {
+  animation: spin 0.8s linear infinite !important;
+  transform-origin: center !important;
+  transform-box: fill-box !important;
+  display: inline-block !important;
+}
 
 /* ─── Pulse dot (live indicator) ─────────────────── */
 .pulse-dot {

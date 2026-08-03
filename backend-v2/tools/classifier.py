@@ -7,37 +7,9 @@ from utils.classification_config import load_classification_config
 
 logger = logging.getLogger(__name__)
 
-# ─── TOOL SCHEMAS ───
-CLASSIFIER_TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "get_supported_document_types",
-            "description": "Gets the list of currently supported document templates and types in the system.",
-            "parameters": {
-                "type": "object",
-                "properties": {}
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_document_text",
-            "description": "Extracts the raw text content of the document using OCR. For PDFs, it restricts OCR to the first two pages.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "file_path": {
-                        "type": "string",
-                        "description": "The file path of the document to run OCR on."
-                    }
-                },
-                "required": ["file_path"]
-            }
-        }
-    }
-]
+# Classification is vision-first and makes a single tool-free LLM call, so no
+# tool schemas are exported here. get_document_text remains for the non-visual
+# (DOCX/spreadsheet) fallback path.
 
 # ─── TOOL FUNCTIONS ───
 def get_supported_doc_types() -> dict:

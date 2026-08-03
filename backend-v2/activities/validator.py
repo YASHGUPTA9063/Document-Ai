@@ -38,9 +38,15 @@ async def validator_activity(document_id: str, extracted_data: dict, doc_type: s
             else:
                 return {"error": f"Unknown tool: {name}"}
 
+        # Strip the base64 image blobs out of the prompt — they are enormous and
+        # would swamp the LLM context. They are re-injected after validation.
+        prompt_data = (extracted_data or {}).copy()
+        sig_img = prompt_data.pop("signature_image", None)
+        photo_img = prompt_data.pop("photo_image", None)
+
         user_message = (
             f"Please validate the following extracted data for a '{doc_type}' document.\n\n"
-            f"Extracted data:\n{json.dumps(extracted_data, indent=2)}\n\n"
+            f"Extracted data:\n{json.dumps(prompt_data, indent=2)}\n\n"
             f"OCR Confidence: {ocr_confidence}\n"
             f"Field Confidences: {json.dumps(field_confidences or {}, indent=2)}\n\n"
             f"You can call the `get_template_fields` tool with doc_type='{doc_type}' to get "
@@ -49,7 +55,7 @@ async def validator_activity(document_id: str, extracted_data: dict, doc_type: s
             f"and return the validation result as JSON."
         )
 
-        result = await run_agent_loop(
+        parsed = await run_agent_loop(
             llm=llm,
             system_prompt=system_prompt,
             user_message=user_message,
@@ -58,8 +64,35 @@ async def validator_activity(document_id: str, extracted_data: dict, doc_type: s
             temperature=0.2,
         )
 
-        logger.info(f"[Document {document_id}] Validation result: is_valid={result.get('is_valid')}")
-        return result
+        validated_data = parsed.get("validated_data", prompt_data)
+
+        # Re-inject the base64 strings so they are persisted to the database
+        if sig_img is not None:
+            validated_data["signature_image"] = sig_img
+        if photo_img is not None:
+            validated_data["photo_image"] = photo_img
+
+        # Strictly enforce template fields on validated_data — the model
+        # otherwise carries through keys the template does not define.
+        template_fields = get_template_fields(doc_type)
+        if template_fields and isinstance(template_fields, list):
+            allowed_keys = set(
+                (f.get("key") or f.get("name") or str(f)) if isinstance(f, dict) else str(f)
+                for f in template_fields
+            ) | {"signature_image", "photo_image", "signature_detected", "photo_detected"}
+
+            unwanted = [k for k in list(validated_data.keys()) if k not in allowed_keys]
+            for k in unwanted:
+                validated_data.pop(k, None)
+
+        logger.info(f"[Document {document_id}] Validation result: is_valid={parsed.get('is_valid')}")
+        return {
+            "is_valid": parsed.get("is_valid", False),
+            "confidence_score": ocr_confidence,
+            "validation_errors": parsed.get("validation_errors", []),
+            "validated_data": validated_data,
+            "field_confidences": field_confidences or {},
+        }
 
     except Exception as e:
         logger.error(f"[Document {document_id}] Validator failed: {str(e)}")

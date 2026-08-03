@@ -327,6 +327,16 @@ export async function runClaimWorkflow(claimId) {
 }
 
 /**
+ * Reset a finished claim and re-run the claim processing workflow.
+ * @param {string} claimId
+ * @returns {Promise<{ claim_id, status }>}
+ */
+export async function rerunClaimWorkflow(claimId) {
+  const { data } = await api.post(`/claims/${claimId}/rerun`);
+  return data;
+}
+
+/**
  * Get the final claim report (after workflow completes).
  * @param {string} claimId
  * @returns {Promise<{ claim_id, claimant_name, overall_status, suggestion, agent_results, processed_at }>}

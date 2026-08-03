@@ -1244,7 +1244,7 @@
           <g transform="translate(80,50)">
             <circle r="22" fill="rgba(6,182,212,0.2)" stroke="#06b6d4" stroke-width="1.5"/>
             <text text-anchor="middle" dominant-baseline="middle" fill="white" font-size="14">📥</text>
-            <text y="34" text-anchor="middle" fill="#67e8f9" font-size="10">Intake</text>
+            <text y="34" text-anchor="middle" fill="#67e8f9" font-size="10">Ingestion</text>
           </g>
           <g transform="translate(180,140)">
             <circle r="22" fill="rgba(139,92,246,0.2)" stroke="#8b5cf6" stroke-width="1.5"/>
@@ -1509,12 +1509,13 @@
 <script>
 // ═══ DATA ═══════════════════════════════════════════════
 const pipelineSteps = [
-  { icon:'📥', label:'Intake', time:'0.1s' },
-  { icon:'🔍', label:'OCR/Parse', time:'0.3s' },
-  { icon:'🏷️', label:'Classify', time:'0.2s' },
-  { icon:'🤖', label:'Extract', time:'0.8s' },
-  { icon:'✅', label:'Validate', time:'0.4s' },
-  { icon:'🔄', label:'Enrich', time:'0.2s' },
+  { icon:'📥', label:'Ingestion', time:'0.1s' },
+  { icon:'🛡️', label:'Quality Check', time:'0.2s' },
+  { icon:'⚙️', label:'Pre Processing', time:'0.3s' },
+  { icon:'🏷️', label:'Classification', time:'0.2s' },
+  { icon:'🤖', label:'Extraction', time:'0.8s' },
+  { icon:'✅', label:'Validation', time:'0.4s' },
+  { icon:'🔄', label:'Human Review', time:'0.2s' },
   { icon:'📤', label:'Output', time:'0.1s' },
 ];
 
@@ -1528,7 +1529,7 @@ const agents = [
   },
   {
     icon:'📥', color:'rgba(6,182,212,0.2)', border:'#06b6d4',
-    name:'Intake Agent', role:'Document Ingestion',
+    name:'Ingestion Agent', role:'Document Ingestion',
     status:'done',
     desc:'Validates file formats, extracts metadata, deduplicates, and queues documents for processing.',
     docs:1243, accuracy:'100%', latency:'0.1s'
@@ -1565,8 +1566,8 @@ const agents = [
 
 const logMessages = [
   ['🎭', 'log-accent', 'Orchestrator', 'New document ingested: invoice_Q2_2024.pdf (2.1 MB)'],
-  ['📥', 'log-cyan', 'Intake', 'File validated — PDF/A, 2 pages, no corruption detected'],
-  ['📥', 'log-cyan', 'Intake', 'SHA-256 hash computed — no duplicate found in index'],
+  ['📥', 'log-cyan', 'Ingestion', 'File validated — PDF/A, 2 pages, no corruption detected'],
+  ['📥', 'log-cyan', 'Ingestion', 'SHA-256 hash computed — no duplicate found in index'],
   ['🎭', 'log-accent', 'Orchestrator', 'Routing to Classifier agent...'],
   ['🏷️', 'log-success', 'Classifier', 'Document type: INVOICE (confidence: 99.3%)'],
   ['🏷️', 'log-success', 'Classifier', 'Sub-type: B2B / Accounts Payable invoice detected'],
@@ -1821,7 +1822,7 @@ function renderQueue() {
 
 // ═══ PROCESSING MODAL ════════════════════════════════
 const procStepsData = [
-  { icon:'📥', name:'Document Intake', detail:'Validating file format and computing hash...', status:'⏳' },
+  { icon:'📥', name:'Document Ingestion', detail:'Validating file format and computing hash...', status:'⏳' },
   { icon:'🔍', name:'OCR & Parsing', detail:'Extracting text and layout from PDF...', status:'⏳' },
   { icon:'🏷️', name:'Classification', detail:'Identifying document type and schema...', status:'⏳' },
   { icon:'🤖', name:'Field Extraction', detail:'Running multi-pass LLM extraction...', status:'⏳' },
@@ -1848,7 +1849,7 @@ function startProcessing() {
 
   let step = 0;
   const pct = [10, 22, 38, 58, 72, 88, 100];
-  const doneLabels = ['Intake complete ✓','OCR complete ✓','Invoice detected ✓','18 fields extracted ✓','6 line items found ✓','All checks passed ✓','Stored as doc_id:INV-00847 ✓'];
+  const doneLabels = ['Ingestion complete ✓','OCR complete ✓','Invoice detected ✓','18 fields extracted ✓','6 line items found ✓','All checks passed ✓','Stored as doc_id:INV-00847 ✓'];
   const delays = [600, 900, 700, 1400, 800, 1000, 500];
 
   function runStep(i) {

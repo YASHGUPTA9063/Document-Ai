@@ -5,6 +5,15 @@ import { getExtractedData, getDocumentFileUrl, updateExtractedData, getTemplates
 import { useApp } from '../store/AppStore';
 import { useDocumentList } from '../hooks/useDocumentList';
 
+function isNullOrEmpty(v) {
+  if (v === null || v === undefined) return true;
+  if (typeof v === 'string') {
+    const trimmed = v.trim().toLowerCase();
+    return trimmed === '' || trimmed === 'null' || trimmed === 'none';
+  }
+  return false;
+}
+
 function parseTableData(value, key) {
   if (value === null || value === undefined) return null;
   let parsed = value;
@@ -235,7 +244,7 @@ function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighT
                             <input
                               type="text"
                               className="styled-input"
-                              value={cellVal ?? ''}
+                              value={isNullOrEmpty(cellVal) ? '' : cellVal}
                               onChange={(e) => handleCellChange(rIdx, h, e.target.value)}
                               style={{
                                 width: '100%',
@@ -247,7 +256,7 @@ function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighT
                               }}
                             />
                           ) : (
-                            cellVal == null ? <span style={{ color: 'var(--muted)' }}>—</span> : String(cellVal)
+                            isNullOrEmpty(cellVal) ? '' : String(cellVal)
                           )}
                         </td>
                       );
@@ -400,7 +409,10 @@ function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighT
     );
   }
 
-  const hasRawDiff = rawVal !== undefined && rawVal !== null && String(rawVal) !== String(value) && typeof rawVal !== 'object';
+  const rawIsNull = isNullOrEmpty(rawVal);
+  const valIsNull = isNullOrEmpty(value);
+
+  const hasRawDiff = !rawIsNull && typeof rawVal !== 'object' && String(rawVal).trim() !== String(value ?? '').trim();
 
   return (
     <div
@@ -415,17 +427,19 @@ function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighT
           <input
             type="text"
             className="styled-input"
-            value={value ?? ''}
+            value={valIsNull ? '' : value}
             onChange={(e) => onChange(fieldKey, e.target.value)}
             style={{ width: '100%', padding: '4px 8px', fontSize: 13, background: 'var(--card-alt)' }}
           />
         ) : (
-          (value == null && !hasRawDiff) ? <span style={{ color: 'var(--muted)' }}>—</span> :
+          (valIsNull && !hasRawDiff) ? '' :
             (() => {
               const displayVal = hasRawDiff ? rawVal : value;
-              const renderedText = typeof displayVal === 'object' ?
-                <code style={{ fontSize: 11, background: 'transparent', color: 'inherit' }}>{JSON.stringify(displayVal)}</code> :
-                String(displayVal);
+              const renderedText = isNullOrEmpty(displayVal) ?
+                '' :
+                (typeof displayVal === 'object' ?
+                  <code style={{ fontSize: 11, background: 'transparent', color: 'inherit' }}>{JSON.stringify(displayVal)}</code> :
+                  String(displayVal));
 
               if (!isEditing && pct != null && pct < fieldHighlightThreshold) {
                 return (
@@ -449,7 +463,7 @@ function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighT
         )}
         {hasRawDiff && (
           <span style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic', marginTop: 2 }}>
-            {isEditing ? `Original (OCR): "${String(rawVal)}"` : `normalised: "${String(value)}"`}
+            {isEditing ? `Original (OCR): "${rawIsNull ? '' : String(rawVal)}"` : `normalised: "${valIsNull ? '' : String(value)}"`}
           </span>
         )}
       </div>
@@ -1262,13 +1276,13 @@ function KycImageCard({ label, icon: Icon, base64Data, detected, accentColor, ve
               fontSize: 9, fontWeight: 600,
               padding: '2px 8px', borderRadius: 99,
               display: 'inline-flex', alignItems: 'center', gap: 3,
-              ...(verificationResult.verdict === 'genuine'
+              ...(['genuine', 'same_person'].includes(verificationResult.verdict)
                 ? { color: '#059669', background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)' }
-                : verificationResult.verdict === 'uncertain'
+                : ['uncertain', 'needs_review'].includes(verificationResult.verdict)
                   ? { color: '#d97706', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }
                   : { color: '#dc2626', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' })
             }}>
-              {verificationResult.verdict === 'genuine' ? <CheckCircle2 size={8} /> : verificationResult.verdict === 'uncertain' ? <AlertTriangle size={8} /> : <Shield size={8} />}
+              {['genuine', 'same_person'].includes(verificationResult.verdict) ? <CheckCircle2 size={8} /> : ['uncertain', 'needs_review'].includes(verificationResult.verdict) ? <AlertTriangle size={8} /> : <Shield size={8} />}
               {(verificationResult.verdict || 'unknown').toUpperCase()}
             </span>
           )}

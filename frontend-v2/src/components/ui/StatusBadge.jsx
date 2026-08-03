@@ -4,15 +4,15 @@ import {
 
 const STATUS_MAP = {
   pending:          { label: 'Pending',          cls: 'badge-gray',   icon: null },
-  pre_validating:   { label: 'Pre-Validating',   cls: 'badge-cyan',   icon: Shield },
-  preprocessing:    { label: 'Preprocessing',    cls: 'badge-purple', icon: Wand2 },
-  processing:       { label: 'Intake',           cls: 'badge-blue',   icon: Upload },
-  classifying:      { label: 'Classifying',      cls: 'badge-blue',   icon: Bot },
+  pre_validating:   { label: 'Quality Check',    cls: 'badge-cyan',   icon: Shield },
+  preprocessing:    { label: 'Pre Processing',   cls: 'badge-purple', icon: Wand2 },
+  processing:       { label: 'Ingestion',        cls: 'badge-blue',   icon: Upload },
+  classifying:      { label: 'Classification',   cls: 'badge-blue',   icon: Bot },
   fraud_checking:   { label: 'Fraud Checking',   cls: 'badge-blue',   icon: Shield },
-  extracting:       { label: 'Extracting',       cls: 'badge-blue',   icon: FileSearch },
+  extracting:       { label: 'Extraction',       cls: 'badge-blue',   icon: FileSearch },
 
-  validating:       { label: 'Validating',       cls: 'badge-blue',   icon: CheckCircle },
-  awaiting_review:  { label: 'Needs Review',     cls: 'badge-yellow', icon: AlertTriangle },
+  validating:       { label: 'Validation',       cls: 'badge-blue',   icon: CheckCircle },
+  awaiting_review:  { label: 'Human Review',     cls: 'badge-yellow', icon: AlertTriangle },
   duplicate:        { label: 'Duplicate',        cls: 'badge-yellow', icon: AlertTriangle },
   completed:        { label: 'Completed',        cls: 'badge-green',  icon: Check },
   rejected:         { label: 'Rejected',         cls: 'badge-red',    icon: X },

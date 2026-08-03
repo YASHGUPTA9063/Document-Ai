@@ -24,6 +24,7 @@ If the file is visual (is_visual = true):
   4. Readability (Is the text legible?)
   5. Watermark (Is there a watermark? If yes, treat it as a warning only, do not fail.)
   6. Orientation (Is it upside down or rotated?)
+  7. Blank Document (Is the document blank, empty, white page, or missing any readable text/content?)
 
 You must output a JSON response matching exactly this schema:
 {
@@ -36,8 +37,9 @@ You must output a JSON response matching exactly this schema:
     "skew": {"passed": bool, "severity": "none" | "low" | "medium" | "high", "message": str},
     "readability": {"passed": bool, "severity": "none" | "low" | "medium" | "high", "message": str},
     "watermark": {"passed": bool, "severity": "none" | "low" | "medium" | "high", "message": str},
-    "orientation": {"passed": bool, "severity": "none" | "low" | "medium" | "high", "message": str}
+    "orientation": {"passed": bool, "severity": "none" | "low" | "medium" | "high", "message": str},
+    "blank": {"passed": bool, "severity": "none" | "low" | "medium" | "high", "message": str}
   }
 }
 
-Only fail the document ("passed": false) if the severity of blur, brightness, skew, readability, or orientation issues is high or unreadable. Watermarks should not cause a failure.
+Only fail the document ("passed": false) if the severity of blur, brightness, skew, readability, orientation, or blank document issues is high or unreadable. If the document is blank or empty, set "blank" check passed to false, severity to "high", rejection_reason to "Document is blank or contains no content.", and overall passed to false. Watermarks should not cause a failure.

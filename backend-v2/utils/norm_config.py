@@ -8,7 +8,7 @@ DEFAULT_NORM_CONFIG = {
     "date_format": "YYYY-MM-DD",
     "number_format": "float",
     "name_casing": "Title Case",
-    "name_sequence": "Firstname Lastname",
+    "name_sequence": "First Name Last Name",
     "custom_rules": ""
 }
 
@@ -56,13 +56,16 @@ def build_normalization_rules_prompt() -> str:
         
     # 2. Number rule
     if num_opt == "float":
-        num_str = "Convert to float/integer numbers (e.g. '$1,250.50' -> 1250.5). Strip any currency symbols."
+        num_str = "Convert monetary amounts to float/integer numbers (e.g. '$1,250.50' -> 1250.5). Strip currency symbols. (Note: rate/percentage fields are preserved separately)."
     elif num_opt == "integer":
-        num_str = "Convert to integer numbers (e.g. '$1,250.50' -> 1250). Strip decimals and currency symbols."
+        num_str = "Convert monetary amounts to integer numbers (e.g. '$1,250.50' -> 1250). Strip decimals and currency symbols. (Note: rate/percentage fields are preserved separately)."
     else:
         num_str = "Keep numbers as strings (e.g. '$1,250.50' -> '$1,250.50')."
         
-    # 3. Casing rule
+    # 3. Rate & Percentage rule
+    rate_str = "For rate, percentage, or withholding fields (e.g. 'Tax Treaty Withholding Rate', 'Tax Rate', 'Interest Rate', etc.), always preserve or append the percentage sign '%' in normalized_extracted (e.g. '21%' or 21 -> '21%'). Do NOT strip the '%' sign from rate/percentage fields."
+
+    # 4. Casing rule
     if casing_opt == "Title Case":
         casing_str = "Normalize spelling and standardize to Title Case."
     elif casing_opt == "UPPERCASE":
@@ -70,10 +73,10 @@ def build_normalization_rules_prompt() -> str:
     else:
         casing_str = "Keep name/address casing exactly as it is written in the document."
         
-    # 4. Name structure sequence rule
-    seq_opt = config.get("name_sequence", "Firstname Lastname")
-    if seq_opt == "Firstname Lastname":
-        seq_str = "Format person names as 'Firstname Lastname' (e.g. 'John Doe')."
+    # 5. Name structure sequence rule
+    seq_opt = config.get("name_sequence", "First Name Last Name")
+    if seq_opt in ("Firstname Lastname", "First Name Last Name"):
+        seq_str = "Format person names as 'First Name Last Name' (e.g. 'John Doe')."
     elif seq_opt == "Firstname Middlename Lastname":
         seq_str = "Format person names as 'Firstname Middlename Lastname' (e.g. 'John Albert Doe'). If no middle name exists, omit it."
     elif seq_opt == "Lastname Firstname":
@@ -90,6 +93,7 @@ def build_normalization_rules_prompt() -> str:
     rules = [
         f"   - Dates: {date_str}",
         f"   - Amounts/Numbers: {num_str}",
+        f"   - Rates & Percentages: {rate_str}",
         f"   - Names & Addresses: {casing_str}",
         f"   - Name Structure: {seq_str}"
     ]

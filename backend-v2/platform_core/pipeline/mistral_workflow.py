@@ -148,11 +148,9 @@ async def activity_validate(
 )
 async def activity_auto_verify(document_id: str, validated_data: dict) -> dict:
     """Step 5.5: Automated verification (signature + face matching)."""
-    from activities.auto_verifier import auto_verifier_activity
+    from activities.auto_verifier import auto_verify_activity
     logger.info(f"[MistralWorkflow] Running auto-verification for {document_id}")
-    # Extract customer_id from validated data
-    customer_id = validated_data.get("customer_id", "")
-    return await auto_verifier_activity(document_id, customer_id)
+    return await auto_verify_activity(document_id, validated_data)
 
 
 @workflows.activity(

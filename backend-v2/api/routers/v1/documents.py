@@ -7,8 +7,11 @@ Split from the monolithic main.py for API versioning and maintainability.
 
 import os
 import asyncio
+import base64
 import logging
 import mimetypes
+import shutil
+import tempfile
 from typing import List
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Query, Request
@@ -375,6 +378,98 @@ async def get_ocr_blocks(document_id: str):
     except Exception as e:
         logger.warning(f"Failed to read OCR blocks for document {document_id}: {e}")
         return {"blocks": [], "available": False}
+
+
+# ─── Manual Verification ─────────────────────────────────────────────────────
+
+@router.post("/{document_id}/verify-signature")
+async def verify_signature(
+    document_id: str,
+    file: UploadFile = File(...),
+    verification_type: str = Query("signature", description="'signature' or 'photo'"),
+):
+    """
+    Compare an extracted signature/photo against a user-uploaded reference image.
+
+    Runs the full verification pipeline:
+      DINO embeddings (thread) ∥ Vision Agent (async) → Judge Agent → final verdict
+
+    The result is persisted on the ExtractedData row for future retrieval.
+    """
+    if verification_type not in ("signature", "photo"):
+        raise HTTPException(status_code=400, detail="verification_type must be 'signature' or 'photo'")
+
+    # 1. Load extracted data to get the base64 crop
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(ExtractedData).where(ExtractedData.document_id == document_id)
+        )
+        data = result.scalar_one_or_none()
+        if not data:
+            raise HTTPException(status_code=404, detail="Extracted data not found for this document")
+
+        image_key = "signature_image" if verification_type == "signature" else "photo_image"
+
+        if not data.validated_data or not data.validated_data.get(image_key):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"No {verification_type} image found in extracted data. "
+                    f"Ensure the document has been processed as a KYC document."
+                ),
+            )
+
+        base64_data = data.validated_data[image_key]
+
+    # 2. Save both images to temp files
+    tmp_dir = tempfile.mkdtemp(prefix="sig_verify_")
+    try:
+        doc_img_path = os.path.join(tmp_dir, f"extracted_{verification_type}.png")
+        with open(doc_img_path, "wb") as f:
+            f.write(base64.b64decode(base64_data))
+
+        ref_img_path = os.path.join(tmp_dir, f"reference_{verification_type}.png")
+        ref_content = await file.read()
+        with open(ref_img_path, "wb") as f:
+            f.write(ref_content)
+
+        # 3. Run the appropriate verification pipeline
+        if verification_type == "photo":
+            from utils.face_verifier import run_face_verification_pipeline
+            pipeline_result = await run_face_verification_pipeline(
+                doc_path=doc_img_path, ref_path=ref_img_path, debug_dir=None
+            )
+        else:
+            from utils.signature_verifier import run_verification_pipeline
+            pipeline_result = await run_verification_pipeline(
+                doc_path=doc_img_path, ref_path=ref_img_path, debug_dir=None
+            )
+
+        # 4. Persist result to database
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(ExtractedData).where(ExtractedData.document_id == document_id)
+            )
+            data = result.scalar_one_or_none()
+            if data:
+                if verification_type == "signature":
+                    data.signature_verification = pipeline_result
+                else:
+                    data.photo_verification = pipeline_result
+
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(data, f"{verification_type}_verification")
+                await session.commit()
+
+        return pipeline_result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Signature verification failed for document {document_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Verification failed: {str(e)}")
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 # ─── Retry & Delete ─────────────────────────────────────────────────────────

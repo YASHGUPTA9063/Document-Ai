@@ -375,7 +375,7 @@ export function Templates() {
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
               >
                 {kycFlag && <ShieldCheck size={12} style={{ color: 'var(--accent)' }} />}
-                {key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')} Template
+                {key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
                 {kycFlag && (
                   <span style={{
                     fontSize: 9, fontWeight: 700, color: 'var(--accent)',
