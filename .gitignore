@@ -28,7 +28,7 @@ __pycache__/
 .ipynb_checkpoints/
 
 # Environments
-.env
+
 *.db
 
 # SQLite runtime sidecar files — regenerated on every run, conflict on every merge
