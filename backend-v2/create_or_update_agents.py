@@ -9,7 +9,7 @@ Usage:
 import os
 import sys
 from dotenv import load_dotenv
-from mistralai.client import Mistral
+from mistralai import Mistral
 
 # Locate directories relative to this file
 base_dir = os.path.dirname(os.path.abspath(__file__))

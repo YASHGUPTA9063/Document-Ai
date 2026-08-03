@@ -10,11 +10,13 @@ const initialRows = [
 ];
 
 const validationRules = [
-  { label: 'Confidence threshold triggers review', badge: '< 85%', variant: 'green' },
-  { label: 'Math cross-check on financial docs', badge: 'Enabled', variant: 'green' },
-  { label: 'Date format normalization (ISO 8601)', badge: 'Enabled', variant: 'green' },
-  { label: 'Vendor name fuzzy match (>90%)', badge: 'Enabled', variant: 'green' },
-  { label: 'Duplicate detection (SHA-256 hash)', badge: 'Enabled', variant: 'green' },
+  { label: 'Review Confidence Threshold', badge: '< 80%', variant: 'green' },
+  { label: 'Mandatory Field Completeness Check', badge: 'Enabled', variant: 'green' },
+  { label: 'Financial Total Reconciliation', badge: 'Enabled', variant: 'green' },
+  { label: 'Line Item & Subtotal Verification', badge: 'Enabled', variant: 'green' },
+  { label: 'Issue & Expiration Date Chronology Check', badge: 'Enabled', variant: 'green' },
+  { label: 'Document Template Schema Alignment', badge: 'Enabled', variant: 'green' },
+  { label: 'OCR Error & Typo Normalization', badge: 'Enabled', variant: 'green' },
 ];
 
 const reviewHistory = [

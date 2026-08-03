@@ -124,10 +124,29 @@ def install_performance_hooks():
     except Exception as e:
         logger.warning(f"Could not patch document workflow tool functions: {e}")
 
-    # 4. Wrap Claim validation tools
+    # 4. Wrap individual claim tool functions (so each tool shows separately in the log)
     try:
         import tools.claim_tools as ct
-        ct.dispatch_claim_tool = wrap_timing(ct.dispatch_claim_tool, "tool", "dispatch_claim_tool")
+        ct.get_claim_documents_data = wrap_timing(ct.get_claim_documents_data, "tool", "get_claim_documents_data")
+        ct.get_claimant_history     = wrap_timing(ct.get_claimant_history,     "tool", "get_claimant_history")
+        ct.get_policy_details       = wrap_timing(ct.get_policy_details,       "tool", "get_policy_details")
+        # Also wrap dispatcher so total tool-dispatch overhead is visible
+        ct.dispatch_claim_tool      = wrap_timing(ct.dispatch_claim_tool,      "tool", "dispatch_claim_tool")
         logger.info("Successfully patched claim workflow tool functions")
     except Exception as e:
         logger.warning(f"Could not patch claim workflow tool functions: {e}")
+
+    # 5. Wrap claim DB operations called during a workflow run
+    try:
+        import db.claim_operations as cdb
+        cdb.get_claim              = wrap_timing(cdb.get_claim,              "db", "get_claim")
+        cdb.update_claim_status    = wrap_timing(cdb.update_claim_status,    "db", "update_claim_status")
+        cdb.upsert_agent_result    = wrap_timing(cdb.upsert_agent_result,    "db", "upsert_agent_result")
+        cdb.save_claim_report      = wrap_timing(cdb.save_claim_report,      "db", "save_claim_report")
+        # Also the inner fetchers called by tools (same module, different refs)
+        cdb.get_claim_documents_data = wrap_timing(cdb.get_claim_documents_data, "db", "get_claim_documents_data")
+        cdb.get_claimant_history     = wrap_timing(cdb.get_claimant_history,     "db", "get_claimant_history")
+        cdb.get_policy_details       = wrap_timing(cdb.get_policy_details,       "db", "get_policy_details")
+        logger.info("Successfully patched claim DB operation functions")
+    except Exception as e:
+        logger.warning(f"Could not patch claim DB operations: {e}")

@@ -79,6 +79,7 @@ async def lifespan(app: FastAPI):
         import contextlib
         with contextlib.suppress(asyncio.CancelledError, asyncio.TimeoutError):
             await asyncio.wait_for(worker_task, timeout=2.0)
+    os._exit(0)
 
 app = FastAPI(title="Mistral Document Processing POC", lifespan=lifespan)
 
@@ -650,30 +651,33 @@ async def update_extracted_data(document_id: str, payload: UpdateExtractedDataRe
         data = result.scalar_one_or_none()
         if not data:
             raise HTTPException(status_code=404, detail="Extracted data not found")
-        
-        old_data = data.validated_data or {}
-        new_data = payload.validated_data
-        
-        # Determine differences and record them as reviewer corrections
+
+        new_raw_fields = payload.raw_fields
+
+        # Patch raw_extracted.raw_fields in-place, preserving field_confidences etc.
+        raw_extracted = dict(data.raw_extracted) if data.raw_extracted else {}
+        old_raw_fields = raw_extracted.get("raw_fields", {})
+        raw_extracted["raw_fields"] = new_raw_fields
+
+        # Track reviewer corrections (delta vs previous raw_fields)
         corrections = dict(data.reviewer_corrections) if data.reviewer_corrections else {}
-        for k, v in new_data.items():
-            if str(old_data.get(k)) != str(v):
+        for k, v in new_raw_fields.items():
+            if str(old_raw_fields.get(k)) != str(v):
                 corrections[k] = v
-                
-        data.validated_data = new_data
+
+        data.raw_extracted = raw_extracted
         data.reviewer_corrections = corrections
-        
-        # Set SQLAlchemy flag to track mutation on JSON columns
+
         from sqlalchemy.orm.attributes import flag_modified
-        flag_modified(data, "validated_data")
+        flag_modified(data, "raw_extracted")
         flag_modified(data, "reviewer_corrections")
-        
+
         await session.commit()
         return {
             "success": True,
             "document_id": document_id,
-            "validated_data": data.validated_data,
-            "reviewer_corrections": data.reviewer_corrections
+            "raw_extracted": data.raw_extracted,
+            "reviewer_corrections": data.reviewer_corrections,
         }
 
 @app.get("/documents/{document_id}/file")

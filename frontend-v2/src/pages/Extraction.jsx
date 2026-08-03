@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Copy, Download, ChevronDown, ChevronRight, Maximize2, ExternalLink, FileText, FileSearch, CheckCircle2, AlertTriangle, Edit2, Check, X, Trash2, Plus, ShieldCheck, UserCircle2, PenTool, ZoomIn, Upload, RotateCcw, Shield, Eye, Fingerprint, Users } from 'lucide-react';
 import { getExtractedData, getDocumentFileUrl, updateExtractedData, getTemplates, verifySignature, getOcrBlocks } from '../api/client';
 import { useApp } from '../store/AppStore';
@@ -1590,6 +1590,7 @@ export function Extraction() {
   const [hoveredField, setHoveredField] = useState(null);
   const { toast } = useApp();
   const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
     getTemplates()
@@ -1611,10 +1612,14 @@ export function Extraction() {
   useEffect(() => { refresh(); }, []);
 
   useEffect(() => {
-    if (completedDocs.length > 0 && !activeId) {
+    if (completedDocs.length === 0) return;
+    const navDocId = location.state?.docId;
+    if (navDocId && completedDocs.some((d) => d.id === navDocId)) {
+      setActiveId(navDocId);
+    } else if (!activeId) {
       setActiveId(completedDocs[0].id);
     }
-  }, [completedDocs, activeId]);
+  }, [completedDocs, location.state?.docId]);
 
   useEffect(() => {
     if (!activeId) return;
@@ -1623,8 +1628,8 @@ export function Extraction() {
     getExtractedData(activeId)
       .then((data) => {
         setExtracted(data);
-        if (data?.validated_data) {
-          setEditedData(data.validated_data);
+        if (data?.raw_extracted?.raw_fields) {
+          setEditedData(data.raw_extracted.raw_fields);
         }
         // Load persisted verification results — only show if they contain a valid verdict
         const sigData = data?.signature_verification;
@@ -1661,8 +1666,8 @@ export function Extraction() {
       toast('Extracted data updated successfully ✓', 'success');
       const data = await getExtractedData(activeId);
       setExtracted(data);
-      if (data?.validated_data) {
-        setEditedData(data.validated_data);
+      if (data?.raw_extracted?.raw_fields) {
+        setEditedData(data.raw_extracted.raw_fields);
       }
       setIsEditing(false);
     } catch (err) {
@@ -1673,8 +1678,8 @@ export function Extraction() {
   };
 
   const handleCancel = () => {
-    if (extracted?.validated_data) {
-      setEditedData(extracted.validated_data);
+    if (extracted?.raw_extracted?.raw_fields) {
+      setEditedData(extracted.raw_extracted.raw_fields);
     }
     setIsEditing(false);
   };

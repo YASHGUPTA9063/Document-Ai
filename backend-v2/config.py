@@ -75,7 +75,6 @@ SUPPORTED_DOCUMENT_TYPES = [
     "driving_licence",
     "driving_license",
     "claim_form",
-    "policy_document",
     "tax_form",
     "medical_report",
     "lab_reports",
@@ -84,6 +83,7 @@ SUPPORTED_DOCUMENT_TYPES = [
     "disability_certificate",
     "legal_letter",
     "utility_bill",
-    "Bank_Statement"
+    "Bank_Statement",
+    "policy_adjustment_form"
 ]
 

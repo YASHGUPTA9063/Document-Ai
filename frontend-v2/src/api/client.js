@@ -93,8 +93,8 @@ export async function getExtractedData(documentId) {
  * @param {string} documentId
  * @param {object} validatedData
  */
-export async function updateExtractedData(documentId, validatedData) {
-  const { data } = await api.put(`/documents/${documentId}/extracted`, { validated_data: validatedData });
+export async function updateExtractedData(documentId, rawFields) {
+  const { data } = await api.put(`/documents/${documentId}/extracted`, { raw_fields: rawFields });
   return data;
 }
 

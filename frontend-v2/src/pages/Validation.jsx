@@ -552,10 +552,13 @@ function ReviewCard({ doc, onAction }) {
 }
 
 const RULES = [
-  { label: 'Confidence threshold triggers review', badge: '< 80%', variant: 'badge-green' },
-  { label: 'Math cross-check on financial docs',   badge: 'Enabled', variant: 'badge-green' },
-  { label: 'Date format normalization (ISO 8601)', badge: 'Enabled', variant: 'badge-green' },
-  { label: 'Duplicate detection (SHA-256 hash)',   badge: 'Enabled', variant: 'badge-green' },
+  { label: 'Review Confidence Threshold',               badge: '< 80%', variant: 'badge-green' },
+  { label: 'Mandatory Field Completeness Check',       badge: 'Enabled', variant: 'badge-green' },
+  { label: 'Financial Total Reconciliation',           badge: 'Enabled', variant: 'badge-green' },
+  { label: 'Line Item & Subtotal Verification',        badge: 'Enabled', variant: 'badge-green' },
+  { label: 'Issue & Expiration Date Chronology Check', badge: 'Enabled', variant: 'badge-green' },
+  { label: 'Document Template Schema Alignment',       badge: 'Enabled', variant: 'badge-green' },
+  { label: 'OCR Error & Typo Normalization',           badge: 'Enabled', variant: 'badge-green' },
 ];
 
 export function Validation() {

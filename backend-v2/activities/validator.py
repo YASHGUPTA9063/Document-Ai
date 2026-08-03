@@ -62,7 +62,7 @@ async def validator_activity(
             f"{json_data}\n\n"
             f"CRITICAL: If the `get_validation_schema` tool returns an empty list or indicates no template schema is configured, "
             f"use your own intelligence to validate that the extracted data is logical, consistent, and free of obvious OCR/parsing errors "
-            f"for a document of type '{doc_type}'.\n\n"
+            f"for a document of type '{doc_type}'. Ensure date logic sequence (e.g. expiration/validation date is not prior to issue or creation date).\n\n"
             f"Output a JSON object matching exactly this schema:\n"
             f"{{\n"
             f"  \"is_valid\": bool,\n"

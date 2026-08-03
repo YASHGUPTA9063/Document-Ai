@@ -26,5 +26,5 @@ class ReviewerDecisionRequest(BaseModel):
     rejection_reason: Optional[str] = None
 
 class UpdateExtractedDataRequest(BaseModel):
-    validated_data: Dict[str, Any]
+    raw_fields: Dict[str, Any]
 

@@ -156,7 +156,7 @@ export function Documents() {
                       <FileText size={14} className="doc-icon" style={{ display: 'inline-block', verticalAlign: 'middle' }} />
                       <span
                         className="doc-filename-link"
-                        onClick={() => navigate('/extraction')}
+                        onClick={() => navigate('/extraction', { state: { docId: doc.id } })}
                       >
                         {doc.filename}
                       </span>

@@ -551,7 +551,7 @@ export function Upload() {
                 { icon: <Brain size={15} />,        label: 'Pre Processing',  desc: 'Automatic image enhancement, deskewing, and formatting conversion' },
                 { icon: <Layers size={15} />,       label: 'Classification',  desc: 'AI determines document type and selects extraction schema automatically' },
                 { icon: <ScanSearch size={15} />,   label: 'Extraction',      desc: 'Mistral OCR + structured field extraction per document type' },
-                { icon: <ShieldCheck size={15} />,  label: 'Validation',      desc: 'Math cross-checks, date logic, and custom schema validation' },
+                { icon: <ShieldCheck size={15} />,  label: 'Validation',      desc: 'Math cross-checks, required fields, and custom schema validation' },
                 { icon: <UserCheck size={15} />,    label: 'Human Review',    desc: 'Human approval required when extraction confidence is low' },
                 { icon: <Share2 size={15} />,       label: 'Output',          desc: 'Structured JSON persisted & ready for downstream export' },
               ].map(({ icon, label, desc }) => (

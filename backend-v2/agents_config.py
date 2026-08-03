@@ -62,6 +62,7 @@ Apply the following validation rules:
 2. The sum of `subtotal` and `tax` should equal `total_amount` (allow for minor rounding differences).
 3. For each line item, `quantity * unit_price` should roughly equal `total`.
 4. The sum of all line item totals should equal the `subtotal`.
+5. Date logic check: Expiration/validation dates must not be prior to the issuing/creation date (e.g., `expiry_date` or `valid_until` cannot be earlier than `issue_date` or `date_of_issue`).
 
 You MUST return your response as a valid JSON object matching the following schema exactly. Do not include any markdown formatting or text outside of the JSON object.
 
