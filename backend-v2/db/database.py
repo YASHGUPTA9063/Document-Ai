@@ -32,11 +32,11 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         for col in [
-            "ALTER TABLE documents ADD COLUMN file_hash VARCHAR",
-            "ALTER TABLE documents ADD COLUMN customer_id VARCHAR",
-            "ALTER TABLE extracted_data ADD COLUMN signature_verification JSON",
-            "ALTER TABLE extracted_data ADD COLUMN photo_verification JSON",
-            "ALTER TABLE extracted_data ADD COLUMN fraud_check JSON",
+            "ALTER TABLE documents ADD COLUMN IF NOT EXISTS file_hash VARCHAR",
+            "ALTER TABLE documents ADD COLUMN IF NOT EXISTS customer_id VARCHAR",
+            "ALTER TABLE extracted_data ADD COLUMN IF NOT EXISTS signature_verification JSON",
+            "ALTER TABLE extracted_data ADD COLUMN IF NOT EXISTS photo_verification JSON",
+            "ALTER TABLE extracted_data ADD COLUMN IF NOT EXISTS fraud_check JSON",
         ]:
             try:
                 async with conn.begin_nested():
@@ -58,11 +58,11 @@ async def init_claim_tables():
 
         # Defensive migrations for Claim columns added in this iteration
         for col in [
-            "ALTER TABLE claims ADD COLUMN claim_type VARCHAR",
-            "ALTER TABLE claims ADD COLUMN amount FLOAT",
-            "ALTER TABLE claims ADD COLUMN priority VARCHAR",
-            "ALTER TABLE claims ADD COLUMN description TEXT",
-            "ALTER TABLE claims ADD COLUMN workflow_run_id VARCHAR",
+            "ALTER TABLE claims ADD COLUMN IF NOT EXISTS claim_type VARCHAR",
+            "ALTER TABLE claims ADD COLUMN IF NOT EXISTS amount FLOAT",
+            "ALTER TABLE claims ADD COLUMN IF NOT EXISTS priority VARCHAR",
+            "ALTER TABLE claims ADD COLUMN IF NOT EXISTS description TEXT",
+            "ALTER TABLE claims ADD COLUMN IF NOT EXISTS workflow_run_id VARCHAR",
         ]:
             try:
                 async with conn.begin_nested():

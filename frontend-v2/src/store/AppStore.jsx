@@ -127,7 +127,14 @@ export function AppProvider({ children }) {
   const dismissToast = useCallback((id) => dispatch({ type: 'REMOVE_TOAST', payload: id }), []);
 
   // ─── Derived helpers ────────────────────────────
-  const pendingDocs = state.documents.filter((d) => ['pending','pre_validating','processing','preprocessing','classifying','fraud_checking','extracting','validating'].includes(d.status));
+  // Must list every non-terminal status the pipeline writes, otherwise the doc
+  // drops out of the processing queue mid-run and its poller is torn down.
+  const IN_FLIGHT_STATUSES = [
+    'pending', 'processing', 'pre_validating', 'preprocessing',
+    'classifying', 'fraud_checking', 'extracting', 'validating',
+    'auto_verifying', 'reviewing', 'finalizing',
+  ];
+  const pendingDocs = state.documents.filter((d) => IN_FLIGHT_STATUSES.includes(d.status));
   const reviewDocs  = state.documents.filter((d) => ['awaiting_review', 'duplicate'].includes(d.status));
 
   const completedDocs = state.documents.filter((d) => d.status === 'completed');

@@ -2,7 +2,10 @@ import { useEffect, useRef } from 'react';
 import { getStatus } from '../api/client';
 import { useApp } from '../store/AppStore';
 
-const TERMINAL_STATUSES = new Set(['completed', 'rejected', 'error', 'deleted']);
+const TERMINAL_STATUSES = new Set([
+  'completed', 'rejected', 'failed', 'error', 'deleted',
+  'duplicate', 'awaiting_review',
+]);
 const POLL_INTERVAL = 2500; // ms
 
 /**

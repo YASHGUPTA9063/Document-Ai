@@ -70,6 +70,12 @@ async def upload_document(
         await session.commit()
         await session.refresh(doc)
 
+        # The pipeline is keyed by document id, and the HITL resume endpoints
+        # address it by workflow_run_id — leaving this NULL made the UI post to
+        # /workflow/null/resume/...
+        doc.workflow_run_id = doc.id
+        await session.commit()
+
         redis_pool = getattr(request.app.state, "redis_pool", None)
         if redis_pool:
             # Enqueue to arq background worker
@@ -164,6 +170,9 @@ async def upload_documents_batch(
                 await session.commit()
                 await session.refresh(doc)
 
+                doc.workflow_run_id = doc.id
+                await session.commit()
+
                 redis_pool = getattr(request.app.state, "redis_pool", None)
                 if redis_pool:
                     await redis_pool.enqueue_job(
@@ -238,7 +247,9 @@ async def get_status(document_id: str):
 
         return WorkflowStatusResponse(
             document_id=doc.id,
-            workflow_run_id=doc.workflow_run_id,
+            # Fall back to the document id for rows created before the column
+            # was populated — the resume endpoints are keyed by it either way.
+            workflow_run_id=doc.workflow_run_id or doc.id,
             status=doc.status,
             doc_type=doc.doc_type,
             confidence_score=doc.extracted_data.confidence_score if doc.extracted_data else None,
@@ -269,7 +280,7 @@ async def list_documents(
                 "filename": d.filename,
                 "status": d.status,
                 "doc_type": d.doc_type,
-                "workflow_run_id": d.workflow_run_id,
+                "workflow_run_id": d.workflow_run_id or d.id,
                 "message": d.error_details.get("error", "") if d.error_details else "",
             }
             for d in docs

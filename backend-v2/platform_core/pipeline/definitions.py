@@ -168,7 +168,11 @@ async def _step_intake(context: dict) -> dict:
 
     result = await intake_activity(document_id, filename)
 
-    if result.get("is_duplicate"):
+    # On resume the paused step is re-run, so the reviewer's decision has to be
+    # honoured here or the pipeline just pauses again forever.
+    override = context.get("skip_duplicate_check") or context.get("duplicate_override")
+
+    if result.get("is_duplicate") and not override:
         raise HumanInputRequired(
             reason="Duplicate detected. Waiting for override decision.",
             data={"intake_result": result},

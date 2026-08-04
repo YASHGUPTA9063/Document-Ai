@@ -8,7 +8,7 @@ import {
 import { Modal } from '../components/ui/Modal';
 import { RegionSelector } from '../components/ui/RegionSelector';
 import { useApp } from '../store/AppStore';
-import { getTemplates, saveTemplates, generateTemplateFromSample, deleteTemplate } from '../api/client';
+import { getTemplates, saveTemplates, generateTemplateFromSample, deleteTemplate, getClassificationConfig } from '../api/client';
 
 const DEFAULT_TEMPLATES = {};
 
@@ -46,6 +46,21 @@ export function Templates() {
   const [sampleFile, setSampleFile] = useState(null);
   const [generatingTemplate, setGeneratingTemplate] = useState(false);
   const [createKycRegions, setCreateKycRegions] = useState({ signature: null, photo: null });
+  // A template is looked up by the doc_type the classifier assigns, so the name
+  // has to be one of the configured types — otherwise it silently never applies.
+  const [docTypes, setDocTypes] = useState([]);
+
+  useEffect(() => {
+    getClassificationConfig()
+      .then((types) => setDocTypes(Array.isArray(types) ? types : []))
+      .catch(() => setDocTypes([]));
+  }, []);
+
+  const normalizeKey = (name) => name.trim().toLowerCase().replace(/[\s-]+/g, '_');
+  const templateNameMatchesDocType =
+    !newTemplateName.trim() ||
+    docTypes.length === 0 ||
+    docTypes.some((t) => normalizeKey(t) === normalizeKey(newTemplateName));
 
   // Preview URL for the sample file (only for images)
   const samplePreviewUrl = useMemo(() => {
@@ -709,15 +724,27 @@ export function Templates() {
               <input
                 type="text"
                 className="styled-input"
+                list="supported-doc-types"
                 value={newTemplateName}
-                placeholder="e.g. Purchase Order, Utility Bill, Invoice"
+                placeholder="e.g. pan_card, utility_bill, invoice"
                 onChange={(e) => setNewTemplateName(e.target.value)}
                 required
                 disabled={generatingTemplate}
               />
+              <datalist id="supported-doc-types">
+                {docTypes.map((t) => <option key={t} value={t} />)}
+              </datalist>
               <span style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4, display: 'block' }}>
-                This name will be used to identify and classify documents of this type.
+                Must match one of the classifier's document types — pick from the list.
+                A template whose name isn't a configured type is never applied.
               </span>
+              {!templateNameMatchesDocType && (
+                <span style={{ fontSize: 10, color: 'var(--warn)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <AlertCircle size={11} />
+                  "{newTemplateName}" isn't a configured document type. Add it under
+                  Settings → Classification, or choose an existing type.
+                </span>
+              )}
             </div>
 
             {/* KYC Document Toggle */}

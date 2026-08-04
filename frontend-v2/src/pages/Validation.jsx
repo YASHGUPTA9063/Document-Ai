@@ -334,10 +334,10 @@ function ReviewCard({ doc, onAction }) {
   const handle = async (approved, corr = null, reason = null) => {
     setLoading(true);
     try {
-      await resumeReview(doc.workflow_run_id, approved, corr, reason);
+      await resumeReview(doc.workflow_run_id || doc.id, approved, corr, reason);
       onAction(doc.id, approved ? 'approved' : 'rejected');
     } catch (err) {
-      toast('Error: ' + err.message, 'error');
+      toast('Error: ' + (err.response?.data?.detail || err.message), 'error');
     } finally {
       setLoading(false);
       setShowEdit(false);
@@ -349,17 +349,19 @@ function ReviewCard({ doc, onAction }) {
   const handleDuplicate = async (override) => {
     setLoading(true);
     try {
-      await resumeDuplicate(doc.workflow_run_id, override);
+      // The pipeline is keyed by document id; workflow_run_id mirrors it.
+      await resumeDuplicate(doc.workflow_run_id || doc.id, override);
       onAction(doc.id, override ? 'override' : 'rejected');
     } catch (err) {
-      toast('Error: ' + err.message, 'error');
+      toast('Error: ' + (err.response?.data?.detail || err.message), 'error');
     } finally {
       setLoading(false);
       setRejectionReason('');
     }
   };
 
-  const isDuplicateWait = doc.message?.toLowerCase().includes('duplicate');
+  const isDuplicateWait =
+    doc.status === 'duplicate' || !!doc.message?.toLowerCase().includes('duplicate');
 
   const handleSaveAndApprove = () => {
     // Pass corrections only if any fields were changed

@@ -281,6 +281,60 @@ async def extract_signature_and_photo(
         return result
 
     # ══════════════════════════════════════════════════════════════════════
+    # PATH 0: Template-level manual coordinates (highest priority)
+    # ══════════════════════════════════════════════════════════════════════
+    # Regions drawn by hand on the template's sample document are ground truth
+    # for that document layout — they must win over anything the OCR block
+    # annotator or the vision model guesses. Auto-detection below only fills in
+    # a region the template did not define.
+    if kyc_boxes:
+        logger.info(f"[Document {document_id}] KYC Path 0: Using MANUAL template coordinates: {kyc_boxes}")
+
+        sig_box = kyc_boxes.get("signature")
+        if sig_box:
+            sx1 = int(sig_box["x1"] / 100.0 * width)
+            sy1 = int(sig_box["y1"] / 100.0 * height)
+            sx2 = int(sig_box["x2"] / 100.0 * width)
+            sy2 = int(sig_box["y2"] / 100.0 * height)
+            cropped = _crop_region(img, sx1, sy1, sx2, sy2)
+            if cropped:
+                result["has_signature"] = True
+                result["signature_bbox"] = {"x1": sx1, "y1": sy1, "x2": sx2, "y2": sy2}
+                sig_path = os.path.join(output_dir, "signature.png")
+                cropped.save(sig_path)
+                result["signature_crop_path"] = os.path.abspath(sig_path)
+                result["signature_base64"] = _image_to_base64(cropped)
+                result["confidence"] = "high"
+                logger.info(f"[Document {document_id}] Path 0: Signature cropped from template region")
+            else:
+                logger.warning(f"[Document {document_id}] Path 0: Signature region is empty after clamping")
+
+        photo_box = kyc_boxes.get("photo")
+        if photo_box:
+            px1 = int(photo_box["x1"] / 100.0 * width)
+            py1 = int(photo_box["y1"] / 100.0 * height)
+            px2 = int(photo_box["x2"] / 100.0 * width)
+            py2 = int(photo_box["y2"] / 100.0 * height)
+            cropped = _crop_region(img, px1, py1, px2, py2)
+            if cropped:
+                result["has_photo"] = True
+                result["photo_bbox"] = {"x1": px1, "y1": py1, "x2": px2, "y2": py2}
+                photo_path = os.path.join(output_dir, "photo.png")
+                cropped.save(photo_path)
+                result["photo_crop_path"] = os.path.abspath(photo_path)
+                result["photo_base64"] = _image_to_base64(cropped)
+                logger.info(f"[Document {document_id}] Path 0: Photo cropped from template region")
+            else:
+                logger.warning(f"[Document {document_id}] Path 0: Photo region is empty after clamping")
+
+        if result["has_signature"] and result["has_photo"]:
+            return result
+
+    # Regions already satisfied by the template must survive the auto paths below.
+    manual_signature = result["has_signature"]
+    manual_photo = result["has_photo"]
+
+    # ══════════════════════════════════════════════════════════════════════
     # PATH 1: OCRProvider 4 Block & Image Annotation Extraction
     # ══════════════════════════════════════════════════════════════════════
     logger.info(f"[Document {document_id}] KYC Path 1: Running OCR Extraction with block annotations...")
@@ -333,54 +387,26 @@ async def extract_signature_and_photo(
         if result["has_signature"] and result["has_photo"]:
             logger.info(f"[Document {document_id}] Path 1 succeeded.")
             return result
-        else:
-            logger.info(f"[Document {document_id}] Path 1 did not extract both. Resetting result...")
+
+        # Partial results from the block annotator are unreliable on their own,
+        # so drop them — but never drop a crop that came from the template.
+        logger.info(f"[Document {document_id}] Path 1 did not extract both. Discarding partial auto-detections...")
+        if not manual_signature:
             result.update({
-                "has_signature": False, "signature_crop_path": None, "signature_base64": None, "signature_bbox": None,
-                "has_photo": False, "photo_crop_path": None, "photo_base64": None, "photo_bbox": None,
-                "confidence": "low", "signer_name": None,
+                "has_signature": False, "signature_crop_path": None,
+                "signature_base64": None, "signature_bbox": None,
+                "signer_name": None,
             })
-            
+        if not manual_photo:
+            result.update({
+                "has_photo": False, "photo_crop_path": None,
+                "photo_base64": None, "photo_bbox": None,
+            })
+        if not (manual_signature or manual_photo):
+            result["confidence"] = "low"
+
     except Exception as e:
-        logger.error(f"[Document {document_id}] Path 1 failed: {e}. Resetting result and falling back...")
-
-    # ══════════════════════════════════════════════════════════════════════
-    # PATH 2: Template-level manual coordinates
-    # ══════════════════════════════════════════════════════════════════════
-    if kyc_boxes:
-        logger.info(f"[Document {document_id}] Using MANUAL template coordinates")
-        sig_box = kyc_boxes.get("signature")
-        if sig_box:
-            sx1 = int(sig_box["x1"] / 100.0 * width)
-            sy1 = int(sig_box["y1"] / 100.0 * height)
-            sx2 = int(sig_box["x2"] / 100.0 * width)
-            sy2 = int(sig_box["y2"] / 100.0 * height)
-            cropped = _crop_region(img, sx1, sy1, sx2, sy2)
-            if cropped:
-                result["has_signature"] = True
-                result["signature_bbox"] = {"x1": sx1, "y1": sy1, "x2": sx2, "y2": sy2}
-                sig_path = os.path.join(output_dir, "signature.png")
-                cropped.save(sig_path)
-                result["signature_crop_path"] = os.path.abspath(sig_path)
-                result["signature_base64"] = _image_to_base64(cropped)
-                result["confidence"] = "high"
-
-        photo_box = kyc_boxes.get("photo")
-        if photo_box:
-            px1 = int(photo_box["x1"] / 100.0 * width)
-            py1 = int(photo_box["y1"] / 100.0 * height)
-            px2 = int(photo_box["x2"] / 100.0 * width)
-            py2 = int(photo_box["y2"] / 100.0 * height)
-            cropped = _crop_region(img, px1, py1, px2, py2)
-            if cropped:
-                result["has_photo"] = True
-                result["photo_bbox"] = {"x1": px1, "y1": py1, "x2": px2, "y2": py2}
-                photo_path = os.path.join(output_dir, "photo.png")
-                cropped.save(photo_path)
-                result["photo_crop_path"] = os.path.abspath(photo_path)
-                result["photo_base64"] = _image_to_base64(cropped)
-
-        return result
+        logger.error(f"[Document {document_id}] Path 1 failed: {e}. Falling back...")
 
     # ══════════════════════════════════════════════════════════════════════
     # FALLBACK PATH: Two-pass Vision approach
@@ -408,7 +434,8 @@ async def extract_signature_and_photo(
             logger.warning(f"[Document {document_id}] Failed to parse document_annotation: {e}")
 
     if annotation:
-        result["confidence"] = annotation.confidence
+        if not (manual_signature or manual_photo):
+            result["confidence"] = annotation.confidence
         result["signer_name"] = annotation.signer_name
 
     logger.info(f"[Document {document_id}] KYC Pass 2: Calling VisionProvider...")
@@ -432,7 +459,7 @@ async def extract_signature_and_photo(
     if not bboxes:
         return result
 
-    if bboxes.signature_found and all(v is not None for v in (bboxes.sig_x1, bboxes.sig_y1, bboxes.sig_x2, bboxes.sig_y2)):
+    if not manual_signature and bboxes.signature_found and all(v is not None for v in (bboxes.sig_x1, bboxes.sig_y1, bboxes.sig_x2, bboxes.sig_y2)):
         result["has_signature"] = True
         result["signature_bbox"] = {"x1": bboxes.sig_x1, "y1": bboxes.sig_y1, "x2": bboxes.sig_x2, "y2": bboxes.sig_y2}
         cropped = _crop_region(img, bboxes.sig_x1, bboxes.sig_y1, bboxes.sig_x2, bboxes.sig_y2)
@@ -442,7 +469,7 @@ async def extract_signature_and_photo(
             result["signature_crop_path"] = os.path.abspath(sig_path)
             result["signature_base64"] = _image_to_base64(cropped)
 
-    if bboxes.photo_found and all(v is not None for v in (bboxes.photo_x1, bboxes.photo_y1, bboxes.photo_x2, bboxes.photo_y2)):
+    if not manual_photo and bboxes.photo_found and all(v is not None for v in (bboxes.photo_x1, bboxes.photo_y1, bboxes.photo_x2, bboxes.photo_y2)):
         result["has_photo"] = True
         result["photo_bbox"] = {"x1": bboxes.photo_x1, "y1": bboxes.photo_y1, "x2": bboxes.photo_x2, "y2": bboxes.photo_y2}
         cropped = _crop_region(img, bboxes.photo_x1, bboxes.photo_y1, bboxes.photo_x2, bboxes.photo_y2)

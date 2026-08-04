@@ -54,16 +54,51 @@ EXTRACTOR_TOOLS = [
 
 
 # ─── TEMPLATE & PROMPT HELPERS ───
+def _normalize_template_key(name: str) -> str:
+    """Collapse a template name or doc_type to a comparable key.
+
+    Templates are saved under whatever name the user typed ("Pan", "Utility
+    Bill") while the classifier emits snake_case keys ("pan_card",
+    "utility_bill"), so both sides have to be normalized before comparison.
+    """
+    return "_".join(str(name).strip().lower().replace("-", " ").replace("_", " ").split())
+
+
 def _load_template_raw(doc_type: str):
-    normalized = doc_type.lower().replace(" ", "_")
+    normalized = _normalize_template_key(doc_type)
     templates_path = os.path.join(settings.STORAGE_DIR, "templates.json")
-    if os.path.exists(templates_path):
-        try:
-            with open(templates_path, "r") as f:
-                templates = json.load(f)
-                return templates.get(normalized)
-        except Exception as e:
-            logger.error(f"Failed to read templates from {templates_path}: {e}")
+    if not os.path.exists(templates_path):
+        return None
+
+    try:
+        with open(templates_path, "r") as f:
+            templates = json.load(f)
+    except Exception as e:
+        logger.error(f"Failed to read templates from {templates_path}: {e}")
+        return None
+
+    # Exact key first, then a normalized sweep so casing/spacing differences
+    # between the saved name and the classified doc_type still resolve.
+    if doc_type in templates:
+        return templates[doc_type]
+
+    for key, value in templates.items():
+        if _normalize_template_key(key) == normalized:
+            return value
+
+    # A template may declare the doc types it applies to, which is the only way
+    # to bind e.g. a "Pan" template to the classifier's "pan_card" output.
+    for key, value in templates.items():
+        if not isinstance(value, dict):
+            continue
+        bound = value.get("doc_types") or []
+        if any(_normalize_template_key(d) == normalized for d in bound):
+            return value
+
+    logger.warning(
+        f"No extraction template found for doc_type '{doc_type}' "
+        f"(available: {list(templates.keys())})"
+    )
     return None
 
 

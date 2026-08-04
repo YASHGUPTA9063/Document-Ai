@@ -10,6 +10,7 @@ Supports two execution engines:
 
 import asyncio
 import logging
+import uuid
 from arq import Worker
 from arq.connections import RedisSettings
 
@@ -93,12 +94,13 @@ async def _start_mistral_worker():
     """
     try:
         import os
-        import mistralai.workflows as workflows
-        from platform_core.pipeline.mistral_workflow import DocumentProcessingWorkflow
 
-        # Ensure the SDK can find the managed-cloud credentials
+        # Set env vars BEFORE importing the SDK — it validates them on import/startup
         os.environ.setdefault("MISTRAL_API_KEY", settings.MISTRAL_API_KEY)
         os.environ.setdefault("DEPLOYMENT_NAME", settings.DEPLOYMENT_NAME)
+
+        import mistralai.workflows as workflows
+        from platform_core.pipeline.mistral_workflow import DocumentProcessingWorkflow
 
         logger.info(
             "[MistralWorker] Starting Mistral Workflows worker "
@@ -107,6 +109,7 @@ async def _start_mistral_worker():
         await workflows.run_worker([DocumentProcessingWorkflow])
     except Exception as e:
         logger.error(f"[MistralWorker] Failed to start Mistral workflow worker: {e}")
+
 
 
 
@@ -171,25 +174,32 @@ async def _run_mistral_document_pipeline(
 
     pipeline_config = platform_config.get("pipelines", {}).get("document_processing", {})
 
+    overrides = context_overrides or {}
+
     workflow_input = {
         "document_id": document_id,
         "filename": filename,
         "file_path": file_path,
         "enable_pre_validation": pipeline_config.get("enable_pre_validation", True),
         "enable_preprocessing": pipeline_config.get("enable_preprocessing", False),
+        "skip_duplicate_check": bool(overrides.get("skip_duplicate_check")),
     }
 
     logger.info(
         f"[MistralWorkflow] Triggering cloud workflow {workflow_id} "
-        f"for document {document_id}"
+        f"for document {document_id} (overrides={overrides or None})"
     )
+
+    # Execution IDs must be unique — a document can legitimately be run more
+    # than once (duplicate override, retry), and reusing the id is rejected.
+    execution_id = f"doc-pipeline-{document_id}-{uuid.uuid4().hex[:8]}"
 
     # Trigger the workflow on Mistral's cloud via REST API
     run_response = await mistral_client.workflows.execute_workflow_async(
         workflow_identifier=workflow_id,
         input=workflow_input,
         deployment_name=settings.DEPLOYMENT_NAME,
-        execution_id=f"doc-pipeline-{document_id}",
+        execution_id=execution_id,
     )
 
     run_id = (

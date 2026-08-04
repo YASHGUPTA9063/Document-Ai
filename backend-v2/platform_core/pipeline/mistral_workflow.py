@@ -37,6 +37,9 @@ class DocumentInput(BaseModel):
     file_path: str
     enable_pre_validation: bool = True
     enable_preprocessing: bool = False
+    # Set when a reviewer overrides a duplicate: the workflow already ended at
+    # the intake gate, so overriding means re-running with the gate disabled.
+    skip_duplicate_check: bool = False
 
 
 class DocumentOutput(BaseModel):
@@ -46,6 +49,49 @@ class DocumentOutput(BaseModel):
     doc_type: Optional[str] = None
     error: Optional[str] = None
     paused_reason: Optional[str] = None
+
+
+# ─── Progress-Tracking Activities ────────────────────────────────────────────
+# The local PipelineEngine writes a status label to the DB before each step
+# (engine.py -> on_status_change). The cloud workflow needs the same writes,
+# otherwise the document sits at "pending" until the final output step and the
+# UI's live pipeline timeline never advances.
+
+@workflows.activity(
+    start_to_close_timeout=timedelta(seconds=30),
+    retry_policy_max_attempts=3,
+)
+async def activity_set_status(document_id: str, status: str) -> dict:
+    """Publish the current pipeline stage so the UI timeline can follow along."""
+    import db.operations as db
+    await db.update_status(document_id, status)
+    return {"document_id": document_id, "status": status}
+
+
+@workflows.activity(
+    start_to_close_timeout=timedelta(seconds=30),
+    retry_policy_max_attempts=3,
+)
+async def activity_set_doc_type(document_id: str, doc_type: str) -> dict:
+    """Persist the classified type as soon as it is known, not just at output."""
+    import db.operations as db
+    await db.update_doc_type(document_id, doc_type)
+    return {"document_id": document_id, "doc_type": doc_type}
+
+
+@workflows.activity(
+    start_to_close_timeout=timedelta(seconds=30),
+    retry_policy_max_attempts=3,
+)
+async def activity_set_terminal_status(document_id: str, status: str, message: str) -> dict:
+    """Persist a non-completed terminal outcome (rejected / duplicate / failed).
+
+    Only the output activity writes a status of its own, so without this every
+    early return from the workflow left the document stuck mid-pipeline.
+    """
+    import db.operations as db
+    await db.update_status_and_message(document_id, status, message)
+    return {"document_id": document_id, "status": status}
 
 
 # ─── Workflow Activities ─────────────────────────────────────────────────────
@@ -221,51 +267,73 @@ class DocumentProcessingWorkflow:
 
         try:
             # ── Step 1: Intake (duplicate detection) ──────────────────────
+            await activity_set_status(document_id, "processing")
             intake_result = await activity_intake(document_id, filename)
-            # TEMPORARY FIX: Bypass duplicate check to allow testing
-            # if intake_result.get("is_duplicate"):
-            #     return DocumentOutput(
-            #         document_id=document_id,
-            #         status="paused",
-            #         paused_reason="Duplicate detected. Waiting for override decision.",
-            #     )
+            if intake_result.get("is_duplicate") and input.skip_duplicate_check:
+                logger.info(
+                    f"[MistralWorkflow] Duplicate override in effect for {document_id} — continuing"
+                )
+            elif intake_result.get("is_duplicate"):
+                existing_id = intake_result.get("existing_document_id")
+                reason = (
+                    f"Duplicate of an already-ingested document ({existing_id})."
+                    if existing_id
+                    else "Duplicate detected. Waiting for override decision."
+                )
+                await activity_set_terminal_status(document_id, "duplicate", reason)
+                return DocumentOutput(
+                    document_id=document_id,
+                    status="paused",
+                    paused_reason=reason,
+                )
 
             # ── Step 2: Pre-Validation (optional) ─────────────────────────
             if input.enable_pre_validation:
+                await activity_set_status(document_id, "pre_validating")
                 pre_val_result = await activity_pre_validate(document_id, file_path)
                 if not pre_val_result.get("passed"):
+                    reason = pre_val_result.get("rejection_reason", "Document failed pre-validation.")
+                    await activity_set_terminal_status(document_id, "rejected", reason)
                     return DocumentOutput(
                         document_id=document_id,
                         status="rejected",
-                        error=pre_val_result.get("rejection_reason", "Document failed pre-validation."),
+                        error=reason,
                     )
 
             # ── Step 2.5: Preprocessing (optional) ────────────────────────
             clean_file_path = file_path
             if input.enable_preprocessing:
+                await activity_set_status(document_id, "preprocessing")
                 preprocess_result = await activity_preprocess(document_id, file_path)
                 clean_file_path = preprocess_result.get("preprocessed_path") or file_path
 
             # ── Step 3: Classify ──────────────────────────────────────────
+            await activity_set_status(document_id, "classifying")
             classify_result = await activity_classify(document_id, clean_file_path)
             doc_type = classify_result.get("doc_type", "others")
+            await activity_set_doc_type(document_id, doc_type)
 
             # ── Step 3.5: Fraud Check (KYC only) ─────────────────────────
             fraud_check_result = None
             if _is_kyc_doc_type(doc_type):
+                await activity_set_status(document_id, "fraud_checking")
                 fraud_check_result = await activity_fraud_check(document_id, clean_file_path)
                 if not fraud_check_result.get("passed", False):
+                    reason = fraud_check_result.get("rejection_reason", "Document failed fraud check.")
+                    await activity_set_terminal_status(document_id, "rejected", reason)
                     return DocumentOutput(
                         document_id=document_id,
                         status="rejected",
                         doc_type=doc_type,
-                        error=fraud_check_result.get("rejection_reason", "Document failed fraud check."),
+                        error=reason,
                     )
 
             # ── Step 4: Extract ───────────────────────────────────────────
+            await activity_set_status(document_id, "extracting")
             extractor_result = await activity_extract(document_id, clean_file_path, doc_type)
 
             # ── Step 5: Validate ──────────────────────────────────────────
+            await activity_set_status(document_id, "validating")
             validator_result = await activity_validate(
                 document_id=document_id,
                 extracted_data=extractor_result.get("fields", {}),
@@ -277,12 +345,14 @@ class DocumentProcessingWorkflow:
             # ── Step 5.5: Auto-Verify (KYC only) ─────────────────────────
             auto_verify_result = None
             if _is_kyc_doc_type(doc_type):
+                await activity_set_status(document_id, "auto_verifying")
                 auto_verify_result = await activity_auto_verify(
                     document_id=document_id,
                     validated_data=validator_result.get("validated_data", {}),
                 )
 
             # ── Step 6: Review ────────────────────────────────────────────
+            await activity_set_status(document_id, "reviewing")
             review_result = await activity_review(
                 document_id=document_id,
                 confidence_score=extractor_result.get("confidence", 0.0),
@@ -293,12 +363,14 @@ class DocumentProcessingWorkflow:
             if review_result.get("auto_approved"):
                 reviewer_final = {"approved": True, "corrections": None}
             else:
-                # Needs human review — mark as paused
+                # Needs human review — park it in the review queue
+                reason = "Confidence below threshold. Manual review required."
+                await activity_set_terminal_status(document_id, "awaiting_review", reason)
                 return DocumentOutput(
                     document_id=document_id,
                     status="paused",
                     doc_type=doc_type,
-                    paused_reason="Confidence below threshold. Manual review required.",
+                    paused_reason=reason,
                 )
 
             # ── Step 7: Output ────────────────────────────────────────────
@@ -313,6 +385,7 @@ class DocumentProcessingWorkflow:
                 "auto_verify_result": auto_verify_result,
             }
 
+            await activity_set_status(document_id, "finalizing")
             await activity_output(document_id, pipeline_context)
 
             return DocumentOutput(
@@ -323,6 +396,10 @@ class DocumentProcessingWorkflow:
 
         except Exception as e:
             logger.error(f"[MistralWorkflow] Pipeline failed for {document_id}: {e}")
+            try:
+                await activity_set_terminal_status(document_id, "failed", str(e))
+            except Exception as status_err:  # never mask the original failure
+                logger.error(f"[MistralWorkflow] Could not persist failure status: {status_err}")
             return DocumentOutput(
                 document_id=document_id,
                 status="failed",

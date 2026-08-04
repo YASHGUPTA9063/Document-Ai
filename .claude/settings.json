@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(docker exec document_ai_worker python -c \"import inspect; from mistralai.client.workflows import Workflows; print\\(inspect.signature\\(Workflows.execute_workflow_async\\)\\)\")",
+      "PowerShell(docker exec document_ai_worker sh -c \"sed -n '1,120p' /opt/venv/lib/python3.12/site-packages/mistralai/workflows/core/config/config.py | head -200\")",
+      "PowerShell(docker exec document_ai_worker python -c \"from mistralai.client.workflows import Workflows; print\\([m for m in dir\\(Workflows\\) if not m.startswith\\('_'\\)]\\)\")",
+      "PowerShell(docker exec document_ai_worker sh -c \"grep -rn 'deployment' /opt/venv/lib/python3.12/site-packages/mistralai/workflows/core/worker.py | head -60\")"
+    ]
+  }
+}
