@@ -28,7 +28,6 @@ __pycache__/
 .ipynb_checkpoints/
 
 # Environments
-.env
 *.db
 
 # Document storage (uploaded files — never commit real document data)
