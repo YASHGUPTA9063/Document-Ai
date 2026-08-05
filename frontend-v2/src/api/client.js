@@ -189,10 +189,10 @@ export async function saveTemplates(templatesData) {
  * @param {object|null} kycBoxes - Optional {signature: {x1,y1,x2,y2}, photo: {x1,y1,x2,y2}}
  * @returns {Promise<{success: boolean, template_name: string, fields: Array, is_kyc: boolean}>}
  */
-export async function generateTemplateFromSample(templateName, file, isKyc = false, kycBoxes = null) {
+export async function generateTemplateFromSample(templateName, file, isKyc = false, kycBoxes = null, useVlm = false) {
   const form = new FormData();
   form.append('file', file);
-  const params = { template_name: templateName, is_kyc: isKyc };
+  const params = { template_name: templateName, is_kyc: isKyc, use_vlm: useVlm };
   if (kycBoxes) {
     params.kyc_boxes = JSON.stringify(kycBoxes);
   }

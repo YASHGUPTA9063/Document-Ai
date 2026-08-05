@@ -777,14 +777,16 @@ def load_templates():
                         # Old format: bare list of fields
                         normalized[key] = {"fields": value, "is_kyc": False}
                     elif isinstance(value, dict):
-                        # New format: already has fields + is_kyc
+                        # New format: already has fields + is_kyc + use_vlm
                         if "fields" not in value:
                             value["fields"] = []
                         if "is_kyc" not in value:
                             value["is_kyc"] = False
+                        if "use_vlm" not in value:
+                            value["use_vlm"] = False
                         normalized[key] = value
                     else:
-                        normalized[key] = {"fields": [], "is_kyc": False}
+                        normalized[key] = {"fields": [], "is_kyc": False, "use_vlm": False}
                 return normalized
         except Exception as e:
             logger.error(f"Failed to load templates: {e}")
@@ -837,6 +839,7 @@ async def delete_template(template_name: str):
 async def generate_template_from_sample(
     template_name: str = Query(...),
     is_kyc: bool = Query(False),
+    use_vlm: bool = Query(False),
     kyc_boxes: str = Query(None, description="JSON string of {signature: {x1,y1,x2,y2}, photo: {x1,y1,x2,y2}} percentages"),
     file: UploadFile = File(...)
 ):
@@ -973,7 +976,8 @@ async def generate_template_from_sample(
         normalized_name = template_name.strip().lower().replace(" ", "_")
         template_entry = {
             "fields": validated_fields,
-            "is_kyc": is_kyc
+            "is_kyc": is_kyc,
+            "use_vlm": use_vlm
         }
 
         # Parse and attach kyc_boxes if provided

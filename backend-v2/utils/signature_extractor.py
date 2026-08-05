@@ -46,7 +46,11 @@ class BboxAnnotation(BaseModel):
     """Used for annotating bounding boxes inside the document."""
     block_type: str = Field(
         ...,
-        description="The type of block: 'photo' (face/passport photograph of the cardholder), 'signature' (handwritten signature), or 'other'."
+        description=(
+            "The type of block: 'photo' (human face or portrait photograph of the cardholder only. "
+            "Do NOT select national emblems, government logos, Ashoka Pillars, crests, or stamps), "
+            "'signature' (handwritten signature), or 'other'."
+        )
     )
 
 

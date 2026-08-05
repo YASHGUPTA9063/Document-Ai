@@ -3,7 +3,7 @@ import {
   FileCode, Plus, RotateCcw, Edit2, Trash2, Calendar, 
   Type, Hash, ToggleLeft, List, Table, Check, X, Search, 
   AlertCircle, CheckCircle2, ChevronRight, Image, ShieldCheck,
-  Crop
+  Crop, Eye
 } from 'lucide-react';
 import { Modal } from '../components/ui/Modal';
 import { RegionSelector } from '../components/ui/RegionSelector';
@@ -36,6 +36,7 @@ export function Templates() {
     label: '',
     type: 'Text',
     required: false,
+    use_vlm: false,
     description: '',
     confidence_threshold: ''
   });
@@ -43,6 +44,7 @@ export function Templates() {
   const [createTemplateModalOpen, setCreateTemplateModalOpen] = useState(false);
   const [newTemplateName, setNewTemplateName] = useState('');
   const [isKycTemplate, setIsKycTemplate] = useState(false);
+  const [isVlmTemplate, setIsVlmTemplate] = useState(false);
   const [sampleFile, setSampleFile] = useState(null);
   const [generatingTemplate, setGeneratingTemplate] = useState(false);
   const [createKycRegions, setCreateKycRegions] = useState({ signature: null, photo: null });
@@ -100,7 +102,27 @@ export function Templates() {
     return t.is_kyc === true;
   }, [templates, activeTab]);
 
+  const isActiveVlm = useMemo(() => {
+    const t = templates[activeTab];
+    if (!t || Array.isArray(t)) return false;
+    return t.use_vlm === true;
+  }, [templates, activeTab]);
 
+  const handleToggleTemplateVlm = async () => {
+    if (!activeTab) return;
+    const existingTemplate = templates[activeTab];
+    const templateMeta = (existingTemplate && !Array.isArray(existingTemplate)) ? existingTemplate : { fields: currentFields };
+    const newVlmState = !isActiveVlm;
+    const updatedTemplates = { ...templates, [activeTab]: { ...templateMeta, use_vlm: newVlmState } };
+    
+    try {
+      setTemplates(updatedTemplates);
+      await saveTemplates(updatedTemplates);
+      toast(`VLM Extraction ${newVlmState ? 'enabled' : 'disabled'} for active template ✓`, 'success');
+    } catch (err) {
+      toast(`Failed to update VLM template setting: ${err.message}`, 'error');
+    }
+  };
 
   const filteredFields = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
@@ -123,6 +145,7 @@ export function Templates() {
       label: '',
       type: 'Text',
       required: false,
+      use_vlm: false,
       description: '',
       confidence_threshold: ''
     });
@@ -136,6 +159,7 @@ export function Templates() {
       label: field.label,
       type: field.type,
       required: field.required,
+      use_vlm: field.use_vlm === true,
       description: field.description || '',
       confidence_threshold: field.confidence_threshold !== undefined && field.confidence_threshold !== null ? field.confidence_threshold : ''
     });
@@ -204,7 +228,7 @@ export function Templates() {
         if (createKycRegions.photo) kycBoxesToSend.photo = createKycRegions.photo;
       }
 
-      const res = await generateTemplateFromSample(newTemplateName, sampleFile, isKycTemplate, kycBoxesToSend);
+      const res = await generateTemplateFromSample(newTemplateName, sampleFile, isKycTemplate, kycBoxesToSend, isVlmTemplate);
       toast(`Template "${res.template_name}" generated successfully ✓`, 'success');
       const updated = await getTemplates();
       setTemplates(updated || {});
@@ -212,6 +236,7 @@ export function Templates() {
       setCreateTemplateModalOpen(false);
       setNewTemplateName('');
       setIsKycTemplate(false);
+      setIsVlmTemplate(false);
       setSampleFile(null);
       setCreateKycRegions({ signature: null, photo: null });
     } catch (err) {
@@ -257,6 +282,7 @@ export function Templates() {
       label: formData.label.trim(),
       type: formData.type,
       required: formData.required,
+      use_vlm: formData.use_vlm,
       description: formData.description.trim(),
       confidence_threshold: formData.confidence_threshold !== '' ? Number(formData.confidence_threshold) : null
     };
@@ -367,6 +393,7 @@ export function Templates() {
             {templateKeys.map((key) => {
             const tpl = templates[key];
             const kycFlag = tpl && !Array.isArray(tpl) && tpl.is_kyc;
+            const vlmFlag = tpl && !Array.isArray(tpl) && tpl.use_vlm;
             return (
               <div 
                 key={key}
@@ -375,6 +402,7 @@ export function Templates() {
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
               >
                 {kycFlag && <ShieldCheck size={12} style={{ color: 'var(--accent)' }} />}
+                {vlmFlag && <Eye size={12} style={{ color: 'var(--accent)' }} />}
                 {key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
                 {kycFlag && (
                   <span style={{
@@ -382,6 +410,13 @@ export function Templates() {
                     background: 'var(--accent-dim)', border: '1px solid rgba(79,110,247,0.25)',
                     padding: '1px 5px', borderRadius: 4, marginLeft: 2
                   }}>KYC</span>
+                )}
+                {vlmFlag && (
+                  <span style={{
+                    fontSize: 9, fontWeight: 700, color: 'var(--accent)',
+                    background: 'var(--accent-dim)', border: '1px solid rgba(79,110,247,0.25)',
+                    padding: '1px 5px', borderRadius: 4, marginLeft: 2
+                  }}>VLM</span>
                 )}
               </div>
             );
@@ -413,6 +448,16 @@ export function Templates() {
             
             {/* Template specific actions aligned next to the search */}
             <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+              {activeTab && (
+                <button 
+                  className={`btn btn-sm ${isActiveVlm ? 'btn-primary' : 'btn-outline'}`}
+                  onClick={handleToggleTemplateVlm}
+                  title="Enable or disable VLM visual extraction for visual checkboxes / tick marks in this template"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                >
+                  <Eye size={12} /> {isActiveVlm ? 'VLM Enabled' : 'Enable VLM'}
+                </button>
+              )}
               {activeTab && (
                 <button 
                   className="btn btn-danger btn-sm" 
@@ -465,8 +510,15 @@ export function Templates() {
                       return (
                         <tr key={field.key} style={{ cursor: 'default' }}>
                           <td style={{ padding: '12px 16px', verticalAlign: 'top' }}>
-                            <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text)' }}>
+                            <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 6 }}>
                               {field.label}
+                              {field.use_vlm && (
+                                <span style={{
+                                  fontSize: 9, fontWeight: 700, color: 'var(--accent)',
+                                  background: 'var(--accent-dim)', border: '1px solid rgba(79,110,247,0.25)',
+                                  padding: '1px 5px', borderRadius: 4, display: 'inline-flex', alignItems: 'center', gap: 3
+                                }} title="Visual checkbox/mark verified via VLM"><Eye size={9} /> VLM</span>
+                              )}
                             </div>
                             <code style={{ fontSize: 11, color: 'var(--muted)', background: 'var(--surface-sunken)', padding: '2px 5px', borderRadius: 4, marginTop: 4, display: 'inline-block', fontFamily: 'monospace' }}>
                               {field.key}
@@ -664,6 +716,21 @@ export function Templates() {
                 Required Field (validations fail if missing)
               </label>
             </div>
+
+            {/* VLM Field Toggle */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+              <input
+                type="checkbox"
+                id="use-vlm-field-checkbox"
+                checked={formData.use_vlm}
+                onChange={(e) => setFormData(prev => ({ ...prev, use_vlm: e.target.checked }))}
+                style={{ width: 14, height: 14, accentColor: 'var(--accent)', cursor: 'pointer' }}
+              />
+              <label htmlFor="use-vlm-field-checkbox" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-dim)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                <Eye size={12} style={{ color: 'var(--accent)' }} />
+                Use VLM Visual Inspection (for checkboxes, tick marks, or visual shapes)
+              </label>
+            </div>
           </form>
         </Modal>
       )}
@@ -743,6 +810,33 @@ export function Templates() {
                 </label>
                 <span style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, display: 'block' }}>
                   Enable signature and photo extraction from identity cards (Aadhaar, PAN, etc.)
+                </span>
+              </div>
+            </div>
+
+            {/* VLM Field Extraction Toggle */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
+              background: isVlmTemplate ? 'rgba(79, 110, 247, 0.08)' : 'var(--surface-sunken)',
+              border: isVlmTemplate ? '1.5px solid rgba(79, 110, 247, 0.3)' : '1px solid var(--border)',
+              borderRadius: 'var(--radius)', cursor: 'pointer',
+              transition: 'all 0.2s ease'
+            }} onClick={() => !generatingTemplate && setIsVlmTemplate(prev => !prev)}>
+              <input
+                type="checkbox"
+                id="vlm-toggle"
+                checked={isVlmTemplate}
+                onChange={(e) => setIsVlmTemplate(e.target.checked)}
+                disabled={generatingTemplate}
+                style={{ width: 16, height: 16, accentColor: 'var(--accent)', cursor: 'pointer' }}
+              />
+              <div style={{ flex: 1 }}>
+                <label htmlFor="vlm-toggle" style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Eye size={14} style={{ color: 'var(--accent)' }} />
+                  Enable VLM Visual Field Extraction
+                </label>
+                <span style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, display: 'block' }}>
+                  Enable Mistral VLM visual reasoning for checkboxes, tick marks (✓), and visual selections
                 </span>
               </div>
             </div>
