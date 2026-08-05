@@ -1,0 +1,32 @@
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Local env / secrets — pass these in via docker-compose env_file / secrets instead
+
+
+
+# Local data — mount as volumes instead of baking into the image
+*.db
+*.db-wal
+*.db-shm
+storage/
+
+# Logs / debug artifacts
+*.log
+ocr_debug.txt
+performance.log
+
+# Tests & docs — not needed at runtime
+tests/
+README.md
+refactoring_tracker.md
+
+# VCS / editor
+.git/
+.gitignore
+.vscode/
+.idea/
