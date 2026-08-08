@@ -287,6 +287,24 @@ export async function saveClassificationConfig(docTypes) {
   return data;
 }
 
+/**
+ * Get vLLM fallback settings.
+ * @returns {Promise<{enabled: boolean, confidence_threshold: number}>}
+ */
+export async function getVllmSettings() {
+  const { data } = await api.get('/settings/vllm');
+  return data;
+}
+
+/**
+ * Save vLLM fallback settings.
+ * @param {{enabled: boolean, confidence_threshold: number}} config
+ * @returns {Promise<object>}
+ */
+export async function saveVllmSettings(config) {
+  const { data } = await api.put('/settings/vllm', config);
+  return data;
+}
 
 // ─── Claim Processing APIs ────────────────────────────────────────────────────
 

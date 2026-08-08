@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Copy, Download, ChevronDown, ChevronRight, Maximize2, ExternalLink, FileText, FileSearch, CheckCircle2, AlertTriangle, Edit2, Check, X, Trash2, Plus, ShieldCheck, UserCircle2, PenTool, ZoomIn, Upload, RotateCcw, Shield, Eye, Fingerprint, Users } from 'lucide-react';
+import { Copy, Download, ChevronDown, ChevronRight, Maximize2, ExternalLink, FileText, FileSearch, CheckCircle2, AlertTriangle, Edit2, Check, X, Trash2, Plus, ShieldCheck, UserCircle2, PenTool, ZoomIn, Upload, RotateCcw, Shield, Eye, Fingerprint, Users, Bot } from 'lucide-react';
 import { getExtractedData, getDocumentFileUrl, updateExtractedData, getTemplates, verifySignature, getOcrBlocks } from '../api/client';
 import { useApp } from '../store/AppStore';
 import { useDocumentList } from '../hooks/useDocumentList';
@@ -216,7 +216,116 @@ function DictRender({ data, isEditing, onSubChange }) {
   );
 }
 
-function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighThreshold = 90, confMedThreshold = 70, fieldHighlightThreshold = 95, rawVal, onFieldHover }) {
+/* ─── vLLM Suggestion Badge ─── */
+function VllmSuggestionBadge({ vllmData, confHighThreshold = 90, confMedThreshold = 70 }) {
+  if (!vllmData || vllmData.value === undefined) return null;
+
+  const vllmConfPct = vllmData.confidence != null ? Math.round(vllmData.confidence * 100) : null;
+  const vllmConfColor = vllmConfPct == null ? '#8b5cf6'
+    : vllmConfPct >= confHighThreshold ? 'var(--success)'
+    : vllmConfPct >= confMedThreshold ? 'var(--warn)'
+    : 'var(--danger)';
+
+  const reasonLabel = vllmData.reason === 'missing'
+    ? 'Field was missing/empty'
+    : 'OCR confidence was low';
+
+  const displayValue = vllmData.value === null || vllmData.value === undefined
+    ? '—'
+    : String(vllmData.value);
+
+  const origValue = vllmData.original_value;
+  const origConf = vllmData.original_confidence;
+
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: 4,
+      marginTop: 4, marginBottom: 4, paddingLeft: '40%',
+    }}>
+      <div style={{
+        display: 'flex', alignItems: 'stretch', gap: 0,
+        background: 'linear-gradient(135deg, rgba(139,92,246,0.06), rgba(139,92,246,0.02))',
+        border: '1px solid rgba(139,92,246,0.2)',
+        borderRadius: 8,
+        overflow: 'hidden',
+      }}>
+        {/* Purple accent bar */}
+        <div style={{
+          width: 3, flexShrink: 0,
+          background: 'linear-gradient(180deg, #8b5cf6, #7c3aed)',
+        }} />
+
+        <div style={{ padding: '7px 10px', flex: 1, display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {/* Header row */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              padding: '1px 7px', borderRadius: 99,
+              background: 'rgba(139,92,246,0.12)',
+              border: '1px solid rgba(139,92,246,0.25)',
+              fontSize: 9.5, fontWeight: 700, color: '#8b5cf6',
+              letterSpacing: '0.03em', textTransform: 'uppercase',
+            }}>
+              <Bot size={10} />
+              vLLM Suggestion
+            </div>
+            {vllmConfPct != null && (
+              <span style={{
+                fontSize: 10, fontWeight: 700,
+                color: vllmConfColor,
+                fontVariantNumeric: 'tabular-nums',
+              }}>
+                {vllmConfPct}%
+              </span>
+            )}
+            <span style={{
+              fontSize: 9.5, color: 'var(--muted)', fontStyle: 'italic',
+              marginLeft: 'auto',
+            }}>
+              {reasonLabel}
+            </span>
+          </div>
+
+          {/* Value row */}
+          <div style={{
+            fontSize: 12.5, fontWeight: 600,
+            color: 'var(--text)',
+            lineHeight: 1.4,
+          }}>
+            {displayValue === '—' ? (
+              <span style={{ color: 'var(--muted)', fontStyle: 'italic' }}>Not found by vLLM</span>
+            ) : (
+              <span style={{
+                background: 'rgba(139,92,246,0.08)',
+                padding: '1px 6px',
+                borderRadius: 4,
+              }}>
+                {displayValue}
+              </span>
+            )}
+          </div>
+
+          {/* Original value comparison (if it existed) */}
+          {origValue != null && String(origValue).trim() !== '' && vllmData.reason !== 'missing' && (
+            <div style={{ fontSize: 10, color: 'var(--muted)', display: 'flex', gap: 4, alignItems: 'center' }}>
+              <span>Original OCR:</span>
+              <span style={{ fontWeight: 600, color: 'var(--text-dim)' }}>
+                "{String(origValue)}"
+              </span>
+              {origConf != null && (
+                <span style={{ color: 'var(--danger)', fontWeight: 600 }}>
+                  ({Math.round(origConf * 100)}%)
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighThreshold = 90, confMedThreshold = 70, fieldHighlightThreshold = 95, rawVal, onFieldHover, vllmData }) {
   const [newInputVal, setNewInputVal] = useState('');
   // conf may be a nested structure for table/array fields — flatten to a single average number
   const resolvedConf = flattenConfidence(conf);
@@ -567,62 +676,70 @@ function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighT
 
   return (
     <div
-      className="field-row"
-      style={{ display: 'flex', alignItems: 'center', minHeight: 32, cursor: onFieldHover ? 'crosshair' : 'default' }}
+      style={{ display: 'flex', flexDirection: 'column' }}
       onMouseEnter={() => onFieldHover?.(fieldKey)}
       onMouseLeave={() => onFieldHover?.(null)}
     >
-      <div className="field-key" style={{ width: '40%', flexShrink: 0 }}>{label}</div>
-      <div className="field-val" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {isEditing ? (
-          <input
-            type="text"
-            className="styled-input"
-            value={valIsNull ? '' : value}
-            onChange={(e) => onChange(fieldKey, e.target.value)}
-            style={{ width: '100%', padding: '4px 8px', fontSize: 13, background: 'var(--card-alt)' }}
-          />
-        ) : (
-          (valIsNull && !hasRawDiff) ? '' :
-            (() => {
-              const displayVal = hasRawDiff ? rawVal : value;
-              const renderedText = isNullOrEmpty(displayVal) ?
-                '' :
-                (typeof displayVal === 'object' ?
-                  <code style={{ fontSize: 11, background: 'transparent', color: 'inherit' }}>{JSON.stringify(displayVal)}</code> :
-                  String(displayVal));
+      <div
+        className="field-row"
+        style={{ display: 'flex', alignItems: 'center', minHeight: 32, cursor: onFieldHover ? 'crosshair' : 'default' }}
+      >
+        <div className="field-key" style={{ width: '40%', flexShrink: 0 }}>{label}</div>
+        <div className="field-val" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {isEditing ? (
+            <input
+              type="text"
+              className="styled-input"
+              value={valIsNull ? '' : value}
+              onChange={(e) => onChange(fieldKey, e.target.value)}
+              style={{ width: '100%', padding: '4px 8px', fontSize: 13, background: 'var(--card-alt)' }}
+            />
+          ) : (
+            (valIsNull && !hasRawDiff) ? '' :
+              (() => {
+                const displayVal = hasRawDiff ? rawVal : value;
+                const renderedText = isNullOrEmpty(displayVal) ?
+                  '' :
+                  (typeof displayVal === 'object' ?
+                    <code style={{ fontSize: 11, background: 'transparent', color: 'inherit' }}>{JSON.stringify(displayVal)}</code> :
+                    String(displayVal));
 
-              if (!isEditing && pct != null && pct < fieldHighlightThreshold) {
-                return (
-                  <span style={{
-                    background: 'rgba(245, 158, 11, 0.12)',
-                    color: 'var(--warn)',
-                    padding: '3px 8px',
-                    borderRadius: '4px',
-                    border: '1px solid rgba(245, 158, 11, 0.3)',
-                    fontWeight: 500,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6
-                  }}>
-                    {renderedText}
-                  </span>
-                );
-              }
-              return renderedText;
-            })()
-        )}
-        {hasRawDiff && (
-          <span style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic', marginTop: 2 }}>
-            {isEditing ? `Original (OCR): "${rawIsNull ? '' : String(rawVal)}"` : `normalised: "${valIsNull ? '' : String(value)}"`}
-          </span>
+                if (!isEditing && pct != null && pct < fieldHighlightThreshold) {
+                  return (
+                    <span style={{
+                      background: 'rgba(245, 158, 11, 0.12)',
+                      color: 'var(--warn)',
+                      padding: '3px 8px',
+                      borderRadius: '4px',
+                      border: '1px solid rgba(245, 158, 11, 0.3)',
+                      fontWeight: 500,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6
+                    }}>
+                      {renderedText}
+                    </span>
+                  );
+                }
+                return renderedText;
+              })()
+          )}
+          {hasRawDiff && (
+            <span style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic', marginTop: 2 }}>
+              {isEditing ? `Original (OCR): "${rawIsNull ? '' : String(rawVal)}"` : `normalised: "${valIsNull ? '' : String(value)}"`}
+            </span>
+          )}
+        </div>
+        {!isEditing && pct != null && (
+          <div className="field-conf" style={{ flexShrink: 0, marginLeft: 8 }}>
+            <div className={`conf-dot ${confClass}`} />
+            <span style={{ color: confColor }}>{pct}%</span>
+          </div>
         )}
       </div>
-      {!isEditing && pct != null && (
-        <div className="field-conf" style={{ flexShrink: 0, marginLeft: 8 }}>
-          <div className={`conf-dot ${confClass}`} />
-          <span style={{ color: confColor }}>{pct}%</span>
-        </div>
+      {/* vLLM Fallback Suggestion */}
+      {!isEditing && vllmData && (
+        <VllmSuggestionBadge vllmData={vllmData} confHighThreshold={confHighThreshold} confMedThreshold={confMedThreshold} />
       )}
     </div>
   );
@@ -1113,7 +1230,7 @@ function FaceVerdictPanel({ result, onReset }) {
   );
 }
 
-function renderFields(data, isEditing, editedData, onChange, confidences = {}, confidenceMode = 'word', confHighThreshold = 90, confMedThreshold = 70, fieldHighlightThreshold = 95, fieldThresholds = {}, rawFields = {}, onFieldHover = null) {
+function renderFields(data, isEditing, editedData, onChange, confidences = {}, confidenceMode = 'word', confHighThreshold = 90, confMedThreshold = 70, fieldHighlightThreshold = 95, fieldThresholds = {}, rawFields = {}, onFieldHover = null, vllmFallback = {}) {
   if (!data || typeof data !== 'object') return null;
   const groups = {};
   const renderSource = isEditing ? editedData : data;
@@ -1145,6 +1262,7 @@ function renderFields(data, isEditing, editedData, onChange, confidences = {}, c
           confMedThreshold={confMedThreshold}
           fieldHighlightThreshold={fieldThresholds[k] ?? fieldHighlightThreshold}
           onFieldHover={onFieldHover}
+          vllmData={vllmFallback?.[k] || null}
         />
       ))}
     </FieldGroup>
@@ -2222,7 +2340,7 @@ export function Extraction() {
                 )}
 
               {extracted.validated_data ? (
-                renderFields(extracted.validated_data, isEditing, editedData, handleFieldChange, extracted.raw_extracted?.field_confidences || {}, confidenceMode, confHighThreshold, confMedThreshold, fieldHighlightThreshold, fieldThresholds, extracted.raw_extracted?.raw_fields || {}, ocrBlocks.length ? setHoveredField : null)
+                renderFields(extracted.validated_data, isEditing, editedData, handleFieldChange, extracted.raw_extracted?.field_confidences || {}, confidenceMode, confHighThreshold, confMedThreshold, fieldHighlightThreshold, fieldThresholds, extracted.raw_extracted?.raw_fields || {}, ocrBlocks.length ? setHoveredField : null, extracted.raw_extracted?.vllm_fallback || {})
               ) : (
                 <div className="empty-state" style={{ padding: 24 }}>
                   <div className="empty-sub">No structured data extracted yet.</div>

@@ -42,6 +42,7 @@ async def persist_final_extraction(
     confidence_score: float, 
     field_confidences: dict, 
     fraud_check: dict, 
+    vllm_fallback: dict,
     signature_verification: dict, 
     photo_verification: dict, 
     corrections: dict
@@ -58,7 +59,8 @@ async def persist_final_extraction(
         
         raw_payload = {
             "raw_fields": raw_extracted or {},
-            "field_confidences": field_confidences or {}
+            "field_confidences": field_confidences or {},
+            "vllm_fallback": vllm_fallback or {}
         }
         
         if not extracted_record:
@@ -108,3 +110,4 @@ async def persist_final_extraction(
         "document_id": document_id,
         "final_data": final_data
     }
+

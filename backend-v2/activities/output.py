@@ -14,6 +14,7 @@ async def output_activity(
     field_confidences: dict = None,
     fraud_check: dict = None,
     raw_extracted: dict = None,
+    vllm_fallback: dict = None,
     signature_verification: dict = None,
     photo_verification: dict = None
 ) -> dict:
@@ -41,6 +42,7 @@ async def output_activity(
             confidence_score=confidence_score,
             field_confidences=field_confidences,
             fraud_check=fraud_check,
+            vllm_fallback=vllm_fallback,
             signature_verification=signature_verification,
             photo_verification=photo_verification,
             corrections=corrections
@@ -54,3 +56,4 @@ async def output_activity(
         from db.operations import update_error
         await update_error(document_id, {"error": str(e), "stage": "output"})
         raise
+

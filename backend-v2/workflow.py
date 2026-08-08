@@ -140,6 +140,7 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
 
         extractor_result = await extractor_activity(document_id, clean_file_path, doc_type)
         raw_extracted = extractor_result.get("raw_extracted")
+        vllm_fallback = extractor_result.get("vllm_fallback")
 
         # Step 5 — Validate
         await _update_status(document_id, "validating")
@@ -197,6 +198,7 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
             field_confidences=validator_result.get("field_confidences"),
             fraud_check=fraud_check_result,
             raw_extracted=raw_extracted,
+            vllm_fallback=vllm_fallback,
             signature_verification=auto_verify_result.get("signature") if auto_verify_result else None,
             photo_verification=auto_verify_result.get("photo") if auto_verify_result else None
         )

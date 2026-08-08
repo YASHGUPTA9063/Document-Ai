@@ -815,6 +815,17 @@ async def update_classification_settings(doc_types: list[str]):
     save_classification_config(doc_types)
     return {"success": True}
 
+@app.get("/settings/vllm")
+async def get_vllm_settings():
+    from utils.vllm_settings import load_vllm_settings
+    return load_vllm_settings()
+
+@app.put("/settings/vllm")
+async def update_vllm_settings(config: dict):
+    from utils.vllm_settings import save_vllm_settings
+    save_vllm_settings(config)
+    return {"success": True}
+
 @app.get("/templates")
 async def get_templates():
     return load_templates()

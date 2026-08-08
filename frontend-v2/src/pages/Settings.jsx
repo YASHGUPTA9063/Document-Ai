@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useApp } from '../store/AppStore';
-import { getNormConfig, saveNormConfig, getClassificationConfig, saveClassificationConfig } from '../api/client';
+import { getNormConfig, saveNormConfig, getClassificationConfig, saveClassificationConfig, getVllmSettings, saveVllmSettings } from '../api/client';
 import {
   Settings as SettingsIcon, SlidersHorizontal, BarChart3,
   CheckCircle2, Circle, ChevronRight, Zap, Eye, ShieldCheck,
-  Palette, Info, RotateCcw, Save, Tag, Trash2, Plus,
+  Palette, Info, RotateCcw, Save, Tag, Trash2, Plus, Bot, ToggleLeft, ToggleRight,
 } from 'lucide-react';
 
 /* ─────────────────────────────────────────────────────────────
@@ -15,6 +15,7 @@ const NAV = [
   { id: 'thresholds',  label: 'Thresholds',         icon: SlidersHorizontal, desc: 'Highlight & approval limits' },
   { id: 'normalization', label: 'Normalization Format', icon: Palette,      desc: 'Date, number & name rules' },
   { id: 'classification', label: 'Classification Types', icon: Tag,          desc: 'Supported document types' },
+  { id: 'vllm',           label: 'vLLM Fallback',        icon: Bot,          desc: 'Re-extract low-confidence fields' },
 ];
 
 /* ─────────────────────────────────────────────────────────────
@@ -953,6 +954,246 @@ function ClassificationSection({ toast }) {
 }
 
 /* ─────────────────────────────────────────────────────────────
+   VLLM FALLBACK SECTION
+───────────────────────────────────────────────────────────── */
+function VllmSection({ toast }) {
+  const [config, setConfig] = useState({ enabled: true, confidence_threshold: 75, trigger_on_missing: true, trigger_on_low_confidence: true });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    async function load() {
+      try {
+        const data = await getVllmSettings();
+        if (active) { setConfig(data); setLoading(false); }
+      } catch (err) {
+        if (active) { toast(err.message || 'Failed to load vLLM settings', 'error'); setLoading(false); }
+      }
+    }
+    load();
+    return () => { active = false; };
+  }, [toast]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await saveVllmSettings(config);
+      toast('vLLM fallback settings saved ✓', 'success');
+    } catch (err) {
+      toast(err.message || 'Failed to save vLLM settings', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 300, color: 'var(--muted)' }}>
+        <div style={{ fontSize: 13, fontWeight: 500 }}>Loading vLLM settings...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <SectionHeader icon={Bot} label="vLLM Fallback Re-extraction" desc="Automatically re-extract required fields that have low confidence or are missing" color="#8b5cf6" />
+
+      <InfoCallout>
+        When enabled, after initial OCR extraction, any template field marked as <strong>required</strong> that is either missing or has a confidence score below the threshold will be automatically re-extracted using Mistral's Vision LLM. Both the original and vLLM values are shown side-by-side for human review.
+      </InfoCallout>
+
+      {/* Enable/Disable Toggle */}
+      <div style={{
+        background: 'var(--card-alt)', borderRadius: 10,
+        border: `1.5px solid ${config.enabled ? '#8b5cf6' : 'var(--border)'}`,
+        padding: '16px 18px', marginBottom: 16,
+        display: 'flex', alignItems: 'center', gap: 14,
+        cursor: 'pointer',
+        transition: 'all 0.18s ease',
+      }}
+        onClick={() => setConfig(prev => ({ ...prev, enabled: !prev.enabled }))}
+      >
+        <div style={{
+          width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: config.enabled ? 'rgba(139, 92, 246, 0.12)' : 'var(--surface)',
+          border: `1px solid ${config.enabled ? 'rgba(139, 92, 246, 0.25)' : 'var(--border)'}`,
+          color: config.enabled ? '#8b5cf6' : 'var(--muted)',
+          transition: 'all 0.18s ease',
+        }}>
+          {config.enabled ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
+        </div>
+        <div style={{ flex: 1, textAlign: 'left' }}>
+          <div style={{
+            fontWeight: 600, fontSize: 13,
+            color: config.enabled ? '#8b5cf6' : 'var(--text)',
+            marginBottom: 3, transition: 'color 0.18s ease',
+          }}>
+            {config.enabled ? 'vLLM Fallback Enabled' : 'vLLM Fallback Disabled'}
+          </div>
+          <div style={{ fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.55 }}>
+            {config.enabled
+              ? 'Required fields below the confidence threshold will be re-extracted via Vision LLM'
+              : 'Extraction uses only the primary OCR pipeline — no fallback re-extraction'}
+          </div>
+        </div>
+        <div style={{ marginTop: 2, flexShrink: 0 }}>
+          {config.enabled
+            ? <CheckCircle2 size={17} color="#8b5cf6" />
+            : <Circle size={17} color="var(--muted)" />}
+        </div>
+      </div>
+
+      {/* Trigger Mode Toggles — only active when enabled */}
+      <div style={{ opacity: config.enabled ? 1 : 0.45, pointerEvents: config.enabled ? 'auto' : 'none', transition: 'opacity 0.2s ease' }}>
+        <div style={{
+          fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase',
+          color: 'var(--muted)', marginBottom: 10, marginTop: 4,
+        }}>
+          Trigger Conditions
+        </div>
+
+        {/* Trigger on Missing */}
+        <div style={{
+          background: 'var(--card-alt)', borderRadius: 10,
+          border: `1.5px solid ${config.trigger_on_missing ? '#8b5cf6' : 'var(--border)'}`,
+          padding: '13px 16px', marginBottom: 10,
+          display: 'flex', alignItems: 'center', gap: 12,
+          cursor: 'pointer',
+          transition: 'all 0.18s ease',
+        }}
+          onClick={() => setConfig(prev => ({ ...prev, trigger_on_missing: !prev.trigger_on_missing }))}
+        >
+          <div style={{
+            width: 32, height: 32, borderRadius: 7, flexShrink: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: config.trigger_on_missing ? 'rgba(139, 92, 246, 0.12)' : 'var(--surface)',
+            border: `1px solid ${config.trigger_on_missing ? 'rgba(139, 92, 246, 0.25)' : 'var(--border)'}`,
+            color: config.trigger_on_missing ? '#8b5cf6' : 'var(--muted)',
+            transition: 'all 0.18s ease',
+          }}>
+            {config.trigger_on_missing ? <CheckCircle2 size={15} /> : <Circle size={15} />}
+          </div>
+          <div style={{ flex: 1, textAlign: 'left' }}>
+            <div style={{
+              fontWeight: 600, fontSize: 12.5,
+              color: config.trigger_on_missing ? '#8b5cf6' : 'var(--text)',
+              marginBottom: 2, transition: 'color 0.18s ease',
+            }}>
+              Trigger on Missing Fields
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.5 }}>
+              Re-extract when a required field value is empty, null, or not found
+            </div>
+          </div>
+        </div>
+
+        {/* Trigger on Low Confidence */}
+        <div style={{
+          background: 'var(--card-alt)', borderRadius: 10,
+          border: `1.5px solid ${config.trigger_on_low_confidence ? '#8b5cf6' : 'var(--border)'}`,
+          padding: '13px 16px', marginBottom: 16,
+          display: 'flex', alignItems: 'center', gap: 12,
+          cursor: 'pointer',
+          transition: 'all 0.18s ease',
+        }}
+          onClick={() => setConfig(prev => ({ ...prev, trigger_on_low_confidence: !prev.trigger_on_low_confidence }))}
+        >
+          <div style={{
+            width: 32, height: 32, borderRadius: 7, flexShrink: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: config.trigger_on_low_confidence ? 'rgba(139, 92, 246, 0.12)' : 'var(--surface)',
+            border: `1px solid ${config.trigger_on_low_confidence ? 'rgba(139, 92, 246, 0.25)' : 'var(--border)'}`,
+            color: config.trigger_on_low_confidence ? '#8b5cf6' : 'var(--muted)',
+            transition: 'all 0.18s ease',
+          }}>
+            {config.trigger_on_low_confidence ? <CheckCircle2 size={15} /> : <Circle size={15} />}
+          </div>
+          <div style={{ flex: 1, textAlign: 'left' }}>
+            <div style={{
+              fontWeight: 600, fontSize: 12.5,
+              color: config.trigger_on_low_confidence ? '#8b5cf6' : 'var(--text)',
+              marginBottom: 2, transition: 'color 0.18s ease',
+            }}>
+              Trigger on Low Confidence
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.5 }}>
+              Re-extract when a required field's confidence score is below the threshold
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Threshold Slider — only active when enabled AND trigger_on_low_confidence is on */}
+      <div style={{ opacity: config.enabled && config.trigger_on_low_confidence ? 1 : 0.45, pointerEvents: config.enabled && config.trigger_on_low_confidence ? 'auto' : 'none', transition: 'opacity 0.2s ease' }}>
+        <ThresholdControl
+          label="vLLM Confidence Threshold"
+          description="Required fields with OCR confidence below this value will be re-extracted via Vision LLM."
+          value={config.confidence_threshold}
+          onChange={(v) => setConfig(prev => ({ ...prev, confidence_threshold: v }))}
+          min={50}
+          max={100}
+          accentColor="#8b5cf6"
+          icon={Bot}
+          presets={[60, 70, 75, 80, 85, 90]}
+        />
+      </div>
+
+      {/* How it works */}
+      <div style={{
+        marginTop: 20, padding: '14px 16px', borderRadius: 10,
+        background: 'var(--surface)', border: '1px solid var(--border)',
+      }}>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 10 }}>
+          How it works
+        </div>
+        {[
+          { step: '1', text: 'Initial extraction runs using the primary OCR + LLM pipeline' },
+          { step: '2', text: 'For each required template field, check trigger conditions: missing value, low confidence, or both (based on your settings above)' },
+          { step: '3', text: 'Send the document image to Mistral VLM with a targeted prompt for only those fields' },
+          { step: '4', text: 'Both the original OCR value and vLLM suggestion are shown side-by-side on the Extraction page' },
+        ].map(({ step, text }) => (
+          <div key={step} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 8 }}>
+            <div style={{
+              width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
+              background: 'rgba(139, 92, 246, 0.1)', border: '1px solid rgba(139, 92, 246, 0.2)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 10, fontWeight: 700, color: '#8b5cf6',
+            }}>{step}</div>
+            <span style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.5 }}>{text}</span>
+          </div>
+        ))}
+      </div>
+
+
+      {/* Save Button */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          style={{
+            all: 'unset', cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            padding: '8px 18px', borderRadius: 8,
+            background: '#8b5cf6',
+            fontSize: 12.5, fontWeight: 600, color: 'white',
+            opacity: saving ? 0.7 : 1,
+            transition: 'all 0.15s ease',
+            boxShadow: '0 2px 6px rgba(139,92,246,0.25)',
+          }}
+          onMouseEnter={e => { if (!saving) e.currentTarget.style.background = '#7c3aed'; }}
+          onMouseLeave={e => { if (!saving) e.currentTarget.style.background = '#8b5cf6'; }}
+        >
+          <Save size={14} />
+          {saving ? 'Saving...' : 'Save vLLM Settings'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
    MAIN SETTINGS COMPONENT
 ───────────────────────────────────────────────────────────── */
 export function Settings() {
@@ -1114,6 +1355,11 @@ export function Settings() {
           )}
           {activeNav === 'classification' && (
             <ClassificationSection
+              toast={toast}
+            />
+          )}
+          {activeNav === 'vllm' && (
+            <VllmSection
               toast={toast}
             />
           )}
