@@ -168,14 +168,16 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
         reviewer_result = await reviewer_activity(
             document_id=document_id, 
             validated_data=validator_result["validated_data"], 
-            confidence_score=validator_result["confidence_score"]
+            confidence_score=validator_result["confidence_score"],
+            validation_errors=validator_result.get("validation_errors", [])
         )
 
         if reviewer_result.get("auto_approved"):
             final_reviewer_result = {"approved": True, "corrections": None}
         else:
             logger.info(f"[Document {document_id}] Pausing for human review. Score < 80%")
-            await _update_status(document_id, "awaiting_review")
+            review_reason = reviewer_result.get("summary") or "Confidence below threshold — manual review required."
+            await _update_status_and_message(document_id, "awaiting_review", review_reason)
             # Pause workflow using Mistral Workflow SDK Interactive Workflow primitives
             human_decision = await self.wait_for_input(ReviewerDecisionRequest, timeout=timedelta(hours=24))
             final_reviewer_result = {

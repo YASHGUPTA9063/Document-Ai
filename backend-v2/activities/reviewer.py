@@ -27,14 +27,28 @@ def _extract_text(content) -> str:
 
 
 @workflows.activity()
-async def reviewer_activity(document_id: str, validated_data: dict, confidence_score: float) -> dict:
+async def reviewer_activity(document_id: str, validated_data: dict, confidence_score: float, validation_errors: list = None) -> dict:
     """
     Step 6 — Reviewer.
     Determines if human review is needed, generating a summary via the Reviewer Agent.
     """
     try:
         logger.info(f"[Document {document_id}] Starting reviewer activity. Confidence: {confidence_score}")
-        
+
+        if validation_errors:
+            logger.info(f"[Document {document_id}] Forcing human review due to validation errors: {validation_errors}")
+            unique_errs = []
+            for err in validation_errors:
+                if err and err not in unique_errs:
+                    unique_errs.append(err)
+            formatted_summary = "\n".join(f"• {err}" for err in unique_errs)
+            return {
+                "approved": None,
+                "auto_approved": False,
+                "needs_review": True,
+                "summary": formatted_summary
+            }
+
         # Remove massive base64 images from the validated data to avoid overwhelming the LLM
         prompt_data = validated_data.copy()
         prompt_data.pop("signature_image", None)

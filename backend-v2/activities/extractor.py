@@ -41,7 +41,7 @@ def _calculate_field_confidence(field_value, word_confidence_scores: list) -> fl
         field_str = field_value.strip()
         
     if not field_str:
-        return 1.0
+        return 0.0
 
     # Normalize and split field value into word tokens
     field_words = re.findall(r'\b\w+\b', field_str.lower())

@@ -66,12 +66,13 @@ def build_normalization_rules_prompt() -> str:
     rate_str = "For rate, percentage, or withholding fields (e.g. 'Tax Treaty Withholding Rate', 'Tax Rate', 'Interest Rate', etc.), always preserve or append the percentage sign '%' in normalized_extracted (e.g. '21%' or 21 -> '21%'). Do NOT strip the '%' sign from rate/percentage fields."
 
     # 4. Casing rule
+    pincode_note = " For addresses, include the pincode/postal code if one is present in the document."
     if casing_opt == "Title Case":
-        casing_str = "Normalize spelling and standardize to Title Case."
+        casing_str = "Normalize spelling and standardize to Title Case." + pincode_note
     elif casing_opt == "UPPERCASE":
-        casing_str = "Normalize spelling and convert to UPPERCASE."
+        casing_str = "Normalize spelling and convert to UPPERCASE." + pincode_note
     else:
-        casing_str = "Keep name/address casing exactly as it is written in the document."
+        casing_str = "Keep name/address casing exactly as it is written in the document." + pincode_note
         
     # 5. Name structure sequence rule
     seq_opt = config.get("name_sequence", "First Name Last Name")

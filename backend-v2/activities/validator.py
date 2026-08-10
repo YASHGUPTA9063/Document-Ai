@@ -174,7 +174,23 @@ async def validator_activity(
             unwanted = [k for k in list(validated_data.keys()) if k not in allowed_keys]
             for k in unwanted:
                 validated_data.pop(k, None)
-        
+
+        # Deterministic mandatory-field check (runs after LLM, after allow-list strip)
+        if template_fields and isinstance(template_fields, list):
+            missing = []
+            for f in template_fields:
+                if not (isinstance(f, dict) and f.get("required")):
+                    continue
+                key = f.get("key") or f.get("name")
+                if key and validated_data.get(key) in (None, "", []):
+                    missing.append(key)
+            if missing:
+                errs = parsed.setdefault("validation_errors", [])
+                for k in missing:
+                    if not any(k in e for e in errs):
+                        errs.append(f"The field '{k}' is required but is empty.")
+                parsed["is_valid"] = False
+
         return {
             "is_valid": parsed.get("is_valid", False),
             "confidence_score": ocr_confidence, # Pass through the OCR native confidence score

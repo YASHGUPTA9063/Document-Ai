@@ -235,7 +235,8 @@ function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighT
   const [newInputVal, setNewInputVal] = useState('');
   // conf may be a nested structure for table/array fields — flatten to a single average number
   const resolvedConf = flattenConfidence(conf);
-  const pct = resolvedConf != null ? Math.round(resolvedConf * 100) : null;
+  // A null/empty value has no meaningful confidence — override to 0
+  const pct = resolvedConf != null ? (isNullOrEmpty(value) ? 0 : Math.round(resolvedConf * 100)) : null;
   const confClass = pct == null ? '' : pct >= confHighThreshold ? 'conf-high' : pct >= confMedThreshold ? 'conf-med' : 'conf-low';
   const confColor = pct == null ? '' : pct >= confHighThreshold ? 'var(--success)' : pct >= confMedThreshold ? 'var(--warn)' : 'var(--danger)';
 

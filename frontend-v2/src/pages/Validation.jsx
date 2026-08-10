@@ -56,6 +56,58 @@ function parseObjectData(value) {
   return null;
 }
 
+function parseValidationMessage(msg) {
+  if (!msg) return [];
+  let cleaned = String(msg).trim();
+  if (!cleaned) return [];
+
+  if (/^Mandatory field\(s\) missing or empty:\s*/i.test(cleaned)) {
+    cleaned = cleaned.replace(/^Mandatory field\(s\) missing or empty:\s*/i, '');
+  }
+
+  let items = [];
+  if (cleaned.includes('\n')) {
+    items = cleaned.split('\n');
+  } else if (cleaned.includes('•')) {
+    items = cleaned.split('•');
+  } else if (cleaned.includes('.,')) {
+    items = cleaned.split(/\.,\s*/);
+  } else {
+    items = cleaned.split(/,\s*(?=(?:The|Mandatory|Field|Validation|Date|[A-Z]['a-zA-Z]))/);
+  }
+
+  const rawList = [];
+  const seen = new Set();
+
+  for (let item of items) {
+    let text = item.replace(/^[•\-\*\s]+/, '').trim();
+    if (!text) continue;
+    if (!/[.!?]$/.test(text)) {
+      text += '.';
+    }
+    const key = text.toLowerCase().replace(/['"]/g, '');
+    if (!seen.has(key)) {
+      seen.add(key);
+      rawList.push(text);
+    }
+  }
+
+  const finalItems = [];
+  for (let text of rawList) {
+    const match = text.match(/^Mandatory field missing or empty:\s*['"]?([^'"]+)['"]?/i);
+    if (match) {
+      const fieldName = match[1];
+      const alreadyCovered = rawList.some(
+        other => other !== text && other.toLowerCase().includes(fieldName.toLowerCase())
+      );
+      if (alreadyCovered) continue;
+    }
+    finalItems.push(text);
+  }
+
+  return finalItems;
+}
+
 /**
  * Inline field-level corrections editor.
  * Renders extracted fields as styled inputs so reviewers can correct
@@ -382,6 +434,7 @@ function ReviewCard({ doc, onAction }) {
   };
 
   const isDuplicateWait = doc.message?.toLowerCase().includes('duplicate');
+  const validationIssues = parseValidationMessage(doc.message);
 
   const handleSaveAndApprove = () => {
     // Pass corrections only if any fields were changed
@@ -415,12 +468,45 @@ function ReviewCard({ doc, onAction }) {
               )}
             </div>
           </div>
-          {doc.message && (
-            <span style={{ fontSize: 11, color: 'var(--warn)', maxWidth: 200, textAlign: 'right' }}>
-              ⚠ {doc.message}
+          {validationIssues.length > 0 && (
+            <span className="badge badge-yellow" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
+              <AlertTriangle size={12} /> {validationIssues.length} Warning{validationIssues.length !== 1 ? 's' : ''}
             </span>
           )}
         </div>
+
+        {/* Validation warnings banner */}
+        {validationIssues.length > 0 && (
+          <div style={{
+            background: 'rgba(245, 158, 11, 0.07)',
+            border: '1px solid rgba(245, 158, 11, 0.25)',
+            borderRadius: 8,
+            padding: '10px 14px',
+            marginBottom: 14
+          }}>
+            <div style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: 'var(--warn)',
+              letterSpacing: '0.05em',
+              textTransform: 'uppercase',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              marginBottom: 6
+            }}>
+              <AlertTriangle size={13} />
+              Validation Warnings &amp; Issues
+            </div>
+            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: 'var(--text)', lineHeight: 1.6 }}>
+              {validationIssues.map((issue, idx) => (
+                <li key={idx} style={{ color: 'var(--warn)', marginBottom: idx < validationIssues.length - 1 ? 3 : 0 }}>
+                  {issue}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {/* Extracted fields summary */}
         {extracted?.validated_data && (

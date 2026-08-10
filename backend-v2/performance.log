@@ -14290,3 +14290,629 @@
 2026-08-10 13:08:56,346 - INFO - [PERF] [TOOL_START] persist_final_extraction started
 2026-08-10 13:08:56,385 - INFO - [PERF] [TOOL_END] persist_final_extraction took 0.038s
 2026-08-10 13:08:56,385 - INFO - [PERF] [ACTIVITY_END] output_activity took 0.039s
+2026-08-10 15:10:50,943 - INFO - Initializing performance timing hooks...
+2026-08-10 15:10:53,071 - INFO - Successfully patched Mistral Agents API client methods
+2026-08-10 15:10:57,328 - INFO - Successfully patched mistralai.workflows activity decorator
+2026-08-10 15:11:01,891 - INFO - Successfully patched document workflow tool functions
+2026-08-10 15:11:01,900 - INFO - Successfully patched claim workflow tool functions
+2026-08-10 15:11:01,908 - INFO - Successfully patched claim DB operation functions
+2026-08-10 15:34:26,411 - INFO - Initializing performance timing hooks...
+2026-08-10 15:34:27,046 - INFO - Successfully patched Mistral Agents API client methods
+2026-08-10 15:34:28,596 - INFO - Successfully patched mistralai.workflows activity decorator
+2026-08-10 15:34:29,813 - INFO - Successfully patched document workflow tool functions
+2026-08-10 15:34:29,814 - INFO - Successfully patched claim workflow tool functions
+2026-08-10 15:34:29,815 - INFO - Successfully patched claim DB operation functions
+2026-08-10 15:35:31,667 - INFO - [PERF] [ACTIVITY_START] intake_activity started
+2026-08-10 15:35:31,667 - INFO - [PERF] [TOOL_START] check_document_duplicates started
+2026-08-10 15:35:31,683 - INFO - [PERF] [TOOL_END] check_document_duplicates took 0.017s
+2026-08-10 15:35:31,684 - INFO - [PERF] [ACTIVITY_END] intake_activity took 0.018s
+2026-08-10 15:35:33,068 - INFO - [PERF] [ACTIVITY_START] pre_validator_activity started
+2026-08-10 15:35:33,072 - INFO - [PERF] [ACTIVITY_END] pre_validator_activity took 0.005s
+2026-08-10 15:35:36,354 - INFO - [PERF] [ACTIVITY_START] classifier_activity started
+2026-08-10 15:35:36,360 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f901f2f76eb9dd5840e6a7c191f' started
+2026-08-10 15:35:42,574 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f901f2f76eb9dd5840e6a7c191f' took 6.213s
+2026-08-10 15:35:42,574 - INFO - [PERF] [ACTIVITY_END] classifier_activity took 6.220s
+2026-08-10 15:35:43,949 - INFO - [PERF] [ACTIVITY_START] get_template_metadata_activity started
+2026-08-10 15:35:43,951 - INFO - [PERF] [ACTIVITY_END] get_template_metadata_activity took 0.001s
+2026-08-10 15:35:51,936 - INFO - [PERF] [ACTIVITY_START] extractor_activity started
+2026-08-10 15:35:51,938 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' started
+2026-08-10 15:35:52,815 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' took 0.876s
+2026-08-10 15:35:52,815 - INFO - [PERF] [TOOL_START] extract_text_from_document started
+2026-08-10 15:37:37,966 - INFO - [PERF] [TOOL_END] extract_text_from_document took 105.150s
+2026-08-10 15:37:37,968 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' started
+2026-08-10 15:37:44,815 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' took 6.847s
+2026-08-10 15:37:44,893 - INFO - [PERF] [ACTIVITY_END] extractor_activity took 112.956s
+2026-08-10 15:37:46,424 - INFO - [PERF] [ACTIVITY_START] validator_activity started
+2026-08-10 15:37:46,425 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f902144777ab66f316fb9b605e7' started
+2026-08-10 15:37:47,269 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f902144777ab66f316fb9b605e7' took 0.844s
+2026-08-10 15:37:47,271 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f902144777ab66f316fb9b605e7' started
+2026-08-10 15:37:51,039 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f902144777ab66f316fb9b605e7' took 3.769s
+2026-08-10 15:37:51,041 - INFO - [PERF] [ACTIVITY_END] validator_activity took 4.617s
+2026-08-10 15:39:05,471 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 15:39:05,538 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.066s
+2026-08-10 15:39:06,300 - INFO - [PERF] [ACTIVITY_START] intake_activity started
+2026-08-10 15:39:06,301 - INFO - [PERF] [TOOL_START] check_document_duplicates started
+2026-08-10 15:39:06,313 - INFO - [PERF] [TOOL_END] check_document_duplicates took 0.012s
+2026-08-10 15:39:06,313 - INFO - [PERF] [ACTIVITY_END] intake_activity took 0.013s
+2026-08-10 15:39:06,943 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 15:39:06,948 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 15:39:09,189 - INFO - [PERF] [ACTIVITY_START] pre_validator_activity started
+2026-08-10 15:39:09,198 - INFO - [PERF] [ACTIVITY_END] pre_validator_activity took 0.009s
+2026-08-10 15:39:09,871 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 15:39:09,877 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 15:39:10,518 - INFO - [PERF] [ACTIVITY_START] preprocessor_activity started
+2026-08-10 15:39:10,518 - INFO - [PERF] [TOOL_START] enhance_document_image started
+2026-08-10 15:39:10,518 - INFO - [PERF] [TOOL_END] enhance_document_image took 0.000s
+2026-08-10 15:39:10,520 - INFO - [PERF] [ACTIVITY_END] preprocessor_activity took 0.001s
+2026-08-10 15:39:11,153 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 15:39:11,159 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 15:39:11,813 - INFO - [PERF] [ACTIVITY_START] classifier_activity started
+2026-08-10 15:39:11,819 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f901f2f76eb9dd5840e6a7c191f' started
+2026-08-10 15:39:20,423 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f901f2f76eb9dd5840e6a7c191f' took 8.603s
+2026-08-10 15:39:20,423 - INFO - [PERF] [ACTIVITY_END] classifier_activity took 8.609s
+2026-08-10 15:39:21,110 - INFO - [PERF] [ACTIVITY_START] update_doc_type_activity started
+2026-08-10 15:39:21,119 - INFO - [PERF] [ACTIVITY_END] update_doc_type_activity took 0.008s
+2026-08-10 15:39:22,455 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 15:39:22,461 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 15:39:25,803 - INFO - [PERF] [ACTIVITY_START] extractor_activity started
+2026-08-10 15:39:25,805 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' started
+2026-08-10 15:39:28,284 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' took 2.478s
+2026-08-10 15:39:28,284 - INFO - [PERF] [TOOL_START] extract_text_from_document started
+2026-08-10 15:41:01,132 - INFO - [PERF] [TOOL_END] extract_text_from_document took 92.848s
+2026-08-10 15:41:01,134 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' started
+2026-08-10 15:41:07,347 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' took 6.215s
+2026-08-10 15:41:07,375 - INFO - [PERF] [ACTIVITY_END] extractor_activity took 101.570s
+2026-08-10 15:41:08,080 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 15:41:08,086 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 15:41:22,439 - INFO - [PERF] [ACTIVITY_START] reviewer_activity started
+2026-08-10 15:41:22,439 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' started
+2026-08-10 15:41:23,062 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' took 0.623s
+2026-08-10 15:41:23,062 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' started
+2026-08-10 15:41:24,569 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' took 1.506s
+2026-08-10 15:41:24,570 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' started
+2026-08-10 15:41:25,288 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' took 0.719s
+2026-08-10 15:41:25,288 - INFO - [PERF] [ACTIVITY_END] reviewer_activity took 2.850s
+2026-08-10 15:45:11,256 - INFO - [PERF] [ACTIVITY_START] intake_activity started
+2026-08-10 15:45:11,256 - INFO - [PERF] [TOOL_START] check_document_duplicates started
+2026-08-10 15:45:11,281 - INFO - [PERF] [TOOL_END] check_document_duplicates took 0.024s
+2026-08-10 15:45:11,281 - INFO - [PERF] [ACTIVITY_END] intake_activity took 0.025s
+2026-08-10 15:45:12,798 - INFO - [PERF] [ACTIVITY_START] pre_validator_activity started
+2026-08-10 15:45:12,802 - INFO - [PERF] [ACTIVITY_END] pre_validator_activity took 0.004s
+2026-08-10 15:45:14,456 - INFO - [PERF] [ACTIVITY_START] preprocessor_activity started
+2026-08-10 15:45:14,457 - INFO - [PERF] [TOOL_START] enhance_document_image started
+2026-08-10 15:45:14,458 - INFO - [PERF] [TOOL_END] enhance_document_image took 0.001s
+2026-08-10 15:45:14,458 - INFO - [PERF] [ACTIVITY_END] preprocessor_activity took 0.002s
+2026-08-10 15:45:17,269 - INFO - [PERF] [ACTIVITY_START] classifier_activity started
+2026-08-10 15:45:17,274 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f901f2f76eb9dd5840e6a7c191f' started
+2026-08-10 15:45:23,528 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f901f2f76eb9dd5840e6a7c191f' took 6.254s
+2026-08-10 15:45:23,529 - INFO - [PERF] [ACTIVITY_END] classifier_activity took 6.260s
+2026-08-10 15:45:24,897 - INFO - [PERF] [ACTIVITY_START] get_template_metadata_activity started
+2026-08-10 15:45:24,898 - INFO - [PERF] [ACTIVITY_END] get_template_metadata_activity took 0.001s
+2026-08-10 15:45:26,595 - INFO - [PERF] [ACTIVITY_START] extractor_activity started
+2026-08-10 15:45:26,597 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' started
+2026-08-10 15:45:27,499 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' took 0.903s
+2026-08-10 15:45:27,500 - INFO - [PERF] [TOOL_START] extract_text_from_document started
+2026-08-10 15:46:04,875 - INFO - [PERF] [TOOL_END] extract_text_from_document took 37.375s
+2026-08-10 15:46:04,875 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' started
+2026-08-10 15:46:05,304 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' took 0.429s
+2026-08-10 15:46:05,304 - INFO - [PERF] [ACTIVITY_END] extractor_activity took 38.710s
+2026-08-10 15:46:41,737 - INFO - Initializing performance timing hooks...
+2026-08-10 15:46:42,355 - INFO - Successfully patched Mistral Agents API client methods
+2026-08-10 15:46:44,119 - INFO - Successfully patched mistralai.workflows activity decorator
+2026-08-10 15:46:45,525 - INFO - Successfully patched document workflow tool functions
+2026-08-10 15:46:45,526 - INFO - Successfully patched claim workflow tool functions
+2026-08-10 15:46:45,527 - INFO - Successfully patched claim DB operation functions
+2026-08-10 15:50:00,374 - INFO - Initializing performance timing hooks...
+2026-08-10 15:50:01,045 - INFO - Successfully patched Mistral Agents API client methods
+2026-08-10 15:50:02,635 - INFO - Successfully patched mistralai.workflows activity decorator
+2026-08-10 15:50:04,190 - INFO - Successfully patched document workflow tool functions
+2026-08-10 15:50:04,192 - INFO - Successfully patched claim workflow tool functions
+2026-08-10 15:50:04,192 - INFO - Successfully patched claim DB operation functions
+2026-08-10 15:52:39,348 - INFO - [PERF] [ACTIVITY_START] intake_activity started
+2026-08-10 15:52:39,350 - INFO - [PERF] [TOOL_START] check_document_duplicates started
+2026-08-10 15:52:39,372 - INFO - [PERF] [TOOL_END] check_document_duplicates took 0.021s
+2026-08-10 15:52:39,373 - INFO - [PERF] [ACTIVITY_END] intake_activity took 0.023s
+2026-08-10 15:52:40,734 - INFO - [PERF] [ACTIVITY_START] pre_validator_activity started
+2026-08-10 15:52:40,739 - INFO - [PERF] [ACTIVITY_END] pre_validator_activity took 0.005s
+2026-08-10 15:52:43,401 - INFO - [PERF] [ACTIVITY_START] classifier_activity started
+2026-08-10 15:52:43,407 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f901f2f76eb9dd5840e6a7c191f' started
+2026-08-10 15:52:51,658 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f901f2f76eb9dd5840e6a7c191f' took 8.252s
+2026-08-10 15:52:51,658 - INFO - [PERF] [ACTIVITY_END] classifier_activity took 8.259s
+2026-08-10 15:53:00,960 - INFO - [PERF] [ACTIVITY_START] get_template_metadata_activity started
+2026-08-10 15:53:00,960 - INFO - [PERF] [ACTIVITY_END] get_template_metadata_activity took 0.001s
+2026-08-10 15:53:09,024 - INFO - [PERF] [ACTIVITY_START] extractor_activity started
+2026-08-10 15:53:09,026 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' started
+2026-08-10 15:53:10,494 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' took 1.469s
+2026-08-10 15:53:10,495 - INFO - [PERF] [TOOL_START] extract_text_from_document started
+2026-08-10 15:54:06,414 - INFO - [PERF] [TOOL_END] extract_text_from_document took 55.919s
+2026-08-10 15:54:06,415 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' started
+2026-08-10 15:54:11,892 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' took 5.478s
+2026-08-10 15:54:11,925 - INFO - [PERF] [ACTIVITY_END] extractor_activity took 62.901s
+2026-08-10 15:56:39,518 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 15:56:39,524 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 15:56:40,319 - INFO - [PERF] [ACTIVITY_START] intake_activity started
+2026-08-10 15:56:40,319 - INFO - [PERF] [TOOL_START] check_document_duplicates started
+2026-08-10 15:56:40,332 - INFO - [PERF] [TOOL_END] check_document_duplicates took 0.011s
+2026-08-10 15:56:40,332 - INFO - [PERF] [ACTIVITY_END] intake_activity took 0.012s
+2026-08-10 15:56:41,120 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 15:56:41,126 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 15:56:41,756 - INFO - [PERF] [ACTIVITY_START] pre_validator_activity started
+2026-08-10 15:56:41,761 - INFO - [PERF] [ACTIVITY_END] pre_validator_activity took 0.004s
+2026-08-10 15:56:42,473 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 15:56:42,488 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.013s
+2026-08-10 15:56:43,779 - INFO - [PERF] [ACTIVITY_START] preprocessor_activity started
+2026-08-10 15:56:43,780 - INFO - [PERF] [TOOL_START] enhance_document_image started
+2026-08-10 15:56:43,780 - INFO - [PERF] [TOOL_END] enhance_document_image took 0.000s
+2026-08-10 15:56:43,781 - INFO - [PERF] [ACTIVITY_END] preprocessor_activity took 0.001s
+2026-08-10 15:56:44,705 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 15:56:44,711 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 15:56:45,423 - INFO - [PERF] [ACTIVITY_START] classifier_activity started
+2026-08-10 15:56:45,437 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f901f2f76eb9dd5840e6a7c191f' started
+2026-08-10 15:56:53,014 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f901f2f76eb9dd5840e6a7c191f' took 7.578s
+2026-08-10 15:56:53,038 - INFO - [PERF] [ACTIVITY_END] classifier_activity took 7.616s
+2026-08-10 15:56:53,757 - INFO - [PERF] [ACTIVITY_START] update_doc_type_activity started
+2026-08-10 15:56:53,850 - INFO - [PERF] [ACTIVITY_END] update_doc_type_activity took 0.093s
+2026-08-10 15:56:55,267 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 15:56:55,275 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.007s
+2026-08-10 15:56:55,953 - INFO - [PERF] [ACTIVITY_START] extractor_activity started
+2026-08-10 15:56:55,956 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' started
+2026-08-10 15:56:56,014 - INFO - [PERF] [ACTIVITY_START] intake_activity started
+2026-08-10 15:56:56,015 - INFO - [PERF] [TOOL_START] check_document_duplicates started
+2026-08-10 15:56:56,028 - INFO - [PERF] [TOOL_END] check_document_duplicates took 0.013s
+2026-08-10 15:56:56,028 - INFO - [PERF] [ACTIVITY_END] intake_activity took 0.014s
+2026-08-10 15:56:57,458 - INFO - [PERF] [ACTIVITY_START] pre_validator_activity started
+2026-08-10 15:56:57,462 - INFO - [PERF] [ACTIVITY_END] pre_validator_activity took 0.004s
+2026-08-10 15:56:57,842 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' took 1.886s
+2026-08-10 15:56:57,842 - INFO - [PERF] [TOOL_START] extract_text_from_document started
+2026-08-10 15:57:16,479 - INFO - [PERF] [TOOL_END] extract_text_from_document took 18.637s
+2026-08-10 15:57:16,479 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' started
+2026-08-10 15:57:16,788 - INFO - [PERF] [ACTIVITY_START] preprocessor_activity started
+2026-08-10 15:57:16,788 - INFO - [PERF] [TOOL_START] enhance_document_image started
+2026-08-10 15:57:16,789 - INFO - [PERF] [TOOL_END] enhance_document_image took 0.000s
+2026-08-10 15:57:16,789 - INFO - [PERF] [ACTIVITY_END] preprocessor_activity took 0.001s
+2026-08-10 15:57:18,054 - INFO - [PERF] [ACTIVITY_START] classifier_activity started
+2026-08-10 15:57:18,058 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f901f2f76eb9dd5840e6a7c191f' started
+2026-08-10 15:57:28,437 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f901f2f76eb9dd5840e6a7c191f' took 10.377s
+2026-08-10 15:57:28,437 - INFO - [PERF] [ACTIVITY_END] classifier_activity took 10.384s
+2026-08-10 15:57:30,092 - INFO - [PERF] [ACTIVITY_START] get_template_metadata_activity started
+2026-08-10 15:57:30,099 - INFO - [PERF] [ACTIVITY_END] get_template_metadata_activity took 0.008s
+2026-08-10 15:57:31,495 - INFO - [PERF] [ACTIVITY_START] extractor_activity started
+2026-08-10 15:57:31,497 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' started
+2026-08-10 15:57:34,082 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' took 2.586s
+2026-08-10 15:57:34,082 - INFO - [PERF] [TOOL_START] extract_text_from_document started
+2026-08-10 15:58:29,390 - INFO - [PERF] [TOOL_END] extract_text_from_document took 55.306s
+2026-08-10 15:58:29,390 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' started
+2026-08-10 15:58:29,471 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' took 72.991s
+2026-08-10 15:58:29,730 - INFO - [PERF] [ACTIVITY_END] extractor_activity took 93.776s
+2026-08-10 15:58:30,979 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' took 1.589s
+2026-08-10 15:58:30,979 - INFO - [PERF] [ACTIVITY_END] extractor_activity took 59.484s
+2026-08-10 15:58:30,995 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 15:58:31,003 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.007s
+2026-08-10 15:58:54,417 - INFO - Initializing performance timing hooks...
+2026-08-10 15:58:55,094 - INFO - Successfully patched Mistral Agents API client methods
+2026-08-10 15:58:56,366 - INFO - Successfully patched mistralai.workflows activity decorator
+2026-08-10 15:58:57,469 - INFO - Successfully patched document workflow tool functions
+2026-08-10 15:58:57,470 - INFO - Successfully patched claim workflow tool functions
+2026-08-10 15:58:57,471 - INFO - Successfully patched claim DB operation functions
+2026-08-10 15:59:31,436 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 15:59:31,714 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.277s
+2026-08-10 16:00:44,711 - INFO - Initializing performance timing hooks...
+2026-08-10 16:00:45,377 - INFO - Successfully patched Mistral Agents API client methods
+2026-08-10 16:00:46,941 - INFO - Successfully patched mistralai.workflows activity decorator
+2026-08-10 16:00:48,126 - INFO - Successfully patched document workflow tool functions
+2026-08-10 16:00:48,127 - INFO - Successfully patched claim workflow tool functions
+2026-08-10 16:00:48,128 - INFO - Successfully patched claim DB operation functions
+2026-08-10 16:01:23,759 - INFO - Initializing performance timing hooks...
+2026-08-10 16:01:24,421 - INFO - Successfully patched Mistral Agents API client methods
+2026-08-10 16:01:25,984 - INFO - Successfully patched mistralai.workflows activity decorator
+2026-08-10 16:01:27,038 - INFO - Successfully patched document workflow tool functions
+2026-08-10 16:01:27,038 - INFO - Successfully patched claim workflow tool functions
+2026-08-10 16:01:27,040 - INFO - Successfully patched claim DB operation functions
+2026-08-10 16:02:01,243 - INFO - Initializing performance timing hooks...
+2026-08-10 16:02:02,420 - INFO - Successfully patched Mistral Agents API client methods
+2026-08-10 16:02:03,802 - INFO - Successfully patched mistralai.workflows activity decorator
+2026-08-10 16:02:05,571 - INFO - Successfully patched document workflow tool functions
+2026-08-10 16:02:05,572 - INFO - Successfully patched claim workflow tool functions
+2026-08-10 16:02:05,573 - INFO - Successfully patched claim DB operation functions
+2026-08-10 16:02:42,448 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:02:42,457 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.009s
+2026-08-10 16:02:43,142 - INFO - [PERF] [ACTIVITY_START] intake_activity started
+2026-08-10 16:02:43,143 - INFO - [PERF] [TOOL_START] check_document_duplicates started
+2026-08-10 16:02:43,233 - INFO - [PERF] [TOOL_END] check_document_duplicates took 0.090s
+2026-08-10 16:02:43,235 - INFO - [PERF] [ACTIVITY_END] intake_activity took 0.093s
+2026-08-10 16:02:43,874 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:02:43,880 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 16:02:45,954 - INFO - [PERF] [ACTIVITY_START] pre_validator_activity started
+2026-08-10 16:02:45,958 - INFO - [PERF] [ACTIVITY_END] pre_validator_activity took 0.005s
+2026-08-10 16:02:46,605 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:02:46,610 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 16:02:47,934 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:02:47,940 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 16:02:50,007 - INFO - [PERF] [ACTIVITY_START] classifier_activity started
+2026-08-10 16:02:50,015 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f901f2f76eb9dd5840e6a7c191f' started
+2026-08-10 16:02:57,669 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f901f2f76eb9dd5840e6a7c191f' took 7.656s
+2026-08-10 16:02:57,671 - INFO - [PERF] [ACTIVITY_END] classifier_activity took 7.663s
+2026-08-10 16:02:58,346 - INFO - [PERF] [ACTIVITY_START] update_doc_type_activity started
+2026-08-10 16:02:58,353 - INFO - [PERF] [ACTIVITY_END] update_doc_type_activity took 0.007s
+2026-08-10 16:02:59,004 - INFO - [PERF] [ACTIVITY_START] get_template_metadata_activity started
+2026-08-10 16:02:59,004 - INFO - [PERF] [ACTIVITY_END] get_template_metadata_activity took 0.001s
+2026-08-10 16:02:59,688 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:02:59,693 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.007s
+2026-08-10 16:06:23,201 - INFO - Initializing performance timing hooks...
+2026-08-10 16:06:23,806 - INFO - Successfully patched Mistral Agents API client methods
+2026-08-10 16:06:25,513 - INFO - Successfully patched mistralai.workflows activity decorator
+2026-08-10 16:06:26,669 - INFO - Successfully patched document workflow tool functions
+2026-08-10 16:06:26,670 - INFO - Successfully patched claim workflow tool functions
+2026-08-10 16:06:26,672 - INFO - Successfully patched claim DB operation functions
+2026-08-10 16:06:55,003 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:06:55,465 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.462s
+2026-08-10 16:06:56,195 - INFO - [PERF] [ACTIVITY_START] intake_activity started
+2026-08-10 16:06:56,195 - INFO - [PERF] [TOOL_START] check_document_duplicates started
+2026-08-10 16:06:56,228 - INFO - [PERF] [TOOL_END] check_document_duplicates took 0.032s
+2026-08-10 16:06:56,228 - INFO - [PERF] [ACTIVITY_END] intake_activity took 0.033s
+2026-08-10 16:06:56,921 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:06:56,927 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 16:06:57,572 - INFO - [PERF] [ACTIVITY_START] pre_validator_activity started
+2026-08-10 16:06:57,576 - INFO - [PERF] [ACTIVITY_END] pre_validator_activity took 0.004s
+2026-08-10 16:06:58,230 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:06:58,236 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 16:06:58,881 - INFO - [PERF] [ACTIVITY_START] preprocessor_activity started
+2026-08-10 16:06:58,881 - INFO - [PERF] [TOOL_START] enhance_document_image started
+2026-08-10 16:06:58,881 - INFO - [PERF] [TOOL_END] enhance_document_image took 0.000s
+2026-08-10 16:06:58,881 - INFO - [PERF] [ACTIVITY_END] preprocessor_activity took 0.001s
+2026-08-10 16:06:59,648 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:06:59,654 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 16:07:00,266 - INFO - [PERF] [ACTIVITY_START] classifier_activity started
+2026-08-10 16:07:00,271 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f901f2f76eb9dd5840e6a7c191f' started
+2026-08-10 16:07:09,868 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f901f2f76eb9dd5840e6a7c191f' took 9.597s
+2026-08-10 16:07:09,868 - INFO - [PERF] [ACTIVITY_END] classifier_activity took 9.603s
+2026-08-10 16:07:10,650 - INFO - [PERF] [ACTIVITY_START] update_doc_type_activity started
+2026-08-10 16:07:10,657 - INFO - [PERF] [ACTIVITY_END] update_doc_type_activity took 0.007s
+2026-08-10 16:07:11,321 - INFO - [PERF] [ACTIVITY_START] get_template_metadata_activity started
+2026-08-10 16:07:11,321 - INFO - [PERF] [ACTIVITY_END] get_template_metadata_activity took 0.001s
+2026-08-10 16:07:12,200 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:07:12,206 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 16:07:12,823 - INFO - [PERF] [ACTIVITY_START] extractor_activity started
+2026-08-10 16:07:12,825 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' started
+2026-08-10 16:07:15,964 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' took 3.138s
+2026-08-10 16:07:15,964 - INFO - [PERF] [TOOL_START] extract_text_from_document started
+2026-08-10 16:07:44,206 - INFO - [PERF] [TOOL_END] extract_text_from_document took 28.243s
+2026-08-10 16:07:44,206 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' started
+2026-08-10 16:08:07,046 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' took 22.838s
+2026-08-10 16:08:07,087 - INFO - [PERF] [ACTIVITY_END] extractor_activity took 54.264s
+2026-08-10 16:08:07,761 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:08:07,767 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 16:08:08,745 - INFO - [PERF] [ACTIVITY_START] validator_activity started
+2026-08-10 16:08:08,745 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f902144777ab66f316fb9b605e7' started
+2026-08-10 16:08:09,838 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f902144777ab66f316fb9b605e7' took 1.094s
+2026-08-10 16:08:09,840 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f902144777ab66f316fb9b605e7' started
+2026-08-10 16:08:14,303 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f902144777ab66f316fb9b605e7' took 4.462s
+2026-08-10 16:08:14,305 - INFO - [PERF] [ACTIVITY_END] validator_activity took 5.560s
+2026-08-10 16:08:15,333 - INFO - [PERF] [ACTIVITY_START] reviewer_activity started
+2026-08-10 16:08:15,333 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' started
+2026-08-10 16:08:16,044 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' took 0.710s
+2026-08-10 16:08:16,044 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' started
+2026-08-10 16:08:17,730 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' took 1.685s
+2026-08-10 16:08:17,730 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' started
+2026-08-10 16:08:21,137 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' took 3.406s
+2026-08-10 16:08:21,137 - INFO - [PERF] [ACTIVITY_END] reviewer_activity took 5.803s
+2026-08-10 16:08:21,995 - INFO - [PERF] [ACTIVITY_START] output_activity started
+2026-08-10 16:08:21,997 - INFO - [PERF] [TOOL_START] persist_final_extraction started
+2026-08-10 16:08:22,034 - INFO - [PERF] [TOOL_END] persist_final_extraction took 0.038s
+2026-08-10 16:08:22,035 - INFO - [PERF] [ACTIVITY_END] output_activity took 0.039s
+2026-08-10 16:10:41,295 - INFO - Initializing performance timing hooks...
+2026-08-10 16:10:42,095 - INFO - Successfully patched Mistral Agents API client methods
+2026-08-10 16:10:43,694 - INFO - Successfully patched mistralai.workflows activity decorator
+2026-08-10 16:10:44,872 - INFO - Successfully patched document workflow tool functions
+2026-08-10 16:10:44,873 - INFO - Successfully patched claim workflow tool functions
+2026-08-10 16:10:44,874 - INFO - Successfully patched claim DB operation functions
+2026-08-10 16:11:53,348 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:11:53,372 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.025s
+2026-08-10 16:11:54,018 - INFO - [PERF] [ACTIVITY_START] intake_activity started
+2026-08-10 16:11:54,019 - INFO - [PERF] [TOOL_START] check_document_duplicates started
+2026-08-10 16:11:54,030 - INFO - [PERF] [TOOL_END] check_document_duplicates took 0.011s
+2026-08-10 16:11:54,032 - INFO - [PERF] [ACTIVITY_END] intake_activity took 0.013s
+2026-08-10 16:11:54,715 - INFO - [PERF] [ACTIVITY_START] update_status_and_message_activity started
+2026-08-10 16:11:54,774 - INFO - [PERF] [ACTIVITY_END] update_status_and_message_activity took 0.059s
+2026-08-10 16:12:01,194 - INFO - [PERF] [ACTIVITY_START] update_status_and_message_activity started
+2026-08-10 16:12:01,200 - INFO - [PERF] [ACTIVITY_END] update_status_and_message_activity took 0.007s
+2026-08-10 16:12:01,652 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:12:01,658 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.007s
+2026-08-10 16:12:02,341 - INFO - [PERF] [ACTIVITY_START] pre_validator_activity started
+2026-08-10 16:12:02,345 - INFO - [PERF] [ACTIVITY_END] pre_validator_activity took 0.004s
+2026-08-10 16:12:03,155 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:12:03,160 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 16:12:03,857 - INFO - [PERF] [ACTIVITY_START] preprocessor_activity started
+2026-08-10 16:12:03,861 - INFO - [PERF] [TOOL_START] enhance_document_image started
+2026-08-10 16:12:03,868 - INFO - [PERF] [TOOL_END] enhance_document_image took 0.006s
+2026-08-10 16:12:03,869 - INFO - [PERF] [ACTIVITY_END] preprocessor_activity took 0.012s
+2026-08-10 16:12:04,580 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:12:04,586 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 16:12:05,225 - INFO - [PERF] [ACTIVITY_START] classifier_activity started
+2026-08-10 16:12:05,232 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f901f2f76eb9dd5840e6a7c191f' started
+2026-08-10 16:12:21,519 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f901f2f76eb9dd5840e6a7c191f' took 16.287s
+2026-08-10 16:12:21,519 - INFO - [PERF] [ACTIVITY_END] classifier_activity took 16.294s
+2026-08-10 16:12:22,256 - INFO - [PERF] [ACTIVITY_START] update_doc_type_activity started
+2026-08-10 16:12:22,264 - INFO - [PERF] [ACTIVITY_END] update_doc_type_activity took 0.006s
+2026-08-10 16:12:23,143 - INFO - [PERF] [ACTIVITY_START] get_template_metadata_activity started
+2026-08-10 16:12:23,143 - INFO - [PERF] [ACTIVITY_END] get_template_metadata_activity took 0.001s
+2026-08-10 16:12:23,807 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:12:23,813 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 16:12:24,525 - INFO - [PERF] [ACTIVITY_START] extractor_activity started
+2026-08-10 16:12:24,527 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' started
+2026-08-10 16:12:25,708 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' took 1.180s
+2026-08-10 16:12:25,708 - INFO - [PERF] [TOOL_START] extract_text_from_document started
+2026-08-10 16:12:54,880 - INFO - [PERF] [TOOL_END] extract_text_from_document took 29.172s
+2026-08-10 16:12:54,880 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' started
+2026-08-10 16:13:01,288 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' took 6.408s
+2026-08-10 16:13:01,329 - INFO - [PERF] [ACTIVITY_END] extractor_activity took 36.804s
+2026-08-10 16:13:02,103 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:13:02,109 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 16:13:03,075 - INFO - [PERF] [ACTIVITY_START] validator_activity started
+2026-08-10 16:13:03,075 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f902144777ab66f316fb9b605e7' started
+2026-08-10 16:13:04,401 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f902144777ab66f316fb9b605e7' took 1.325s
+2026-08-10 16:13:04,403 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f902144777ab66f316fb9b605e7' started
+2026-08-10 16:13:22,224 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f902144777ab66f316fb9b605e7' took 17.823s
+2026-08-10 16:13:22,226 - INFO - [PERF] [ACTIVITY_END] validator_activity took 19.151s
+2026-08-10 16:13:23,130 - INFO - [PERF] [ACTIVITY_START] reviewer_activity started
+2026-08-10 16:13:23,130 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' started
+2026-08-10 16:13:23,868 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' took 0.738s
+2026-08-10 16:13:23,868 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' started
+2026-08-10 16:13:24,615 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' took 0.747s
+2026-08-10 16:13:24,615 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' started
+2026-08-10 16:13:25,270 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' took 0.655s
+2026-08-10 16:13:25,270 - INFO - [PERF] [ACTIVITY_END] reviewer_activity took 2.142s
+2026-08-10 16:13:26,144 - INFO - [PERF] [ACTIVITY_START] output_activity started
+2026-08-10 16:13:26,146 - INFO - [PERF] [TOOL_START] persist_final_extraction started
+2026-08-10 16:13:26,179 - INFO - [PERF] [TOOL_END] persist_final_extraction took 0.034s
+2026-08-10 16:13:26,179 - INFO - [PERF] [ACTIVITY_END] output_activity took 0.035s
+2026-08-10 16:15:12,287 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:15:12,302 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.015s
+2026-08-10 16:15:13,270 - INFO - [PERF] [ACTIVITY_START] intake_activity started
+2026-08-10 16:15:13,270 - INFO - [PERF] [TOOL_START] check_document_duplicates started
+2026-08-10 16:15:13,287 - INFO - [PERF] [TOOL_END] check_document_duplicates took 0.017s
+2026-08-10 16:15:13,298 - INFO - [PERF] [ACTIVITY_END] intake_activity took 0.029s
+2026-08-10 16:15:13,962 - INFO - [PERF] [ACTIVITY_START] update_status_and_message_activity started
+2026-08-10 16:15:13,970 - INFO - [PERF] [ACTIVITY_END] update_status_and_message_activity took 0.007s
+2026-08-10 16:15:18,967 - INFO - [PERF] [ACTIVITY_START] update_status_and_message_activity started
+2026-08-10 16:15:18,973 - INFO - [PERF] [ACTIVITY_END] update_status_and_message_activity took 0.006s
+2026-08-10 16:15:19,407 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:15:19,415 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.007s
+2026-08-10 16:15:20,144 - INFO - [PERF] [ACTIVITY_START] pre_validator_activity started
+2026-08-10 16:15:20,148 - INFO - [PERF] [ACTIVITY_END] pre_validator_activity took 0.004s
+2026-08-10 16:15:20,861 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:15:21,047 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.185s
+2026-08-10 16:15:21,731 - INFO - [PERF] [ACTIVITY_START] preprocessor_activity started
+2026-08-10 16:15:21,733 - INFO - [PERF] [TOOL_START] enhance_document_image started
+2026-08-10 16:15:21,733 - INFO - [PERF] [TOOL_END] enhance_document_image took 0.000s
+2026-08-10 16:15:21,733 - INFO - [PERF] [ACTIVITY_END] preprocessor_activity took 0.001s
+2026-08-10 16:15:22,394 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:15:22,400 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 16:15:23,413 - INFO - [PERF] [ACTIVITY_START] classifier_activity started
+2026-08-10 16:15:23,417 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f901f2f76eb9dd5840e6a7c191f' started
+2026-08-10 16:15:32,212 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f901f2f76eb9dd5840e6a7c191f' took 8.794s
+2026-08-10 16:15:32,212 - INFO - [PERF] [ACTIVITY_END] classifier_activity took 8.800s
+2026-08-10 16:15:32,854 - INFO - [PERF] [ACTIVITY_START] update_doc_type_activity started
+2026-08-10 16:15:32,860 - INFO - [PERF] [ACTIVITY_END] update_doc_type_activity took 0.006s
+2026-08-10 16:15:33,506 - INFO - [PERF] [ACTIVITY_START] get_template_metadata_activity started
+2026-08-10 16:15:33,506 - INFO - [PERF] [ACTIVITY_END] get_template_metadata_activity took 0.001s
+2026-08-10 16:15:34,173 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:15:34,179 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 16:15:34,953 - INFO - [PERF] [ACTIVITY_START] extractor_activity started
+2026-08-10 16:15:34,955 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' started
+2026-08-10 16:15:36,840 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' took 1.884s
+2026-08-10 16:15:36,840 - INFO - [PERF] [TOOL_START] extract_text_from_document started
+2026-08-10 16:16:05,110 - INFO - [PERF] [TOOL_END] extract_text_from_document took 28.269s
+2026-08-10 16:16:05,110 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' started
+2026-08-10 16:16:22,416 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' took 17.305s
+2026-08-10 16:16:22,458 - INFO - [PERF] [ACTIVITY_END] extractor_activity took 47.505s
+2026-08-10 16:16:23,221 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:16:23,227 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 16:16:24,053 - INFO - [PERF] [ACTIVITY_START] validator_activity started
+2026-08-10 16:16:24,053 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f902144777ab66f316fb9b605e7' started
+2026-08-10 16:16:24,826 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f902144777ab66f316fb9b605e7' took 0.774s
+2026-08-10 16:16:24,828 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f902144777ab66f316fb9b605e7' started
+2026-08-10 16:16:37,696 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f902144777ab66f316fb9b605e7' took 12.867s
+2026-08-10 16:16:37,698 - INFO - [PERF] [ACTIVITY_END] validator_activity took 13.646s
+2026-08-10 16:16:38,681 - INFO - [PERF] [ACTIVITY_START] reviewer_activity started
+2026-08-10 16:16:38,681 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' started
+2026-08-10 16:16:39,586 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' took 0.905s
+2026-08-10 16:16:39,587 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' started
+2026-08-10 16:16:40,451 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' took 0.864s
+2026-08-10 16:16:40,453 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' started
+2026-08-10 16:16:42,254 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' took 1.802s
+2026-08-10 16:16:42,254 - INFO - [PERF] [ACTIVITY_END] reviewer_activity took 3.574s
+2026-08-10 16:16:43,152 - INFO - [PERF] [ACTIVITY_START] output_activity started
+2026-08-10 16:16:43,153 - INFO - [PERF] [TOOL_START] persist_final_extraction started
+2026-08-10 16:16:43,172 - INFO - [PERF] [TOOL_END] persist_final_extraction took 0.019s
+2026-08-10 16:16:43,173 - INFO - [PERF] [ACTIVITY_END] output_activity took 0.021s
+2026-08-10 16:24:02,662 - INFO - Initializing performance timing hooks...
+2026-08-10 16:24:03,321 - INFO - Successfully patched Mistral Agents API client methods
+2026-08-10 16:24:04,866 - INFO - Successfully patched mistralai.workflows activity decorator
+2026-08-10 16:24:06,285 - INFO - Successfully patched document workflow tool functions
+2026-08-10 16:24:06,285 - INFO - Successfully patched claim workflow tool functions
+2026-08-10 16:24:06,288 - INFO - Successfully patched claim DB operation functions
+2026-08-10 16:25:21,169 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:25:21,259 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.090s
+2026-08-10 16:25:21,983 - INFO - [PERF] [ACTIVITY_START] intake_activity started
+2026-08-10 16:25:21,983 - INFO - [PERF] [TOOL_START] check_document_duplicates started
+2026-08-10 16:25:22,014 - INFO - [PERF] [TOOL_END] check_document_duplicates took 0.031s
+2026-08-10 16:25:22,014 - INFO - [PERF] [ACTIVITY_END] intake_activity took 0.031s
+2026-08-10 16:25:22,697 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:25:22,704 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 16:25:23,405 - INFO - [PERF] [ACTIVITY_START] pre_validator_activity started
+2026-08-10 16:25:23,409 - INFO - [PERF] [ACTIVITY_END] pre_validator_activity took 0.004s
+2026-08-10 16:25:24,072 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:25:24,078 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.007s
+2026-08-10 16:25:24,753 - INFO - [PERF] [ACTIVITY_START] preprocessor_activity started
+2026-08-10 16:25:24,753 - INFO - [PERF] [TOOL_START] enhance_document_image started
+2026-08-10 16:25:24,755 - INFO - [PERF] [TOOL_END] enhance_document_image took 0.000s
+2026-08-10 16:25:24,755 - INFO - [PERF] [ACTIVITY_END] preprocessor_activity took 0.001s
+2026-08-10 16:25:25,594 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:25:25,600 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 16:25:26,303 - INFO - [PERF] [ACTIVITY_START] classifier_activity started
+2026-08-10 16:25:26,312 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f901f2f76eb9dd5840e6a7c191f' started
+2026-08-10 16:25:35,373 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f901f2f76eb9dd5840e6a7c191f' took 9.061s
+2026-08-10 16:25:35,373 - INFO - [PERF] [ACTIVITY_END] classifier_activity took 9.070s
+2026-08-10 16:25:36,041 - INFO - [PERF] [ACTIVITY_START] update_doc_type_activity started
+2026-08-10 16:25:36,047 - INFO - [PERF] [ACTIVITY_END] update_doc_type_activity took 0.006s
+2026-08-10 16:25:36,707 - INFO - [PERF] [ACTIVITY_START] get_template_metadata_activity started
+2026-08-10 16:25:36,707 - INFO - [PERF] [ACTIVITY_END] get_template_metadata_activity took 0.001s
+2026-08-10 16:25:37,351 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:25:37,358 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 16:25:38,049 - INFO - [PERF] [ACTIVITY_START] extractor_activity started
+2026-08-10 16:25:38,051 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' started
+2026-08-10 16:25:38,871 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' took 0.820s
+2026-08-10 16:25:38,873 - INFO - [PERF] [TOOL_START] extract_text_from_document started
+2026-08-10 16:26:34,792 - INFO - [PERF] [TOOL_END] extract_text_from_document took 55.920s
+2026-08-10 16:26:34,792 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' started
+2026-08-10 16:26:40,414 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' took 5.621s
+2026-08-10 16:26:40,456 - INFO - [PERF] [ACTIVITY_END] extractor_activity took 62.405s
+2026-08-10 16:26:41,172 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:26:41,179 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 16:26:42,020 - INFO - [PERF] [ACTIVITY_START] validator_activity started
+2026-08-10 16:26:42,020 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f902144777ab66f316fb9b605e7' started
+2026-08-10 16:26:42,880 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f902144777ab66f316fb9b605e7' took 0.860s
+2026-08-10 16:26:42,882 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f902144777ab66f316fb9b605e7' started
+2026-08-10 16:26:46,984 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f902144777ab66f316fb9b605e7' took 4.103s
+2026-08-10 16:26:46,986 - INFO - [PERF] [ACTIVITY_END] validator_activity took 4.967s
+2026-08-10 16:26:47,844 - INFO - [PERF] [ACTIVITY_START] reviewer_activity started
+2026-08-10 16:26:47,844 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' started
+2026-08-10 16:26:48,724 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' took 0.879s
+2026-08-10 16:26:48,724 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' started
+2026-08-10 16:26:53,186 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' took 4.461s
+2026-08-10 16:26:53,186 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' started
+2026-08-10 16:26:54,241 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f90224874ccbcda2086ee5fc54a' took 1.054s
+2026-08-10 16:26:54,241 - INFO - [PERF] [ACTIVITY_END] reviewer_activity took 6.397s
+2026-08-10 16:26:55,148 - INFO - [PERF] [ACTIVITY_START] output_activity started
+2026-08-10 16:26:55,148 - INFO - [PERF] [TOOL_START] persist_final_extraction started
+2026-08-10 16:26:55,163 - INFO - [PERF] [TOOL_END] persist_final_extraction took 0.015s
+2026-08-10 16:26:55,163 - INFO - [PERF] [ACTIVITY_END] output_activity took 0.015s
+2026-08-10 16:31:23,513 - INFO - Initializing performance timing hooks...
+2026-08-10 16:31:24,221 - INFO - Successfully patched Mistral Agents API client methods
+2026-08-10 16:31:26,020 - INFO - Successfully patched mistralai.workflows activity decorator
+2026-08-10 16:31:27,142 - INFO - Successfully patched document workflow tool functions
+2026-08-10 16:31:27,144 - INFO - Successfully patched claim workflow tool functions
+2026-08-10 16:31:27,144 - INFO - Successfully patched claim DB operation functions
+2026-08-10 16:32:10,240 - INFO - Initializing performance timing hooks...
+2026-08-10 16:32:10,921 - INFO - Successfully patched Mistral Agents API client methods
+2026-08-10 16:32:12,339 - INFO - Successfully patched mistralai.workflows activity decorator
+2026-08-10 16:32:13,415 - INFO - Successfully patched document workflow tool functions
+2026-08-10 16:32:13,417 - INFO - Successfully patched claim workflow tool functions
+2026-08-10 16:32:13,417 - INFO - Successfully patched claim DB operation functions
+2026-08-10 16:32:44,185 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:32:44,202 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.017s
+2026-08-10 16:32:45,284 - INFO - [PERF] [ACTIVITY_START] intake_activity started
+2026-08-10 16:32:45,284 - INFO - [PERF] [TOOL_START] check_document_duplicates started
+2026-08-10 16:32:45,297 - INFO - [PERF] [TOOL_END] check_document_duplicates took 0.013s
+2026-08-10 16:32:45,299 - INFO - [PERF] [ACTIVITY_END] intake_activity took 0.015s
+2026-08-10 16:32:46,065 - INFO - [PERF] [ACTIVITY_START] update_status_and_message_activity started
+2026-08-10 16:32:46,071 - INFO - [PERF] [ACTIVITY_END] update_status_and_message_activity took 0.006s
+2026-08-10 16:32:52,653 - INFO - [PERF] [ACTIVITY_START] update_status_and_message_activity started
+2026-08-10 16:32:52,661 - INFO - [PERF] [ACTIVITY_END] update_status_and_message_activity took 0.006s
+2026-08-10 16:32:53,104 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:32:53,110 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 16:32:53,858 - INFO - [PERF] [ACTIVITY_START] pre_validator_activity started
+2026-08-10 16:32:53,862 - INFO - [PERF] [ACTIVITY_END] pre_validator_activity took 0.005s
+2026-08-10 16:32:54,772 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:32:54,780 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.007s
+2026-08-10 16:32:55,503 - INFO - [PERF] [ACTIVITY_START] preprocessor_activity started
+2026-08-10 16:32:55,505 - INFO - [PERF] [TOOL_START] enhance_document_image started
+2026-08-10 16:32:55,505 - INFO - [PERF] [TOOL_END] enhance_document_image took 0.000s
+2026-08-10 16:32:55,505 - INFO - [PERF] [ACTIVITY_END] preprocessor_activity took 0.001s
+2026-08-10 16:32:56,200 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:32:56,206 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 16:32:56,906 - INFO - [PERF] [ACTIVITY_START] classifier_activity started
+2026-08-10 16:32:56,912 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f901f2f76eb9dd5840e6a7c191f' started
+2026-08-10 16:33:05,155 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f901f2f76eb9dd5840e6a7c191f' took 8.243s
+2026-08-10 16:33:05,155 - INFO - [PERF] [ACTIVITY_END] classifier_activity took 8.250s
+2026-08-10 16:33:05,950 - INFO - [PERF] [ACTIVITY_START] update_doc_type_activity started
+2026-08-10 16:33:05,958 - INFO - [PERF] [ACTIVITY_END] update_doc_type_activity took 0.008s
+2026-08-10 16:33:06,653 - INFO - [PERF] [ACTIVITY_START] get_template_metadata_activity started
+2026-08-10 16:33:06,655 - INFO - [PERF] [ACTIVITY_END] get_template_metadata_activity took 0.001s
+2026-08-10 16:33:07,372 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:33:07,377 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 16:33:08,437 - INFO - [PERF] [ACTIVITY_START] extractor_activity started
+2026-08-10 16:33:08,440 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' started
+2026-08-10 16:33:09,321 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' took 0.881s
+2026-08-10 16:33:09,321 - INFO - [PERF] [TOOL_START] extract_text_from_document started
+2026-08-10 16:34:01,564 - INFO - [PERF] [TOOL_END] extract_text_from_document took 52.242s
+2026-08-10 16:34:01,564 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' started
+2026-08-10 16:34:07,777 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' took 6.212s
+2026-08-10 16:34:07,824 - INFO - [PERF] [ACTIVITY_END] extractor_activity took 59.386s
+2026-08-10 16:34:09,195 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:34:09,201 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.007s
+2026-08-10 16:34:09,914 - INFO - [PERF] [ACTIVITY_START] validator_activity started
+2026-08-10 16:34:09,918 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f902144777ab66f316fb9b605e7' started
+2026-08-10 16:34:10,739 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f902144777ab66f316fb9b605e7' took 0.822s
+2026-08-10 16:34:10,741 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f902144777ab66f316fb9b605e7' started
+2026-08-10 16:34:14,216 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f902144777ab66f316fb9b605e7' took 3.475s
+2026-08-10 16:34:14,218 - INFO - [PERF] [ACTIVITY_END] validator_activity took 4.304s
+2026-08-10 16:34:15,148 - INFO - [PERF] [ACTIVITY_START] reviewer_activity started
+2026-08-10 16:34:15,148 - INFO - [PERF] [ACTIVITY_END] reviewer_activity took 0.001s
+2026-08-10 16:34:16,064 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 16:34:16,071 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 16:34:41,712 - INFO - [PERF] [ACTIVITY_START] output_activity started
+2026-08-10 16:34:41,714 - INFO - [PERF] [TOOL_START] persist_final_extraction started
+2026-08-10 16:34:41,749 - INFO - [PERF] [TOOL_END] persist_final_extraction took 0.036s
+2026-08-10 16:34:41,750 - INFO - [PERF] [ACTIVITY_END] output_activity took 0.037s
+2026-08-10 16:49:29,326 - INFO - Initializing performance timing hooks...
+2026-08-10 16:49:29,944 - INFO - Successfully patched Mistral Agents API client methods
+2026-08-10 16:49:31,823 - INFO - Successfully patched mistralai.workflows activity decorator
+2026-08-10 16:49:33,094 - INFO - Successfully patched document workflow tool functions
+2026-08-10 16:49:33,095 - INFO - Successfully patched claim workflow tool functions
+2026-08-10 16:49:33,101 - INFO - Successfully patched claim DB operation functions
+2026-08-10 17:00:15,514 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 17:00:15,560 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.046s
+2026-08-10 17:00:16,191 - INFO - [PERF] [ACTIVITY_START] intake_activity started
+2026-08-10 17:00:16,191 - INFO - [PERF] [TOOL_START] check_document_duplicates started
+2026-08-10 17:00:16,203 - INFO - [PERF] [TOOL_END] check_document_duplicates took 0.013s
+2026-08-10 17:00:16,204 - INFO - [PERF] [ACTIVITY_END] intake_activity took 0.014s
+2026-08-10 17:00:16,843 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 17:00:16,848 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 17:00:17,479 - INFO - [PERF] [ACTIVITY_START] pre_validator_activity started
+2026-08-10 17:00:17,485 - INFO - [PERF] [ACTIVITY_END] pre_validator_activity took 0.005s
+2026-08-10 17:00:18,126 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 17:00:18,136 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.010s
+2026-08-10 17:00:18,771 - INFO - [PERF] [ACTIVITY_START] preprocessor_activity started
+2026-08-10 17:00:18,772 - INFO - [PERF] [TOOL_START] enhance_document_image started
+2026-08-10 17:00:18,772 - INFO - [PERF] [TOOL_END] enhance_document_image took 0.000s
+2026-08-10 17:00:18,773 - INFO - [PERF] [ACTIVITY_END] preprocessor_activity took 0.001s
+2026-08-10 17:00:19,397 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 17:00:19,404 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 17:00:20,020 - INFO - [PERF] [ACTIVITY_START] classifier_activity started
+2026-08-10 17:00:20,026 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f901f2f76eb9dd5840e6a7c191f' started
+2026-08-10 17:00:26,033 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f901f2f76eb9dd5840e6a7c191f' took 6.007s
+2026-08-10 17:00:26,033 - INFO - [PERF] [ACTIVITY_END] classifier_activity took 6.013s
+2026-08-10 17:00:26,663 - INFO - [PERF] [ACTIVITY_START] update_doc_type_activity started
+2026-08-10 17:00:26,668 - INFO - [PERF] [ACTIVITY_END] update_doc_type_activity took 0.006s
+2026-08-10 17:00:27,303 - INFO - [PERF] [ACTIVITY_START] get_template_metadata_activity started
+2026-08-10 17:00:27,305 - INFO - [PERF] [ACTIVITY_END] get_template_metadata_activity took 0.001s
+2026-08-10 17:00:27,927 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 17:00:27,936 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 17:00:28,547 - INFO - [PERF] [ACTIVITY_START] extractor_activity started
+2026-08-10 17:00:28,549 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' started
+2026-08-10 17:00:29,380 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' took 0.831s
+2026-08-10 17:00:29,381 - INFO - [PERF] [TOOL_START] extract_text_from_document started
+2026-08-10 17:00:59,510 - INFO - [PERF] [TOOL_END] extract_text_from_document took 30.129s
+2026-08-10 17:00:59,510 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' started
+2026-08-10 17:01:22,122 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f9020417444a51d1c63058d4c9d' took 22.611s
+2026-08-10 17:01:22,148 - INFO - [PERF] [ACTIVITY_END] extractor_activity took 53.601s
+2026-08-10 17:01:22,839 - INFO - [PERF] [ACTIVITY_START] update_status_activity started
+2026-08-10 17:01:22,844 - INFO - [PERF] [ACTIVITY_END] update_status_activity took 0.006s
+2026-08-10 17:01:23,504 - INFO - [PERF] [ACTIVITY_START] validator_activity started
+2026-08-10 17:01:23,504 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f902144777ab66f316fb9b605e7' started
+2026-08-10 17:01:24,454 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f902144777ab66f316fb9b605e7' took 0.950s
+2026-08-10 17:01:24,456 - INFO - [PERF] [AGENT_START] Agent async completion for agent_id='ag_019f5f902144777ab66f316fb9b605e7' started
+2026-08-10 17:01:36,170 - INFO - [PERF] [AGENT_END] Agent async completion for agent_id='ag_019f5f902144777ab66f316fb9b605e7' took 11.714s
+2026-08-10 17:01:36,172 - INFO - [PERF] [ACTIVITY_END] validator_activity took 12.667s
+2026-08-10 17:01:37,105 - INFO - [PERF] [ACTIVITY_START] reviewer_activity started
+2026-08-10 17:01:37,105 - INFO - [PERF] [ACTIVITY_END] reviewer_activity took 0.001s
+2026-08-10 17:01:38,057 - INFO - [PERF] [ACTIVITY_START] update_status_and_message_activity started
+2026-08-10 17:01:38,065 - INFO - [PERF] [ACTIVITY_END] update_status_and_message_activity took 0.007s
+2026-08-10 17:04:14,186 - INFO - Initializing performance timing hooks...
+2026-08-10 17:04:14,784 - INFO - Successfully patched Mistral Agents API client methods
+2026-08-10 17:04:16,362 - INFO - Successfully patched mistralai.workflows activity decorator
+2026-08-10 17:04:17,525 - INFO - Successfully patched document workflow tool functions
+2026-08-10 17:04:17,525 - INFO - Successfully patched claim workflow tool functions
+2026-08-10 17:04:17,525 - INFO - Successfully patched claim DB operation functions
