@@ -15,7 +15,7 @@ const NAV = [
   { id: 'thresholds',  label: 'Thresholds',         icon: SlidersHorizontal, desc: 'Highlight & approval limits' },
   { id: 'normalization', label: 'Normalization Format', icon: Palette,      desc: 'Date, number & name rules' },
   { id: 'classification', label: 'Classification Types', icon: Tag,          desc: 'Supported document types' },
-  { id: 'vllm',           label: 'vLLM Fallback',        icon: Bot,          desc: 'Re-extract low-confidence fields' },
+  // { id: 'vllm',           label: 'vLLM Fallback',        icon: Bot,          desc: 'Re-extract low-confidence fields' },
 ];
 
 /* ─────────────────────────────────────────────────────────────
@@ -1358,11 +1358,11 @@ export function Settings() {
               toast={toast}
             />
           )}
-          {activeNav === 'vllm' && (
+          {/* {activeNav === 'vllm' && (
             <VllmSection
               toast={toast}
             />
-          )}
+          )} */}
         </div>
       </div>
     </div>

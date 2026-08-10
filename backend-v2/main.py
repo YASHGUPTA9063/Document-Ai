@@ -787,6 +787,11 @@ def load_templates():
                         normalized[key] = value
                     else:
                         normalized[key] = {"fields": [], "is_kyc": False, "use_vlm": False}
+                # Normalize field-level defaults: ensure every field has a weight
+                for tpl in normalized.values():
+                    for field in tpl.get("fields", []):
+                        if "weight" not in field or field["weight"] is None:
+                            field["weight"] = 80
                 return normalized
         except Exception as e:
             logger.error(f"Failed to load templates: {e}")

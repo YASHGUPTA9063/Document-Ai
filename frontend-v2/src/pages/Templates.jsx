@@ -38,7 +38,8 @@ export function Templates() {
     required: false,
     use_vlm: false,
     description: '',
-    confidence_threshold: ''
+    confidence_threshold: '',
+    weight: 80
   });
 
   const [createTemplateModalOpen, setCreateTemplateModalOpen] = useState(false);
@@ -147,7 +148,8 @@ export function Templates() {
       required: false,
       use_vlm: false,
       description: '',
-      confidence_threshold: ''
+      confidence_threshold: '',
+      weight: 80
     });
     setModalOpen(true);
   };
@@ -161,7 +163,8 @@ export function Templates() {
       required: field.required,
       use_vlm: field.use_vlm === true,
       description: field.description || '',
-      confidence_threshold: field.confidence_threshold !== undefined && field.confidence_threshold !== null ? field.confidence_threshold : ''
+      confidence_threshold: field.confidence_threshold !== undefined && field.confidence_threshold !== null ? field.confidence_threshold : '',
+      weight: field.weight !== undefined && field.weight !== null ? field.weight : 80
     });
     setModalOpen(true);
   };
@@ -284,7 +287,8 @@ export function Templates() {
       required: formData.required,
       use_vlm: formData.use_vlm,
       description: formData.description.trim(),
-      confidence_threshold: formData.confidence_threshold !== '' ? Number(formData.confidence_threshold) : null
+      confidence_threshold: formData.confidence_threshold !== '' ? Number(formData.confidence_threshold) : null,
+      weight: formData.weight !== '' && formData.weight !== null && formData.weight !== undefined ? Number(formData.weight) : 80
     };
 
     let updatedList;
@@ -486,18 +490,19 @@ export function Templates() {
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: 'var(--card-alt)' }}>
-                    <th style={{ padding: '12px 16px', width: '20%', position: 'sticky', top: 0, zIndex: 10, background: 'var(--card-alt)' }}>Field Name / Key</th>
-                    <th style={{ padding: '12px 16px', width: '12%', position: 'sticky', top: 0, zIndex: 10, background: 'var(--card-alt)' }}>Type</th>
-                    <th style={{ padding: '12px 16px', width: '33%', position: 'sticky', top: 0, zIndex: 10, background: 'var(--card-alt)' }}>Description</th>
-                    <th style={{ padding: '12px 16px', width: '15%', textAlign: 'center', position: 'sticky', top: 0, zIndex: 10, background: 'var(--card-alt)' }}>Highlight Threshold</th>
-                    <th style={{ padding: '12px 16px', width: '10%', textAlign: 'center', position: 'sticky', top: 0, zIndex: 10, background: 'var(--card-alt)' }}>Required</th>
-                    <th style={{ padding: '12px 16px', width: '10%', textAlign: 'right', position: 'sticky', top: 0, zIndex: 10, background: 'var(--card-alt)' }}>Actions</th>
+                    <th style={{ padding: '12px 16px', width: '18%', position: 'sticky', top: 0, zIndex: 10, background: 'var(--card-alt)' }}>Field Name / Key</th>
+                    <th style={{ padding: '12px 16px', width: '10%', position: 'sticky', top: 0, zIndex: 10, background: 'var(--card-alt)' }}>Type</th>
+                    <th style={{ padding: '12px 16px', width: '28%', position: 'sticky', top: 0, zIndex: 10, background: 'var(--card-alt)' }}>Description</th>
+                    <th style={{ padding: '12px 16px', width: '12%', textAlign: 'center', position: 'sticky', top: 0, zIndex: 10, background: 'var(--card-alt)' }}>Highlight Threshold</th>
+                    <th style={{ padding: '12px 16px', width: '10%', textAlign: 'center', position: 'sticky', top: 0, zIndex: 10, background: 'var(--card-alt)' }}>Weight</th>
+                    <th style={{ padding: '12px 16px', width: '8%', textAlign: 'center', position: 'sticky', top: 0, zIndex: 10, background: 'var(--card-alt)' }}>Required</th>
+                    <th style={{ padding: '12px 16px', width: '8%', textAlign: 'right', position: 'sticky', top: 0, zIndex: 10, background: 'var(--card-alt)' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredFields.length === 0 ? (
                     <tr>
-                      <td colSpan={6} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--muted)' }}>
+                      <td colSpan={7} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--muted)' }}>
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
                           <AlertCircle size={24} style={{ opacity: 0.5 }} />
                           <span>No fields match the search query</span>
@@ -550,6 +555,16 @@ export function Templates() {
                             ) : (
                               <span style={{ color: 'var(--muted)', fontSize: 11 }}>{fieldHighlightThreshold}% (Default)</span>
                             )}
+                          </td>
+                          <td style={{ padding: '12px 16px', verticalAlign: 'top', textAlign: 'center' }}>
+                            <span style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 4,
+                              fontSize: 11, fontWeight: 600,
+                              color: (field.weight ?? 80) >= 70 ? 'var(--accent)' : (field.weight ?? 80) >= 40 ? 'var(--warn)' : 'var(--muted)',
+                              background: (field.weight ?? 80) >= 70 ? 'var(--accent-dim)' : (field.weight ?? 80) >= 40 ? 'rgba(245,158,11,0.1)' : 'var(--surface-sunken)',
+                              border: `1px solid ${(field.weight ?? 80) >= 70 ? 'rgba(79,110,247,0.2)' : (field.weight ?? 80) >= 40 ? 'rgba(245,158,11,0.2)' : 'var(--border)'}`,
+                              padding: '2px 8px', borderRadius: 99,
+                            }}>{field.weight ?? 80}%</span>
                           </td>
                           <td style={{ padding: '12px 16px', verticalAlign: 'top', textAlign: 'center' }}>
                             {field.required ? (
@@ -700,6 +715,35 @@ export function Templates() {
               />
               <span style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4, display: 'block' }}>
                 Highlight this field if its extraction confidence falls below this value.
+              </span>
+            </div>
+
+            {/* Field Weight (for document confidence calculation) */}
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-dim)', marginBottom: 6 }}>
+                Field Weight (%) — Document Confidence
+              </label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={formData.weight}
+                  onChange={(e) => setFormData(prev => ({ ...prev, weight: Number(e.target.value) }))}
+                  style={{ flex: 1, accentColor: 'var(--accent)', cursor: 'pointer' }}
+                />
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  className="styled-input"
+                  value={formData.weight}
+                  onChange={(e) => setFormData(prev => ({ ...prev, weight: e.target.value === '' ? '' : Number(e.target.value) }))}
+                  style={{ width: 64, textAlign: 'center', padding: '4px 6px', fontSize: 13, fontWeight: 600 }}
+                />
+              </div>
+              <span style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4, display: 'block' }}>
+                How much this field contributes to the overall document confidence score. Higher = more impact. Default is 80%.
               </span>
             </div>
 

@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Copy, Download, ChevronDown, ChevronRight, Maximize2, ExternalLink, FileText, FileSearch, CheckCircle2, AlertTriangle, Edit2, Check, X, Trash2, Plus, ShieldCheck, UserCircle2, PenTool, ZoomIn, Upload, RotateCcw, Shield, Eye, Fingerprint, Users, Bot } from 'lucide-react';
+import { Copy, Download, ChevronDown, ChevronRight, Maximize2, ExternalLink, FileText, FileSearch, CheckCircle2, AlertTriangle, Edit2, Check, X, Trash2, Plus, ShieldCheck, UserCircle2, PenTool, ZoomIn, ZoomOut, Maximize, Upload, RotateCcw, Shield, Eye, Fingerprint, Users, Bot } from 'lucide-react';
 import { getExtractedData, getDocumentFileUrl, updateExtractedData, getTemplates, verifySignature, getOcrBlocks } from '../api/client';
 import { useApp } from '../store/AppStore';
 import { useDocumentList } from '../hooks/useDocumentList';
@@ -216,116 +216,22 @@ function DictRender({ data, isEditing, onSubChange }) {
   );
 }
 
-/* ─── vLLM Suggestion Badge ─── */
-function VllmSuggestionBadge({ vllmData, confHighThreshold = 90, confMedThreshold = 70 }) {
-  if (!vllmData || vllmData.value === undefined) return null;
+/* ─── vLLM Suggestion Badge — COMMENTED OUT ─── */
+// function VllmSuggestionBadge({ vllmData, confHighThreshold = 90, confMedThreshold = 70 }) {
+//   if (!vllmData || vllmData.value === undefined) return null;
+//   const vllmConfPct = vllmData.confidence != null ? Math.round(vllmData.confidence * 100) : null;
+//   const vllmConfColor = vllmConfPct == null ? '#8b5cf6'
+//     : vllmConfPct >= confHighThreshold ? 'var(--success)'
+//     : vllmConfPct >= confMedThreshold ? 'var(--warn)'
+//     : 'var(--danger)';
+//   const reasonLabel = vllmData.reason === 'missing' ? 'Field was missing/empty' : 'OCR confidence was low';
+//   const displayValue = vllmData.value === null || vllmData.value === undefined ? '—' : String(vllmData.value);
+//   const origValue = vllmData.original_value;
+//   const origConf = vllmData.original_confidence;
+//   return ( ... ); // Full JSX omitted for brevity — see git history
+// }
 
-  const vllmConfPct = vllmData.confidence != null ? Math.round(vllmData.confidence * 100) : null;
-  const vllmConfColor = vllmConfPct == null ? '#8b5cf6'
-    : vllmConfPct >= confHighThreshold ? 'var(--success)'
-    : vllmConfPct >= confMedThreshold ? 'var(--warn)'
-    : 'var(--danger)';
-
-  const reasonLabel = vllmData.reason === 'missing'
-    ? 'Field was missing/empty'
-    : 'OCR confidence was low';
-
-  const displayValue = vllmData.value === null || vllmData.value === undefined
-    ? '—'
-    : String(vllmData.value);
-
-  const origValue = vllmData.original_value;
-  const origConf = vllmData.original_confidence;
-
-  return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', gap: 4,
-      marginTop: 4, marginBottom: 4, paddingLeft: '40%',
-    }}>
-      <div style={{
-        display: 'flex', alignItems: 'stretch', gap: 0,
-        background: 'linear-gradient(135deg, rgba(139,92,246,0.06), rgba(139,92,246,0.02))',
-        border: '1px solid rgba(139,92,246,0.2)',
-        borderRadius: 8,
-        overflow: 'hidden',
-      }}>
-        {/* Purple accent bar */}
-        <div style={{
-          width: 3, flexShrink: 0,
-          background: 'linear-gradient(180deg, #8b5cf6, #7c3aed)',
-        }} />
-
-        <div style={{ padding: '7px 10px', flex: 1, display: 'flex', flexDirection: 'column', gap: 3 }}>
-          {/* Header row */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <div style={{
-              display: 'inline-flex', alignItems: 'center', gap: 4,
-              padding: '1px 7px', borderRadius: 99,
-              background: 'rgba(139,92,246,0.12)',
-              border: '1px solid rgba(139,92,246,0.25)',
-              fontSize: 9.5, fontWeight: 700, color: '#8b5cf6',
-              letterSpacing: '0.03em', textTransform: 'uppercase',
-            }}>
-              <Bot size={10} />
-              vLLM Suggestion
-            </div>
-            {vllmConfPct != null && (
-              <span style={{
-                fontSize: 10, fontWeight: 700,
-                color: vllmConfColor,
-                fontVariantNumeric: 'tabular-nums',
-              }}>
-                {vllmConfPct}%
-              </span>
-            )}
-            <span style={{
-              fontSize: 9.5, color: 'var(--muted)', fontStyle: 'italic',
-              marginLeft: 'auto',
-            }}>
-              {reasonLabel}
-            </span>
-          </div>
-
-          {/* Value row */}
-          <div style={{
-            fontSize: 12.5, fontWeight: 600,
-            color: 'var(--text)',
-            lineHeight: 1.4,
-          }}>
-            {displayValue === '—' ? (
-              <span style={{ color: 'var(--muted)', fontStyle: 'italic' }}>Not found by vLLM</span>
-            ) : (
-              <span style={{
-                background: 'rgba(139,92,246,0.08)',
-                padding: '1px 6px',
-                borderRadius: 4,
-              }}>
-                {displayValue}
-              </span>
-            )}
-          </div>
-
-          {/* Original value comparison (if it existed) */}
-          {origValue != null && String(origValue).trim() !== '' && vllmData.reason !== 'missing' && (
-            <div style={{ fontSize: 10, color: 'var(--muted)', display: 'flex', gap: 4, alignItems: 'center' }}>
-              <span>Original OCR:</span>
-              <span style={{ fontWeight: 600, color: 'var(--text-dim)' }}>
-                "{String(origValue)}"
-              </span>
-              {origConf != null && (
-                <span style={{ color: 'var(--danger)', fontWeight: 600 }}>
-                  ({Math.round(origConf * 100)}%)
-                </span>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighThreshold = 90, confMedThreshold = 70, fieldHighlightThreshold = 95, rawVal, onFieldHover, vllmData }) {
+function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighThreshold = 90, confMedThreshold = 70, fieldHighlightThreshold = 95, rawVal, onFieldHover /*, vllmData */ }) {
   const [newInputVal, setNewInputVal] = useState('');
   // conf may be a nested structure for table/array fields — flatten to a single average number
   const resolvedConf = flattenConfidence(conf);
@@ -737,10 +643,10 @@ function FieldRow({ label, fieldKey, value, isEditing, onChange, conf, confHighT
           </div>
         )}
       </div>
-      {/* vLLM Fallback Suggestion */}
-      {!isEditing && vllmData && (
+      {/* vLLM Fallback Suggestion — COMMENTED OUT */}
+      {/* {!isEditing && vllmData && (
         <VllmSuggestionBadge vllmData={vllmData} confHighThreshold={confHighThreshold} confMedThreshold={confMedThreshold} />
-      )}
+      )} */}
     </div>
   );
 }
@@ -1230,7 +1136,7 @@ function FaceVerdictPanel({ result, onReset }) {
   );
 }
 
-function renderFields(data, isEditing, editedData, onChange, confidences = {}, confidenceMode = 'word', confHighThreshold = 90, confMedThreshold = 70, fieldHighlightThreshold = 95, fieldThresholds = {}, rawFields = {}, onFieldHover = null, vllmFallback = {}) {
+function renderFields(data, isEditing, editedData, onChange, confidences = {}, confidenceMode = 'word', confHighThreshold = 90, confMedThreshold = 70, fieldHighlightThreshold = 95, fieldThresholds = {}, rawFields = {}, onFieldHover = null /*, vllmFallback = {} */) {
   if (!data || typeof data !== 'object') return null;
   const groups = {};
   const renderSource = isEditing ? editedData : data;
@@ -1262,7 +1168,7 @@ function renderFields(data, isEditing, editedData, onChange, confidences = {}, c
           confMedThreshold={confMedThreshold}
           fieldHighlightThreshold={fieldThresholds[k] ?? fieldHighlightThreshold}
           onFieldHover={onFieldHover}
-          vllmData={vllmFallback?.[k] || null}
+          /* vllmData={vllmFallback?.[k] || null} */
         />
       ))}
     </FieldGroup>
@@ -1618,6 +1524,106 @@ function DocumentViewer({ fileUrl, filename, ext, ocrBlocks = [], highlightField
   // ── All hooks must be at the top — no exceptions (Rules of Hooks) ──
   const imgRef    = useRef(null);
   const canvasRef = useRef(null);
+  const containerRef = useRef(null);
+
+  // ── Zoom & Pan state ──
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const isPanning = useRef(false);
+  const panStart = useRef({ x: 0, y: 0 });
+  const panOrigin = useRef({ x: 0, y: 0 });
+
+  const MIN_ZOOM = 0.25;
+  const MAX_ZOOM = 5;
+  const ZOOM_STEP = 0.15;
+
+  // Reset zoom/pan when the file changes
+  useEffect(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }, [fileUrl]);
+
+  // ── Zoom helpers ──
+  const zoomIn = useCallback(() => {
+    setZoom(z => Math.min(MAX_ZOOM, +(z + ZOOM_STEP).toFixed(2)));
+  }, []);
+
+  const zoomOut = useCallback(() => {
+    setZoom(z => Math.max(MIN_ZOOM, +(z - ZOOM_STEP).toFixed(2)));
+  }, []);
+
+  const resetZoom = useCallback(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }, []);
+
+  const fitToView = useCallback(() => {
+    const img = imgRef.current;
+    const container = containerRef.current;
+    if (!img || !container) { resetZoom(); return; }
+    const cW = container.clientWidth - 32; // account for padding
+    const cH = container.clientHeight - 32;
+    const iW = img.naturalWidth || img.clientWidth;
+    const iH = img.naturalHeight || img.clientHeight;
+    if (!iW || !iH) { resetZoom(); return; }
+    const fitScale = Math.min(cW / iW, cH / iH, MAX_ZOOM);
+    setZoom(+(Math.max(MIN_ZOOM, fitScale)).toFixed(2));
+    setPan({ x: 0, y: 0 });
+  }, [resetZoom]);
+
+  // ── Mouse-wheel zoom (centered on cursor) ──
+  const handleWheel = useCallback((e) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
+    setZoom(z => {
+      const newZ = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, +(z + delta).toFixed(2)));
+      // Adjust pan so zoom feels centered on the cursor position
+      const container = containerRef.current;
+      if (container) {
+        const rect = container.getBoundingClientRect();
+        const cx = e.clientX - rect.left - rect.width / 2;
+        const cy = e.clientY - rect.top - rect.height / 2;
+        const factor = 1 - newZ / z;
+        setPan(p => ({
+          x: p.x + cx * factor,
+          y: p.y + cy * factor,
+        }));
+      }
+      return newZ;
+    });
+  }, []);
+
+  // ── Pan via mouse drag ──
+  const handleMouseDown = useCallback((e) => {
+    if (e.button !== 0) return; // left-click only
+    isPanning.current = true;
+    panStart.current = { x: e.clientX, y: e.clientY };
+    panOrigin.current = { ...pan };
+    e.currentTarget.style.cursor = 'grabbing';
+  }, [pan]);
+
+  const handleMouseMove = useCallback((e) => {
+    if (!isPanning.current) return;
+    const dx = e.clientX - panStart.current.x;
+    const dy = e.clientY - panStart.current.y;
+    setPan({
+      x: panOrigin.current.x + dx,
+      y: panOrigin.current.y + dy,
+    });
+  }, []);
+
+  const handleMouseUp = useCallback((e) => {
+    isPanning.current = false;
+    if (containerRef.current) containerRef.current.style.cursor = zoom > 1 ? 'grab' : 'default';
+  }, [zoom]);
+
+  // Attach wheel listener with { passive: false } so we can preventDefault
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, [handleWheel]);
 
   // Strip markdown formatting from block content before substring matching
   const stripMarkdown = (text) =>
@@ -1762,36 +1768,163 @@ function DocumentViewer({ fileUrl, filename, ext, ocrBlocks = [], highlightField
     );
   }
 
+  // ── Zoom control bar styles ──
+  const zoomBarStyle = {
+    position: 'absolute',
+    bottom: 14,
+    left: '50%',
+    transform: 'translateX(-50%)',
+    zIndex: 10,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 2,
+    background: 'rgba(15, 18, 28, 0.82)',
+    backdropFilter: 'blur(12px)',
+    border: '1px solid rgba(255,255,255,0.10)',
+    borderRadius: 10,
+    padding: '4px 6px',
+    boxShadow: '0 4px 20px rgba(0,0,0,0.35)',
+  };
+
+  const zoomBtnStyle = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 28,
+    height: 28,
+    border: 'none',
+    borderRadius: 7,
+    background: 'transparent',
+    color: 'rgba(255,255,255,0.75)',
+    cursor: 'pointer',
+    transition: 'background 120ms, color 120ms',
+    fontSize: 12,
+  };
+
+  const zoomBtnHover = (e) => {
+    e.currentTarget.style.background = 'rgba(255,255,255,0.12)';
+    e.currentTarget.style.color = '#fff';
+  };
+  const zoomBtnLeave = (e) => {
+    e.currentTarget.style.background = 'transparent';
+    e.currentTarget.style.color = 'rgba(255,255,255,0.75)';
+  };
+
   if (['png', 'jpg', 'jpeg', 'webp'].includes(ext)) {
     return (
-      <div style={{
-        position: 'relative',
-        width: '100%',
-        height: '100%',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'var(--surface)',
-        padding: 16,
-      }}>
-        <img
-          ref={imgRef}
-          src={fileUrl}
-          alt={filename}
-          onLoad={syncCanvas}
-          style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 6, display: 'block' }}
-        />
-        {/* Canvas overlay for citation bbox highlights — sits on top of img, pointer-events:none so it doesn't block interaction */}
-        <canvas
-          ref={canvasRef}
-          style={{
-            position: 'absolute',
-            top: '50%',
-            left: '50%',
-            transform: 'translate(-50%, -50%)',
-            pointerEvents: 'none',
-          }}
-        />
+      <div
+        ref={containerRef}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        style={{
+          position: 'relative',
+          width: '100%',
+          height: '100%',
+          overflow: 'hidden',
+          background: 'var(--surface)',
+          cursor: zoom > 1 ? 'grab' : 'default',
+          userSelect: 'none',
+        }}
+      >
+        {/* Transformed wrapper: img + canvas move together */}
+        <div style={{
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+          transformOrigin: 'center center',
+          transition: isPanning.current ? 'none' : 'transform 120ms ease-out',
+          position: 'relative',
+          padding: 16,
+        }}>
+          <img
+            ref={imgRef}
+            src={fileUrl}
+            alt={filename}
+            onLoad={syncCanvas}
+            draggable={false}
+            style={{
+              maxWidth: '100%',
+              maxHeight: '100%',
+              objectFit: 'contain',
+              borderRadius: 6,
+              display: 'block',
+            }}
+          />
+          {/* Canvas overlay for citation bbox highlights — moves with img */}
+          <canvas
+            ref={canvasRef}
+            style={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              pointerEvents: 'none',
+            }}
+          />
+        </div>
+
+        {/* ── Floating zoom control bar ── */}
+        <div style={zoomBarStyle}>
+          <button
+            onClick={zoomOut}
+            style={zoomBtnStyle}
+            onMouseEnter={zoomBtnHover}
+            onMouseLeave={zoomBtnLeave}
+            title="Zoom out"
+          >
+            <ZoomOut size={14} />
+          </button>
+
+          <div style={{
+            fontSize: 11,
+            fontWeight: 700,
+            color: 'rgba(255,255,255,0.85)',
+            minWidth: 44,
+            textAlign: 'center',
+            fontVariantNumeric: 'tabular-nums',
+            letterSpacing: '0.02em',
+            userSelect: 'none',
+          }}>
+            {Math.round(zoom * 100)}%
+          </div>
+
+          <button
+            onClick={zoomIn}
+            style={zoomBtnStyle}
+            onMouseEnter={zoomBtnHover}
+            onMouseLeave={zoomBtnLeave}
+            title="Zoom in"
+          >
+            <ZoomIn size={14} />
+          </button>
+
+          <div style={{ width: 1, height: 18, background: 'rgba(255,255,255,0.12)', margin: '0 3px' }} />
+
+          <button
+            onClick={resetZoom}
+            style={zoomBtnStyle}
+            onMouseEnter={zoomBtnHover}
+            onMouseLeave={zoomBtnLeave}
+            title="Reset zoom (100%)"
+          >
+            <RotateCcw size={13} />
+          </button>
+
+          <button
+            onClick={fitToView}
+            style={zoomBtnStyle}
+            onMouseEnter={zoomBtnHover}
+            onMouseLeave={zoomBtnLeave}
+            title="Fit to view"
+          >
+            <Maximize size={13} />
+          </button>
+        </div>
       </div>
     );
   }
@@ -2000,6 +2133,37 @@ export function Extraction() {
   const fileUrl = activeId ? getDocumentFileUrl(activeId) : '';
   const ext = activeDoc?.filename?.split('.').pop()?.toLowerCase() ?? '';
 
+  // ── Weighted Document Confidence Score ──
+  const weightedDocConfidence = useMemo(() => {
+    if (!extracted?.raw_extracted?.field_confidences) return null;
+    if (!activeDoc?.doc_type) return null;
+    const docTypeKey = activeDoc.doc_type.toLowerCase().replace(/\s+/g, '_');
+    const raw = templates[docTypeKey];
+    const templateFields = Array.isArray(raw) ? raw : (raw?.fields || []);
+    if (templateFields.length === 0) return null;
+
+    // Build weight map from template
+    const weightMap = {};
+    templateFields.forEach(f => {
+      weightMap[f.key] = (f.weight !== undefined && f.weight !== null) ? f.weight : 80;
+    });
+
+    const confidences = extracted.raw_extracted.field_confidences;
+    let weightedSum = 0;
+    let totalWeight = 0;
+
+    Object.entries(confidences).forEach(([key, confVal]) => {
+      const resolved = flattenConfidence(confVal);
+      if (resolved == null) return;
+      const w = weightMap[key] ?? 80; // default weight for fields not in template
+      weightedSum += w * resolved;
+      totalWeight += w;
+    });
+
+    if (totalWeight === 0) return null;
+    return weightedSum / totalWeight; // 0–1 scale
+  }, [extracted, templates, activeDoc?.doc_type]);
+
   if (completedDocs.length === 0) {
     return (
       <div className="page">
@@ -2174,28 +2338,70 @@ export function Extraction() {
                   </>
                 )}
               </span>
-              <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-                {confidenceMode === 'word' && (
-                  <>
-                    Word Conf: <strong style={{ color: 'var(--text)' }}>{Math.round(wordConf * 100)}%</strong>
-                  </>
-                )}
-                {confidenceMode === 'page' && (
-                  <>
-                    Page Conf: <strong style={{ color: 'var(--text)' }}>{Math.round(pageConf * 100)}%</strong>
-                  </>
-                )}
-                {confidenceMode === 'both' && (
-                  <>
-                    Word Conf: <strong style={{ color: 'var(--text)' }}>{Math.round(wordConf * 100)}%</strong> · Page Conf: <strong style={{ color: 'var(--text)' }}>{Math.round(pageConf * 100)}%</strong>
-                  </>
-                )}
-                {extracted.reviewer_corrections && Object.keys(extracted.reviewer_corrections).length > 0 && (
-                  <span style={{ marginLeft: 8, color: 'var(--accent)' }}>
-                    · {Object.keys(extracted.reviewer_corrections).length} corrected
-                  </span>
-                )}
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+                  {confidenceMode === 'word' && (
+                    <>
+                      Word Conf: <strong style={{ color: 'var(--text)' }}>{Math.round(wordConf * 100)}%</strong>
+                    </>
+                  )}
+                  {confidenceMode === 'page' && (
+                    <>
+                      Page Conf: <strong style={{ color: 'var(--text)' }}>{Math.round(pageConf * 100)}%</strong>
+                    </>
+                  )}
+                  {confidenceMode === 'both' && (
+                    <>
+                      Word Conf: <strong style={{ color: 'var(--text)' }}>{Math.round(wordConf * 100)}%</strong> · Page Conf: <strong style={{ color: 'var(--text)' }}>{Math.round(pageConf * 100)}%</strong>
+                    </>
+                  )}
+                  {extracted.reviewer_corrections && Object.keys(extracted.reviewer_corrections).length > 0 && (
+                    <span style={{ marginLeft: 8, color: 'var(--accent)' }}>
+                      · {Object.keys(extracted.reviewer_corrections).length} corrected
+                    </span>
+                  )}
+                </span>
+                {/* ── Compact Doc Confidence Gauge ── */}
+                {weightedDocConfidence != null && (() => {
+                  const wPct = Math.round(weightedDocConfidence * 100);
+                  const gaugeColor = wPct >= confHighThreshold ? '#059669' : wPct >= confMedThreshold ? '#d97706' : '#dc2626';
+                  const circumference = 2 * Math.PI * 13;
+                  const strokeDash = (wPct / 100) * circumference;
+                  return (
+                    <div
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 6,
+                        marginLeft: 10,
+                        padding: '3px 10px 3px 5px', borderRadius: 99,
+                        background: 'rgba(0,0,0,0.15)',
+                        border: `1px solid ${gaugeColor}33`,
+                      }}
+                      title="Weighted Document Confidence — computed from template field weights × individual field confidence scores"
+                    >
+                      <div style={{ position: 'relative', width: 28, height: 28, flexShrink: 0 }}>
+                        <svg width="28" height="28" viewBox="0 0 32 32" style={{ transform: 'rotate(-90deg)' }}>
+                          <circle cx="16" cy="16" r="13" fill="none" stroke="rgba(128,128,128,0.15)" strokeWidth="2.5" />
+                          <circle
+                            cx="16" cy="16" r="13" fill="none"
+                            stroke={gaugeColor} strokeWidth="2.5"
+                            strokeLinecap="round"
+                            strokeDasharray={`${strokeDash} ${circumference}`}
+                            style={{ transition: 'stroke-dasharray 0.6s ease' }}
+                          />
+                        </svg>
+                        <div style={{
+                          position: 'absolute', inset: 0,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 8, fontWeight: 800, color: gaugeColor,
+                        }}>
+                          {wPct}
+                        </div>
+                      </div>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: gaugeColor, whiteSpace: 'nowrap' }}>Doc Score</span>
+                    </div>
+                  );
+                })()}
+              </div>
             </div>
           )}
         </div>
@@ -2220,6 +2426,11 @@ export function Extraction() {
                   {confidenceMode === 'both' && (
                     <>
                       Word: <span style={{ color: wordConf >= autoApproveThreshold / 100 ? 'var(--success)' : 'var(--warn)', fontWeight: 600 }}>{Math.round(wordConf * 100)}%</span> · Page: <span style={{ color: pageConf >= autoApproveThreshold / 100 ? 'var(--success)' : 'var(--warn)', fontWeight: 600 }}>{Math.round(pageConf * 100)}%</span>
+                    </>
+                  )}
+                  {weightedDocConfidence != null && (
+                    <>
+                      {' '}· Doc Score: <span style={{ color: Math.round(weightedDocConfidence * 100) >= confHighThreshold ? '#059669' : Math.round(weightedDocConfidence * 100) >= confMedThreshold ? '#d97706' : '#dc2626', fontWeight: 600 }}>{Math.round(weightedDocConfidence * 100)}%</span>
                     </>
                   )}
                 </div>
@@ -2340,7 +2551,7 @@ export function Extraction() {
                 )}
 
               {extracted.validated_data ? (
-                renderFields(extracted.validated_data, isEditing, editedData, handleFieldChange, extracted.raw_extracted?.field_confidences || {}, confidenceMode, confHighThreshold, confMedThreshold, fieldHighlightThreshold, fieldThresholds, extracted.raw_extracted?.raw_fields || {}, ocrBlocks.length ? setHoveredField : null, extracted.raw_extracted?.vllm_fallback || {})
+                renderFields(extracted.validated_data, isEditing, editedData, handleFieldChange, extracted.raw_extracted?.field_confidences || {}, confidenceMode, confHighThreshold, confMedThreshold, fieldHighlightThreshold, fieldThresholds, extracted.raw_extracted?.raw_fields || {}, ocrBlocks.length ? setHoveredField : null /* , extracted.raw_extracted?.vllm_fallback || {} */)
               ) : (
                 <div className="empty-state" style={{ padding: 24 }}>
                   <div className="empty-sub">No structured data extracted yet.</div>

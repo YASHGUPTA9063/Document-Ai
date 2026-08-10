@@ -285,41 +285,41 @@ async def extractor_activity(document_id: str, file_path: str, doc_type: str) ->
                 for k in extra_keys:
                     f_dict.pop(k, None)
 
-        # ─── vLLM Fallback: Re-extract required fields with low confidence ───
+        # ─── vLLM Fallback: COMMENTED OUT — retaining old extraction-only logic ───
         vllm_fallback_results = {}
-        try:
-            from utils.vllm_settings import load_vllm_settings
-            from tools.vllm_fallback import vllm_reextract_required_fields
-
-            vllm_settings = load_vllm_settings()
-            if vllm_settings.get("enabled", False):
-                vllm_threshold = vllm_settings.get("confidence_threshold", 75)
-                vllm_trigger_missing = vllm_settings.get("trigger_on_missing", True)
-                vllm_trigger_low_conf = vllm_settings.get("trigger_on_low_confidence", True)
-                logger.info(
-                    f"[Document {document_id}] vLLM fallback enabled (threshold: {vllm_threshold}%, "
-                    f"trigger_on_missing: {vllm_trigger_missing}, trigger_on_low_confidence: {vllm_trigger_low_conf}). "
-                    f"Checking required fields..."
-                )
-                vllm_fallback_results = vllm_reextract_required_fields(
-                    file_path=file_path,
-                    doc_type=doc_type,
-                    document_id=document_id,
-                    normalized_extracted=normalized_extracted,
-                    field_confidences=field_confidences,
-                    threshold=vllm_threshold,
-                    trigger_on_missing=vllm_trigger_missing,
-                    trigger_on_low_confidence=vllm_trigger_low_conf
-                )
-                if vllm_fallback_results:
-                    logger.info(
-                        f"[Document {document_id}] vLLM fallback produced results for "
-                        f"{len(vllm_fallback_results)} fields: {list(vllm_fallback_results.keys())}"
-                    )
-            else:
-                logger.info(f"[Document {document_id}] vLLM fallback is disabled in settings")
-        except Exception as e:
-            logger.warning(f"[Document {document_id}] vLLM fallback step failed (non-fatal): {e}")
+        # try:
+        #     from utils.vllm_settings import load_vllm_settings
+        #     from tools.vllm_fallback import vllm_reextract_required_fields
+        #
+        #     vllm_settings = load_vllm_settings()
+        #     if vllm_settings.get("enabled", False):
+        #         vllm_threshold = vllm_settings.get("confidence_threshold", 75)
+        #         vllm_trigger_missing = vllm_settings.get("trigger_on_missing", True)
+        #         vllm_trigger_low_conf = vllm_settings.get("trigger_on_low_confidence", True)
+        #         logger.info(
+        #             f"[Document {document_id}] vLLM fallback enabled (threshold: {vllm_threshold}%, "
+        #             f"trigger_on_missing: {vllm_trigger_missing}, trigger_on_low_confidence: {vllm_trigger_low_conf}). "
+        #             f"Checking required fields..."
+        #         )
+        #         vllm_fallback_results = vllm_reextract_required_fields(
+        #             file_path=file_path,
+        #             doc_type=doc_type,
+        #             document_id=document_id,
+        #             normalized_extracted=normalized_extracted,
+        #             field_confidences=field_confidences,
+        #             threshold=vllm_threshold,
+        #             trigger_on_missing=vllm_trigger_missing,
+        #             trigger_on_low_confidence=vllm_trigger_low_conf
+        #         )
+        #         if vllm_fallback_results:
+        #             logger.info(
+        #                 f"[Document {document_id}] vLLM fallback produced results for "
+        #                 f"{len(vllm_fallback_results)} fields: {list(vllm_fallback_results.keys())}"
+        #             )
+        #     else:
+        #         logger.info(f"[Document {document_id}] vLLM fallback is disabled in settings")
+        # except Exception as e:
+        #     logger.warning(f"[Document {document_id}] vLLM fallback step failed (non-fatal): {e}")
 
         logger.info(f"[Document {document_id}] Normalized fields from extractor: {normalized_extracted}")
         return {
