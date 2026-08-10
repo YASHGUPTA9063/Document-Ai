@@ -14916,3 +14916,11 @@
 2026-08-10 17:04:17,525 - INFO - Successfully patched document workflow tool functions
 2026-08-10 17:04:17,525 - INFO - Successfully patched claim workflow tool functions
 2026-08-10 17:04:17,525 - INFO - Successfully patched claim DB operation functions
+2026-08-10 17:05:51,787 - INFO - Initializing performance timing hooks...
+2026-08-10 17:05:52,364 - INFO - Successfully patched Mistral Agents API client methods
+2026-08-10 17:05:53,671 - INFO - Successfully patched mistralai.workflows activity decorator
+2026-08-10 17:05:54,723 - INFO - Successfully patched document workflow tool functions
+2026-08-10 17:05:54,723 - INFO - Successfully patched claim workflow tool functions
+2026-08-10 17:05:54,725 - INFO - Successfully patched claim DB operation functions
+2026-08-10 17:10:13,247 - INFO - [PERF] [ACTIVITY_START] update_status_and_message_activity started
+2026-08-10 17:10:13,295 - INFO - [PERF] [ACTIVITY_END] update_status_and_message_activity took 0.048s
