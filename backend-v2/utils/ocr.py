@@ -11,11 +11,9 @@ logger = logging.getLogger(__name__)
 client = Mistral(api_key=settings.MISTRAL_API_KEY)
 
 def extract_with_ocr(
-    file_path: str, 
-    doc_type: str, 
+    file_path: str,
+    doc_type: str,
     pages: list = None,
-    document_annotation_format: dict = None,
-    document_annotation_prompt: str = None
 ) -> dict:
     """
     Extract text using Mistral OCR or python-docx for DOCX files.
@@ -81,12 +79,8 @@ def extract_with_ocr(
     
     if actual_pages is not None:
         ocr_args["pages"] = actual_pages
-    if document_annotation_format is not None:
-        ocr_args["document_annotation_format"] = document_annotation_format
-    if document_annotation_prompt is not None:
-        ocr_args["document_annotation_prompt"] = document_annotation_prompt
 
-    logger.info(f"Calling Mistral OCR with args: model={ocr_args['model']}, pages={ocr_args.get('pages')}, annotated={document_annotation_format is not None}")
+    logger.info(f"Calling Mistral OCR: model={ocr_args['model']}, pages={ocr_args.get('pages')}")
     ocr_response = client.ocr.process(**ocr_args)
 
     # Parse response
@@ -146,27 +140,10 @@ def extract_with_ocr(
     
     avg_confidence = (total_confidence / valid_pages_count) if valid_pages_count > 0 else 0.0
     
-    # Extract document annotation if present
-    document_annotation = None
-    if hasattr(ocr_response, "document_annotation") and ocr_response.document_annotation:
-        annotation = ocr_response.document_annotation
-        if isinstance(annotation, str):
-            try:
-                document_annotation = json.loads(annotation)
-            except Exception:
-                document_annotation = annotation
-        elif hasattr(annotation, "to_dict"):
-            document_annotation = annotation.to_dict()
-        elif hasattr(annotation, "model_dump"):
-            document_annotation = annotation.model_dump()
-        else:
-            document_annotation = annotation
-            
     return {
         "raw_text": raw_text.strip(),
         "confidence": avg_confidence,
         "pages": pages_list,
         "word_confidence_scores": all_word_confidences,
-        "document_annotation": document_annotation,
         "blocks": all_blocks,  # bounding box blocks for field citation highlighting
     }

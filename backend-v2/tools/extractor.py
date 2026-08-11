@@ -197,7 +197,7 @@ def _vlm_verify_fields(file_path: str, vlm_fields: list, ocr_raw_text: str) -> d
 def build_json_schema_from_fields(fields_list: list) -> dict:
     properties = {}
     required = []
-    
+
     if not fields_list:
         return {
             "type": "json_schema",
@@ -208,11 +208,13 @@ def build_json_schema_from_fields(fields_list: list) -> dict:
                     "type": "object",
                     "properties": {
                         "document_title": {"type": "string", "description": "Title or main heading of the document"},
-                        "document_date": {"type": "string", "description": "Date associated with the document"},
+                        "document_date": {"type": ["string", "null"], "description": "Date associated with the document"},
                         "summary": {"type": "string", "description": "Brief summary of the document contents"},
                         "full_ocr_text": {"type": "string", "description": "The complete raw OCR text content of the document"}
                     },
-                    "required": ["document_title", "summary", "full_ocr_text"]
+                    # strict=True requires ALL properties to be in required
+                    "required": ["document_title", "document_date", "summary", "full_ocr_text"],
+                    "additionalProperties": False
                 }
             }
         }
@@ -221,7 +223,8 @@ def build_json_schema_from_fields(fields_list: list) -> dict:
         key = f["key"]
         f_type = f.get("type", "Text").lower()
         desc = f.get("description", "")
-        
+        is_required = f.get("required", False)
+
         if "array" in f_type or f_type == "list":
             properties[key] = {
                 "type": "array",
@@ -232,19 +235,22 @@ def build_json_schema_from_fields(fields_list: list) -> dict:
                         "quantity": {"type": "string", "description": "Quantity or count of items"},
                         "unit_price": {"type": "string", "description": "Price per unit"},
                         "amount": {"type": "string", "description": "Total amount for the item line"}
-                    }
+                    },
+                    "required": ["description", "quantity", "unit_price", "amount"],
+                    "additionalProperties": False
                 },
                 "description": desc
             }
         else:
+            # Required fields: plain string. Optional fields: string|null so model can signal absence.
             properties[key] = {
-                "type": "string",
+                "type": "string" if is_required else ["string", "null"],
                 "description": desc
             }
-            
-        if f.get("required"):
-            required.append(key)
-            
+
+        # strict=True requires ALL properties in required
+        required.append(key)
+
     return {
         "type": "json_schema",
         "json_schema": {
@@ -253,7 +259,8 @@ def build_json_schema_from_fields(fields_list: list) -> dict:
             "schema": {
                 "type": "object",
                 "properties": properties,
-                "required": required
+                "required": required,
+                "additionalProperties": False
             }
         }
     }
@@ -262,17 +269,63 @@ def build_json_schema_from_fields(fields_list: list) -> dict:
 def build_ocr_prompt_from_fields(fields_list: list) -> str:
     if not fields_list:
         return "Extract structured data: document_title, document_date, summary, and copy the full OCR text into the full_ocr_text field."
-    
+
     desc_lines = []
     for f in fields_list:
         req_str = "Required" if f.get("required") else "Optional"
         desc_lines.append(f"- '{f['key']}' ({f.get('type', 'Text')}, {req_str}): {f.get('description', '')}")
-        
+
     fields_instruction = "\n".join(desc_lines)
     return (
         f"Extract key fields from the document following this schema:\n{fields_instruction}\n\n"
-        f"Return the exact text as written in the document without normalization or cleaning."
+        f"Rules:\n"
+        f"- Return the exact text as written in the document without normalization or cleaning.\n"
+        f"- For every field, return a value even if not found — use empty string for required fields, null for optional fields.\n"
+        f"- Never omit a field from the output."
     )
+
+
+def _chat_extract_fields(raw_markdown: str, fields_list: list, doc_type: str) -> dict:
+    """
+    Step 2 of the two-step extraction pipeline.
+    Uses mistral-large-latest at temperature=0 with json_schema structured output
+    to deterministically extract fields from the raw OCR Markdown.
+    Full control: temperature=0, retries, no 8-page limit.
+    """
+    schema = build_json_schema_from_fields(fields_list)
+    prompt = build_ocr_prompt_from_fields(fields_list)
+
+    system = (
+        "You are a document data extraction specialist. "
+        "Extract fields exactly as written in the document. "
+        "If a required field is not present, return empty string. "
+        "If an optional field is not present, return null. "
+        "Never omit a field."
+    )
+    user_msg = (
+        f"Document type: {doc_type}\n\n"
+        f"{prompt}\n\n"
+        f"--- DOCUMENT TEXT ---\n{raw_markdown}\n--- END ---"
+    )
+
+    chat_client = Mistral(api_key=settings.MISTRAL_API_KEY)
+    for attempt in range(3):
+        try:
+            resp = chat_client.chat.complete(
+                model="mistral-large-latest",
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user",   "content": user_msg}
+                ],
+                response_format=schema,
+                temperature=0
+            )
+            return json.loads(resp.choices[0].message.content)
+        except Exception as e:
+            logger.warning(f"_chat_extract_fields attempt {attempt + 1} failed: {e}")
+            if attempt == 2:
+                raise
+    return {}  # unreachable
 
 
 # ─── OCR BLOCK STORAGE ───
@@ -296,27 +349,30 @@ def _save_ocr_blocks(document_id: str, blocks: list):
 # ─── TOOL FUNCTIONS ───
 def extract_text_from_document(file_path: str, doc_type: str, document_id: str = None) -> dict:
     fields_list = get_template_fields(doc_type)
-    annotation_format = build_json_schema_from_fields(fields_list)
-    annotation_prompt = build_ocr_prompt_from_fields(fields_list)
 
-    ocr_result = extract_with_ocr(
-        file_path=file_path, 
-        doc_type=doc_type,
-        document_annotation_format=annotation_format,
-        document_annotation_prompt=annotation_prompt
-    )
+    # Step 1: Pure OCR — fast, cheap, deterministic Markdown extraction
+    ocr_result = extract_with_ocr(file_path=file_path, doc_type=doc_type)
 
     raw_text = ocr_result.get("raw_text", "")
     ocr_confidence = ocr_result.get("confidence", 0.0)
     word_confidence_scores = ocr_result.get("word_confidence_scores", [])
-    doc_annotation = ocr_result.get("document_annotation") or {}
     blocks = ocr_result.get("blocks", [])
 
     # Persist blocks sidecar file for field citation highlighting (image documents only)
     if document_id and blocks:
         _save_ocr_blocks(document_id, blocks)
 
-    # Perform VLM verification for visual fields if configured in template metadata
+    # Step 2: Deterministic structured extraction at temperature=0
+    # Uses mistral-large-latest with json_schema response_format — full control over output
+    doc_annotation = {}
+    if raw_text:
+        try:
+            doc_annotation = _chat_extract_fields(raw_text, fields_list, doc_type)
+            logger.info(f"Chat extraction returned {len(doc_annotation)} fields for doc_type='{doc_type}'")
+        except Exception as e:
+            logger.error(f"Chat extraction failed for doc_type='{doc_type}': {e}")
+
+    # VLM verification for visual fields (checkboxes, tick marks) if configured in template
     template_meta = get_template_metadata(doc_type)
     vlm_confidences = {}
 
