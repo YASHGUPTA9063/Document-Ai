@@ -1430,5 +1430,115 @@ async def delete_claim(claim_id: str):
         raise HTTPException(status_code=404, detail=f"Claim {claim_id} not found")
     return {"claim_id": claim_id, "deleted": True}
 
+# ─── Cross-Document Validation ────────────────────────────────────────────────
+import difflib
+import re as _re
+from sqlalchemy import desc as _desc
 
+_NAME_THRESHOLD = 0.85
+
+def _norm_name(s: str) -> str:
+    return _re.sub(r'[^a-z ]', '', (s or '').lower().strip())
+
+def _norm_dob(s: str) -> str:
+    return _re.sub(r'[^0-9]', '', s or '')
+
+def _fuzzy_name(a: str, b: str) -> dict:
+    na, nb = _norm_name(a), _norm_name(b)
+    if not na or not nb:
+        return {"result": "NOT_FOUND", "score": None, "threshold": _NAME_THRESHOLD}
+    score = round(difflib.SequenceMatcher(None, na, nb).ratio(), 3)
+    return {"result": "MATCH" if score >= _NAME_THRESHOLD else "MISMATCH", "score": score, "threshold": _NAME_THRESHOLD}
+
+def _exact_dob(a: str, b: str) -> dict:
+    da, db = _norm_dob(a), _norm_dob(b)
+    if not da or not db:
+        return {"result": "NOT_FOUND"}
+    return {"result": "MATCH" if da == db else "MISMATCH"}
+
+
+@app.get("/cross-validate/latest")
+async def cross_validate_latest():
+    """
+    Cross-validates Name and DOB between the most recently completed
+    PAN Card and Aadhaar Card documents in the system.
+
+    No customer_id required — always picks the latest of each doc type.
+    Uses fuzzy matching (difflib) for name, normalised exact match for DOB.
+    """
+    async with AsyncSessionLocal() as session:
+        pan_result = await session.execute(
+            select(Document)
+            .options(selectinload(Document.extracted_data))
+            .where(Document.doc_type == "pan_card")
+            .where(Document.status == "completed")
+            .order_by(_desc(Document.updated_at))
+            .limit(1)
+        )
+        pan_doc = pan_result.scalar_one_or_none()
+
+        aad_result = await session.execute(
+            select(Document)
+            .options(selectinload(Document.extracted_data))
+            .where(Document.doc_type == "aadhar_card")
+            .where(Document.status == "completed")
+            .order_by(_desc(Document.updated_at))
+            .limit(1)
+        )
+        aadhaar_doc = aad_result.scalar_one_or_none()
+
+    missing = []
+    if not pan_doc:
+        missing.append("pan_card")
+    if not aadhaar_doc:
+        missing.append("aadhar_card")
+
+    if missing:
+        return {
+            "overall": "INCOMPLETE",
+            "missing": missing,
+            "pan": None,
+            "aadhaar": None,
+            "checks": None,
+        }
+
+    pan_data = (pan_doc.extracted_data.validated_data or {}) if pan_doc.extracted_data else {}
+    aad_data = (aadhaar_doc.extracted_data.validated_data or {}) if aadhaar_doc.extracted_data else {}
+
+    pan_name = pan_data.get("full_name", "")
+    pan_dob  = pan_data.get("date_of_birth", "")
+    aad_name = aad_data.get("full_name_english", "")
+    aad_dob  = aad_data.get("date_of_birth", "")
+
+    name_check = _fuzzy_name(pan_name, aad_name)
+    dob_check  = _exact_dob(pan_dob, aad_dob)
+
+    overall = (
+        "PASS"
+        if name_check["result"] == "MATCH" and dob_check["result"] == "MATCH"
+        else "FAIL"
+    )
+
+    return {
+        "overall": overall,
+        "missing": [],
+        "pan": {
+            "document_id": pan_doc.id,
+            "filename": pan_doc.filename,
+            "name": pan_name,
+            "dob": pan_dob,
+            "uploaded_at": pan_doc.updated_at.isoformat() if pan_doc.updated_at else None,
+        },
+        "aadhaar": {
+            "document_id": aadhaar_doc.id,
+            "filename": aadhaar_doc.filename,
+            "name": aad_name,
+            "dob": aad_dob,
+            "uploaded_at": aadhaar_doc.updated_at.isoformat() if aadhaar_doc.updated_at else None,
+        },
+        "checks": {
+            "name": name_check,
+            "dob":  dob_check,
+        },
+    }
 

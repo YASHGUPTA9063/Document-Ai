@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle, XCircle, Edit3, RefreshCw, AlertTriangle, FileText, X, Plus } from 'lucide-react';
-import { resumeReview, resumeDuplicate, getExtractedData } from '../api/client';
+import { CheckCircle, XCircle, Edit3, RefreshCw, AlertTriangle, FileText, X, Plus, GitCompare, Loader2 } from 'lucide-react';
+import { resumeReview, resumeDuplicate, getExtractedData, crossValidate } from '../api/client';
 import { useApp } from '../store/AppStore';
 import { useDocumentList } from '../hooks/useDocumentList';
 import { StatusBadge } from '../components/ui/StatusBadge';
@@ -663,6 +663,165 @@ function ReviewCard({ doc, onAction }) {
   );
 }
 
+// ── Cross-Validation Panel ────────────────────────────────────────────────────
+function ResultChip({ result, score }) {
+  const cfg = {
+    MATCH:     { color: 'var(--success)',  bg: 'var(--success-dim)',  border: 'var(--success-border)',  icon: '✓' },
+    MISMATCH:  { color: 'var(--danger)',   bg: 'var(--danger-dim)',   border: 'var(--danger-border)',   icon: '✗' },
+    NOT_FOUND: { color: 'var(--muted)',    bg: 'var(--surface)',      border: 'var(--border)',           icon: '?' },
+  }[result] || { color: 'var(--muted)', bg: 'var(--surface)', border: 'var(--border)', icon: '?' };
+
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5,
+      padding: '3px 10px', borderRadius: 99, fontSize: 11, fontWeight: 700,
+      color: cfg.color, background: cfg.bg, border: `1px solid ${cfg.border}`,
+    }}>
+      {cfg.icon} {result}
+      {score != null && (
+        <span style={{ fontWeight: 400, opacity: 0.85, marginLeft: 3 }}>
+          {Math.round(score * 100)}%
+        </span>
+      )}
+    </span>
+  );
+}
+
+function FieldRow({ label, panVal, aadhaarVal, check }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr 1fr auto', gap: 8, alignItems: 'center', padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
+      <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</span>
+      <span style={{ fontSize: 12, color: 'var(--text)', fontFamily: 'monospace', wordBreak: 'break-all' }}>{panVal || <em style={{ color: 'var(--muted)' }}>—</em>}</span>
+      <span style={{ fontSize: 12, color: 'var(--text)', fontFamily: 'monospace', wordBreak: 'break-all' }}>{aadhaarVal || <em style={{ color: 'var(--muted)' }}>—</em>}</span>
+      <ResultChip result={check?.result || 'NOT_FOUND'} score={check?.score ?? null} />
+    </div>
+  );
+}
+
+function CrossValidation() {
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+
+  const run = async () => {
+    setLoading(true); setError(null);
+    try {
+      setResult(await crossValidate());
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Auto-load on mount
+  useEffect(() => { run(); }, []);
+
+  const overallCfg = {
+    PASS:       { color: 'var(--success)', bg: 'var(--success-dim)',      border: 'var(--success-border)', label: '✓ PASS' },
+    FAIL:       { color: 'var(--danger)',  bg: 'var(--danger-dim)',       border: 'var(--danger-border)',  label: '✗ FAIL' },
+    INCOMPLETE: { color: 'var(--warn)',    bg: 'rgba(245,158,11,0.07)',   border: 'rgba(245,158,11,0.25)', label: '⚠ INCOMPLETE' },
+  }[result?.overall] || {};
+
+  return (
+    <div className="card">
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <GitCompare size={16} style={{ color: 'var(--accent)' }} />
+          <div className="card-title" style={{ margin: 0 }}>PAN ↔ Aadhaar Cross-Validation</div>
+        </div>
+        <button className="btn btn-ghost btn-sm" onClick={run} disabled={loading} title="Refresh">
+          <RefreshCw size={12} className={loading ? 'spin' : ''} />
+        </button>
+      </div>
+
+      {/* Loading skeleton */}
+      {loading && !result && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--muted)', fontSize: 12, padding: '12px 0' }}>
+          <Loader2 size={14} className="spin" /> Checking latest documents…
+        </div>
+      )}
+
+      {/* Error */}
+      {error && (
+        <div style={{ fontSize: 12, color: 'var(--danger)', padding: '8px 10px', background: 'var(--danger-dim)', borderRadius: 6, border: '1px solid var(--danger-border)' }}>
+          {error}
+        </div>
+      )}
+
+      {result && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {/* Overall badge */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '10px 14px', borderRadius: 8,
+            background: overallCfg.bg, border: `1px solid ${overallCfg.border}`,
+          }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: overallCfg.color }}>{overallCfg.label}</span>
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>Latest documents</span>
+          </div>
+
+          {/* INCOMPLETE — list missing docs */}
+          {result.overall === 'INCOMPLETE' && result.missing?.length > 0 && (
+            <div style={{ fontSize: 12, color: 'var(--warn)', background: 'rgba(245,158,11,0.06)', padding: '8px 12px', borderRadius: 6, border: '1px solid rgba(245,158,11,0.2)' }}>
+              <AlertTriangle size={12} style={{ display: 'inline', marginRight: 5 }} />
+              No completed {result.missing.map(m => <strong key={m} style={{ marginLeft: 4 }}>{m.replace('_', ' ').toUpperCase()}</strong>)} found yet.
+              Upload both and wait for processing.
+            </div>
+          )}
+
+          {/* Field comparison table */}
+          {result.pan && result.aadhaar && (
+            <div style={{ background: 'var(--surface)', borderRadius: 8, padding: '10px 12px' }}>
+              {/* Column headers */}
+              <div style={{ display: 'grid', gridTemplateColumns: '70px 1fr 1fr auto', gap: 8, marginBottom: 6 }}>
+                <span />
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>PAN Card</div>
+                  <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 1 }}>{result.pan.filename}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Aadhaar</div>
+                  <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 1 }}>{result.aadhaar.filename}</div>
+                </div>
+                <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Result</span>
+              </div>
+              <FieldRow
+                label="Name"
+                panVal={result.pan.name}
+                aadhaarVal={result.aadhaar.name}
+                check={result.checks?.name}
+              />
+              <FieldRow
+                label="DOB"
+                panVal={result.pan.dob}
+                aadhaarVal={result.aadhaar.dob}
+                check={result.checks?.dob}
+              />
+            </div>
+          )}
+
+          {/* Threshold + timestamp note */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            {result.checks?.name?.threshold != null && (
+              <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+                Name fuzzy threshold: {Math.round(result.checks.name.threshold * 100)}%
+              </span>
+            )}
+            {result.pan?.uploaded_at && (
+              <span style={{ fontSize: 10, color: 'var(--muted)' }}>
+                PAN: {new Date(result.pan.uploaded_at).toLocaleDateString()}
+                {result.aadhaar?.uploaded_at && ` · Aadhaar: ${new Date(result.aadhaar.uploaded_at).toLocaleDateString()}`}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const RULES = [
   { label: 'Review Confidence Threshold',               badge: '< 80%', variant: 'badge-green' },
   { label: 'Mandatory Field Completeness Check',       badge: 'Enabled', variant: 'badge-green' },
@@ -760,6 +919,8 @@ export function Validation() {
               <p><strong>Reject</strong> — marks the document as rejected and stops processing.</p>
             </div>
           </div>
+
+          <CrossValidation />
         </div>
       </div>
     </div>

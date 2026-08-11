@@ -402,5 +402,15 @@ export async function uploadClaimDocument(claimId, file, docType, onProgress) {
   return data;
 }
 
+/**
+ * Cross-validate Name and DOB between the most recently completed
+ * PAN Card and Aadhaar Card documents in the system.
+ * @returns {Promise<object>}
+ */
+export async function crossValidate() {
+  const { data } = await api.get('/cross-validate/latest');
+  return data;
+}
+
 export default api;
 
