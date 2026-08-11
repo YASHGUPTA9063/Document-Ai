@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RefreshCw, Cpu, CheckCircle, ListTodo, FileText, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { useApp } from '../store/AppStore';
@@ -52,11 +52,31 @@ function SinglePoller({ docId }) {
 }
 
 export function Processing() {
-  const { documents, pendingDocs } = useApp();
+  const { documents, pendingDocs, reviewDocs } = useApp();
   const { refresh, loading } = useDocumentList();
   const navigate = useNavigate();
 
   useEffect(() => { refresh(); }, []);
+
+  // Redirect to /validation when any doc needs human review
+  useEffect(() => {
+    if (reviewDocs.length > 0) navigate('/validation');
+  }, [reviewDocs.length]);
+
+  // Redirect to /extraction when all queued docs finish processing
+  const prevPendingCount = useRef(0);
+  const prevPendingIds = useRef([]);
+  useEffect(() => {
+    if (prevPendingCount.current > 0 && pendingDocs.length === 0 && reviewDocs.length === 0) {
+      // Find the first doc that just completed from the previous pending set
+      const justCompleted = documents.find(
+        (d) => prevPendingIds.current.includes(d.id) && d.status === 'completed'
+      );
+      navigate('/extraction', { state: { docId: justCompleted?.id } });
+    }
+    prevPendingCount.current = pendingDocs.length;
+    prevPendingIds.current = pendingDocs.map((d) => d.id);
+  }, [pendingDocs.length, reviewDocs.length]);
 
   // Most recently active doc for the live pipeline display
   const featured = pendingDocs[0];

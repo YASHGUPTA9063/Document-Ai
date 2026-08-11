@@ -231,8 +231,10 @@ export function Upload() {
       });
       setUploadedIds((ids) => [...ids, ...successful.map((r) => r.document_id)]);
 
-      if (result.succeeded > 0)
+      if (result.succeeded > 0) {
         toast(`${result.succeeded} file${result.succeeded > 1 ? 's' : ''} submitted to AI pipeline!`, 'success');
+        setTimeout(() => navigate('/processing'), 1500);
+      }
       if (result.failed > 0)
         toast(`${result.failed} file${result.failed > 1 ? 's' : ''} failed to upload`, 'warn');
 
@@ -423,7 +425,7 @@ export function Upload() {
                 ) : (
                   <>
                     <Layers size={14} />
-                    Send {readyCount} File{readyCount !== 1 ? 's' : ''} as Batch to AI Pipeline
+                    Send {readyCount} File{readyCount !== 1 ? 's' : ''} for Extraction
                   </>
                 )}
               </button>
@@ -535,9 +537,6 @@ export function Upload() {
             <div className="card-header">
               <div>
                 <div className="card-title">AI Processing Pipeline</div>
-                <div className="card-sub">
-                  8-step automated workflow · All batch files run through each stage in parallel
-                </div>
               </div>
               <span className="batch-mode-chip">
                 <Zap size={11} /> Parallel
