@@ -1446,9 +1446,56 @@ def _norm_dob(s: str) -> str:
 def _fuzzy_name(a: str, b: str) -> dict:
     na, nb = _norm_name(a), _norm_name(b)
     if not na or not nb:
-        return {"result": "NOT_FOUND", "score": None, "threshold": _NAME_THRESHOLD}
-    score = round(difflib.SequenceMatcher(None, na, nb).ratio(), 3)
-    return {"result": "MATCH" if score >= _NAME_THRESHOLD else "MISMATCH", "score": score, "threshold": _NAME_THRESHOLD}
+        return {"result": "NOT_FOUND", "score": None, "threshold": 1.0}
+        
+    words_a = na.split()
+    words_b = nb.split()
+    
+    # Identify shorter and longer word lists
+    if len(words_a) <= len(words_b):
+        shorter, longer = words_a, words_b
+    else:
+        shorter, longer = words_b, words_a
+        
+    if not shorter:
+        return {"result": "MISMATCH", "score": 0.0, "threshold": 1.0}
+        
+    available_longer = list(longer)
+    matched_count = 0
+    
+    for ws in shorter:
+        matched_idx = -1
+        for idx, wl in enumerate(available_longer):
+            if ws == wl:
+                matched_idx = idx
+                break
+            elif len(ws) == 1 and wl.startswith(ws):
+                matched_idx = idx
+                break
+            elif len(wl) == 1 and ws.startswith(wl):
+                matched_idx = idx
+                break
+                
+        if matched_idx != -1:
+            matched_count += 1
+            available_longer.pop(matched_idx)
+            
+    all_words_matched = (matched_count == len(shorter))
+    
+    # Safeguard: if shorter name is 1 word and longer name has multiple, mismatch to prevent false positives
+    # ponytail: exact token subset verification for official IDs. Typos not allowed.
+    if len(shorter) == 1 and len(longer) > 1:
+        is_match = False
+    else:
+        is_match = all_words_matched
+        
+    score = round(matched_count / len(shorter), 3)
+    
+    return {
+        "result": "MATCH" if is_match else "MISMATCH",
+        "score": score,
+        "threshold": 1.0
+    }
 
 def _exact_dob(a: str, b: str) -> dict:
     da, db = _norm_dob(a), _norm_dob(b)
