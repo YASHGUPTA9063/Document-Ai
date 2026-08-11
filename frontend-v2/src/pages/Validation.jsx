@@ -463,7 +463,7 @@ function ReviewCard({ doc, onAction }) {
               {doc.doc_type && <span className="badge badge-cyan">{doc.doc_type}</span>}
               {score != null && (
                 <span className="badge badge-yellow">
-                  Confidence: <strong style={{ color: scoreColor }}>{Math.round(score * 100)}%</strong>
+                  Doc Score: <strong style={{ color: scoreColor }}>{Math.round(score * 100)}%</strong>
                 </span>
               )}
             </div>
@@ -892,9 +892,21 @@ export function Validation() {
               <ReviewCard key={doc.id} doc={doc} onAction={handleAction} />
             ))
           )}
+
+          <div className="card">
+            <div className="card-title" style={{ marginBottom: 12 }}>How Review Works</div>
+            <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7 }}>
+              <p style={{ marginBottom: 8 }}>Documents are automatically approved if confidence ≥ 80%. Otherwise, they enter this review queue.</p>
+              <p style={{ marginBottom: 8 }}><strong>Approve</strong> — signals the workflow to finalize and store extracted data.</p>
+              <p style={{ marginBottom: 8 }}><strong>Edit &amp; Approve</strong> — opens an inline field editor. Each extracted field appears as a styled input — just change what's wrong and the corrections are tracked automatically. No manual JSON required.</p>
+              <p><strong>Reject</strong> — marks the document as rejected and stops processing.</p>
+            </div>
+          </div>
         </div>
 
         <div>
+          <CrossValidation />
+
           <div className="card">
             <div className="card-title" style={{ marginBottom: 12 }}>Validation Rules</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13 }}>
@@ -909,18 +921,6 @@ export function Validation() {
               ))}
             </div>
           </div>
-
-          <div className="card">
-            <div className="card-title" style={{ marginBottom: 12 }}>How Review Works</div>
-            <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7 }}>
-              <p style={{ marginBottom: 8 }}>Documents are automatically approved if confidence ≥ 80%. Otherwise, they enter this review queue.</p>
-              <p style={{ marginBottom: 8 }}><strong>Approve</strong> — signals the workflow to finalize and store extracted data.</p>
-              <p style={{ marginBottom: 8 }}><strong>Edit &amp; Approve</strong> — opens an inline field editor. Each extracted field appears as a styled input — just change what's wrong and the corrections are tracked automatically. No manual JSON required.</p>
-              <p><strong>Reject</strong> — marks the document as rejected and stops processing.</p>
-            </div>
-          </div>
-
-          <CrossValidation />
         </div>
       </div>
     </div>

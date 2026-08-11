@@ -2340,28 +2340,11 @@ export function Extraction() {
                 )}
               </span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-                  {confidenceMode === 'word' && (
-                    <>
-                      Word Conf: <strong style={{ color: 'var(--text)' }}>{Math.round(wordConf * 100)}%</strong>
-                    </>
-                  )}
-                  {confidenceMode === 'page' && (
-                    <>
-                      Page Conf: <strong style={{ color: 'var(--text)' }}>{Math.round(pageConf * 100)}%</strong>
-                    </>
-                  )}
-                  {confidenceMode === 'both' && (
-                    <>
-                      Word Conf: <strong style={{ color: 'var(--text)' }}>{Math.round(wordConf * 100)}%</strong> · Page Conf: <strong style={{ color: 'var(--text)' }}>{Math.round(pageConf * 100)}%</strong>
-                    </>
-                  )}
-                  {extracted.reviewer_corrections && Object.keys(extracted.reviewer_corrections).length > 0 && (
-                    <span style={{ marginLeft: 8, color: 'var(--accent)' }}>
-                      · {Object.keys(extracted.reviewer_corrections).length} corrected
-                    </span>
-                  )}
-                </span>
+                {extracted.reviewer_corrections && Object.keys(extracted.reviewer_corrections).length > 0 && (
+                  <span style={{ fontSize: 12, color: 'var(--accent)' }}>
+                    {Object.keys(extracted.reviewer_corrections).length} corrected
+                  </span>
+                )}
                 {/* ── Compact Doc Confidence Gauge ── */}
                 {weightedDocConfidence != null && (() => {
                   const wPct = Math.round(weightedDocConfidence * 100);
@@ -2412,28 +2395,9 @@ export function Extraction() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
             <div>
               <div style={{ fontSize: 15, fontWeight: 700 }}>Extracted Data</div>
-              {extracted && (
+              {extracted && weightedDocConfidence != null && (
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
-                  {confidenceMode === 'word' && (
-                    <>
-                      Word Confidence: <span style={{ color: wordConf >= autoApproveThreshold / 100 ? 'var(--success)' : 'var(--warn)', fontWeight: 600 }}>{Math.round(wordConf * 100)}%</span>
-                    </>
-                  )}
-                  {confidenceMode === 'page' && (
-                    <>
-                      Page Confidence: <span style={{ color: pageConf >= autoApproveThreshold / 100 ? 'var(--success)' : 'var(--warn)', fontWeight: 600 }}>{Math.round(pageConf * 100)}%</span>
-                    </>
-                  )}
-                  {confidenceMode === 'both' && (
-                    <>
-                      Word: <span style={{ color: wordConf >= autoApproveThreshold / 100 ? 'var(--success)' : 'var(--warn)', fontWeight: 600 }}>{Math.round(wordConf * 100)}%</span> · Page: <span style={{ color: pageConf >= autoApproveThreshold / 100 ? 'var(--success)' : 'var(--warn)', fontWeight: 600 }}>{Math.round(pageConf * 100)}%</span>
-                    </>
-                  )}
-                  {weightedDocConfidence != null && (
-                    <>
-                      {' '}· Doc Score: <span style={{ color: Math.round(weightedDocConfidence * 100) >= confHighThreshold ? '#059669' : Math.round(weightedDocConfidence * 100) >= confMedThreshold ? '#d97706' : '#dc2626', fontWeight: 600 }}>{Math.round(weightedDocConfidence * 100)}%</span>
-                    </>
-                  )}
+                  Doc Score: <span style={{ color: Math.round(weightedDocConfidence * 100) >= confHighThreshold ? '#059669' : Math.round(weightedDocConfidence * 100) >= confMedThreshold ? '#d97706' : '#dc2626', fontWeight: 600 }}>{Math.round(weightedDocConfidence * 100)}%</span>
                 </div>
               )}
             </div>
