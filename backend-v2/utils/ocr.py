@@ -116,7 +116,7 @@ def extract_with_ocr(
 
     # Call Mistral OCR
     ocr_args = {
-        "model": "mistral-ocr-latest",
+        "model": "mistral-ocr-4-1",
         "document": {
             "type": "document_url",
             "document_url": document_url
