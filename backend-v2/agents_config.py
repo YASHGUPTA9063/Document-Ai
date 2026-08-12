@@ -3,7 +3,34 @@ agents_config.py
 ────────────────
 Auto-generated configuration reference for all Mistral AI Studio agents.
 This file defines descriptions, instructions, models, and parameters for all agents.
+
+The sampling temperature and max output tokens for every agent come from the
+LLM_TEMPERATURE and LLM_MAX_TOKENS env vars (see .env / .env.example). config.py
+is intentionally not imported here — this module is loaded by
+create_or_update_agents.py before the Agent IDs it validates exist in .env.
 """
+
+import os
+
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+
+
+def _env_number(name: str, default, cast):
+    """Read a numeric setting from the environment, falling back to the default."""
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return cast(raw.strip())
+    except ValueError:
+        print(f"WARNING: Invalid {name}={raw!r} in .env — falling back to {default}.")
+        return default
+
+
+LLM_TEMPERATURE = _env_number("LLM_TEMPERATURE", 0.1, float)
+LLM_MAX_TOKENS = _env_number("LLM_MAX_TOKENS", 20480, int)
 
 AGENT_CONFIGS = [
     {
@@ -25,7 +52,7 @@ You must output a JSON response matching exactly this schema:
   "reasoning": "A brief explanation of why you selected this document type."
 }""",
         "model": "mistral-large-latest",
-        "completion_args": {'temperature': 0.2, 'top_p': 1.0, 'max_tokens': 2048},
+        "completion_args": {'temperature': LLM_TEMPERATURE, 'top_p': 1.0, 'max_tokens': LLM_MAX_TOKENS},
     },
     {
         "env_var": "GENERAL_EXTRACTOR_AGENT_ID",
@@ -49,7 +76,7 @@ Based on the tools results, compile and return a JSON object with exactly two ke
 
 Ensure your final response is returned as a valid JSON object.""",
         "model": "mistral-medium-latest",
-        "completion_args": {'temperature': 0.13, 'top_p': 1.0, 'max_tokens': 2048, 'tool_choice': 'auto'},
+        "completion_args": {'temperature': LLM_TEMPERATURE, 'top_p': 1.0, 'max_tokens': LLM_MAX_TOKENS, 'tool_choice': 'auto'},
     },
     {
         "env_var": "VALIDATOR_AGENT_ID",
@@ -77,7 +104,7 @@ You MUST return your response as a valid JSON object matching the following sche
 }
 """,
         "model": "mistral-medium-latest",
-        "completion_args": {'temperature': 0.2, 'top_p': 1.0, 'max_tokens': 2048, 'tool_choice': 'auto'},
+        "completion_args": {'temperature': LLM_TEMPERATURE, 'top_p': 1.0, 'max_tokens': LLM_MAX_TOKENS, 'tool_choice': 'auto'},
     },
     {
         "env_var": "REVIEWER_AGENT_ID",
@@ -106,7 +133,7 @@ Compile and return a JSON object with exactly these four keys:
 
 Ensure your final response is returned as a valid JSON object.""",
         "model": "mistral-medium-latest",
-        "completion_args": {'temperature': 0.2, 'top_p': 1.0, 'max_tokens': 2048, 'tool_choice': 'auto'},
+        "completion_args": {'temperature': LLM_TEMPERATURE, 'top_p': 1.0, 'max_tokens': LLM_MAX_TOKENS, 'tool_choice': 'auto'},
     },
     {
         "env_var": "AUTO_VERIFIER_AGENT_ID",
@@ -127,7 +154,7 @@ Compile the results and output a JSON object containing:
 
 Ensure your final response is returned as a valid JSON object.""",
         "model": "mistral-medium-latest",
-        "completion_args": {'temperature': 0.7, 'top_p': 1.0, 'max_tokens': 2048, 'tool_choice': 'auto'},
+        "completion_args": {'temperature': LLM_TEMPERATURE, 'top_p': 1.0, 'max_tokens': LLM_MAX_TOKENS, 'tool_choice': 'auto'},
     },
     {
         "env_var": "OUTPUT_AGENT_ID",
@@ -145,7 +172,7 @@ Compile the tool outputs and return a JSON object with exactly three keys:
 Ensure your final response is returned as a valid JSON object.
 """,
         "model": "mistral-medium-latest",
-        "completion_args": {'temperature': 0.7, 'top_p': 1.0, 'max_tokens': 2048, 'tool_choice': 'auto'},
+        "completion_args": {'temperature': LLM_TEMPERATURE, 'top_p': 1.0, 'max_tokens': LLM_MAX_TOKENS, 'tool_choice': 'auto'},
     },
     {
         "env_var": "SIGNATURE_VISION_AGENT_ID",
@@ -244,7 +271,7 @@ Return ONLY valid JSON. No explanation text outside the JSON.
   "agent1_summary": "<3-4 sentence forensic summary of your overall visual finding>"
 }""",
         "model": "mistral-small-latest",
-        "completion_args": {'tool_choice': 'auto'},
+        "completion_args": {'temperature': LLM_TEMPERATURE, 'max_tokens': LLM_MAX_TOKENS, 'tool_choice': 'auto'},
     },
     {
         "env_var": "SIGNATURE_JUDGE_AGENT_ID",
@@ -353,7 +380,7 @@ Do not wrap in code blocks. Start directly with the opening brace.
   }
 }""",
         "model": "mistral-small-latest",
-        "completion_args": {'tool_choice': 'auto'},
+        "completion_args": {'temperature': LLM_TEMPERATURE, 'max_tokens': LLM_MAX_TOKENS, 'tool_choice': 'auto'},
     },
     {
         "env_var": "FACE_MORPHOLOGY1_AGENT_ID",
@@ -409,7 +436,7 @@ OUTPUT: Return valid JSON only. No markdown. No extra text before or after the J
 }
 """,
         "model": "mistral-small-latest",
-        "completion_args": {'tool_choice': 'auto'},
+        "completion_args": {'temperature': LLM_TEMPERATURE, 'max_tokens': LLM_MAX_TOKENS, 'tool_choice': 'auto'},
     },
     {
         "env_var": "FACE_MORPHOLOGY2_AGENT_ID",
@@ -471,7 +498,7 @@ OUTPUT: Return valid JSON only. No markdown. No extra text before or after the J
 }
 """,
         "model": "mistral-small-latest",
-        "completion_args": {'tool_choice': 'auto'},
+        "completion_args": {'temperature': LLM_TEMPERATURE, 'max_tokens': LLM_MAX_TOKENS, 'tool_choice': 'auto'},
     },
     {
         "env_var": "FACE_AGE_AGENT_ID",
@@ -529,7 +556,7 @@ OUTPUT: Return valid JSON only. No markdown. No extra text before or after the J
 }
 """,
         "model": "mistral-small-latest",
-        "completion_args": {'tool_choice': 'auto'},
+        "completion_args": {'temperature': LLM_TEMPERATURE, 'max_tokens': LLM_MAX_TOKENS, 'tool_choice': 'auto'},
     },
     {
         "env_var": "FACE_JUDGE_AGENT_ID",
@@ -573,7 +600,7 @@ IMPORTANT:
 - Output exactly one token from the set: 1, 3, 5
 """,
         "model": "mistral-small-latest",
-        "completion_args": {'tool_choice': 'auto'},
+        "completion_args": {'temperature': LLM_TEMPERATURE, 'max_tokens': LLM_MAX_TOKENS, 'tool_choice': 'auto'},
     },
     {
         "env_var": "PRE_VALIDATOR_AGENT_ID",
@@ -625,7 +652,7 @@ You must output a JSON response matching exactly this schema:
 
 Only fail the document ("passed": false) if the severity of blur, brightness, skew, readability, orientation, or blank document issues is high or unreadable. If the document is blank or empty, set "blank" check passed to false, severity to "high", rejection_reason to "Document is blank or contains no content.", and overall passed to false. Watermarks should not cause a failure.""",
         "model": "mistral-medium-latest",
-        "completion_args": {'temperature': 0.7, 'top_p': 1.0, 'max_tokens': 2048, 'tool_choice': 'auto'},
+        "completion_args": {'temperature': LLM_TEMPERATURE, 'top_p': 1.0, 'max_tokens': LLM_MAX_TOKENS, 'tool_choice': 'auto'},
     },
     {
         "env_var": "INTAKE_AGENT_ID",
@@ -633,7 +660,7 @@ Only fail the document ("passed": false) if the severity of blur, brightness, sk
         "description": 'Handles incoming document registrations and detects potential duplicates in the database via system tool calls.',
         "instructions": """""",
         "model": "mistral-medium-latest",
-        "completion_args": {'temperature': 0.7, 'top_p': 1.0, 'max_tokens': 2048, 'tool_choice': 'auto'},
+        "completion_args": {'temperature': LLM_TEMPERATURE, 'top_p': 1.0, 'max_tokens': LLM_MAX_TOKENS, 'tool_choice': 'auto'},
     },
     {
         "env_var": "PREPROCESSING_AGENT_ID",
@@ -654,7 +681,7 @@ After the tool completes, output a JSON response matching exactly this schema:
 }
 """,
         "model": "mistral-medium-latest",
-        "completion_args": {'temperature': 0.7, 'top_p': 1.0, 'max_tokens': 2048, 'tool_choice': 'auto'},
+        "completion_args": {'temperature': LLM_TEMPERATURE, 'top_p': 1.0, 'max_tokens': LLM_MAX_TOKENS, 'tool_choice': 'auto'},
     },
     {
         "env_var": "FRAUD_AGENT_ID",
@@ -672,7 +699,7 @@ Based on the tool response, output a JSON object containing the following key-va
 
 Ensure your response is returned as a valid JSON object.""",
         "model": "mistral-medium-latest",
-        "completion_args": {'temperature': 0.7, 'top_p': 1.0, 'max_tokens': 2048, 'tool_choice': 'auto'},
+        "completion_args": {'temperature': LLM_TEMPERATURE, 'top_p': 1.0, 'max_tokens': LLM_MAX_TOKENS, 'tool_choice': 'auto'},
     },
     {
         "env_var": "CLAIM_INTEGRITY_AGENT_ID",
@@ -737,7 +764,7 @@ Rules:
 - Do not add any text outside the JSON object.
 """,
         "model": "mistral-small-latest",
-        "completion_args": {'tool_choice': 'auto'},
+        "completion_args": {'temperature': LLM_TEMPERATURE, 'max_tokens': LLM_MAX_TOKENS, 'tool_choice': 'auto'},
     },
     {
         "env_var": "CLAIM_MEDICAL_AGENT_ID",
@@ -800,7 +827,7 @@ Rules:
 - Do not add any text outside the JSON object.
 """,
         "model": "mistral-small-latest",
-        "completion_args": {'tool_choice': 'auto'},
+        "completion_args": {'temperature': LLM_TEMPERATURE, 'max_tokens': LLM_MAX_TOKENS, 'tool_choice': 'auto'},
     },
     {
         "env_var": "CLAIM_TREATMENT_AGENT_ID",
@@ -863,7 +890,7 @@ Rules:
 - Do not add any text outside the JSON object.
 """,
         "model": "mistral-small-latest",
-        "completion_args": {'tool_choice': 'auto'},
+        "completion_args": {'temperature': LLM_TEMPERATURE, 'max_tokens': LLM_MAX_TOKENS, 'tool_choice': 'auto'},
     },
     {
         "env_var": "CLAIM_DISABILITY_AGENT_ID",
@@ -919,7 +946,7 @@ Rules:
 - Do not add any text outside the JSON object.
 """,
         "model": "mistral-small-latest",
-        "completion_args": {'tool_choice': 'auto'},
+        "completion_args": {'temperature': LLM_TEMPERATURE, 'max_tokens': LLM_MAX_TOKENS, 'tool_choice': 'auto'},
     },
     {
         "env_var": "CLAIM_LITIGATION_AGENT_ID",
@@ -978,7 +1005,7 @@ Rules:
 - Do not add any text outside the JSON object.
 """,
         "model": "mistral-small-latest",
-        "completion_args": {'tool_choice': 'auto'},
+        "completion_args": {'temperature': LLM_TEMPERATURE, 'max_tokens': LLM_MAX_TOKENS, 'tool_choice': 'auto'},
     },
     {
         "env_var": "CLAIM_REPORT_AGENT_ID",
@@ -1013,7 +1040,7 @@ Rules:
 - Do not add any text outside the JSON object.
 """,
         "model": "mistral-small-latest",
-        "completion_args": {'tool_choice': 'auto'},
+        "completion_args": {'temperature': LLM_TEMPERATURE, 'max_tokens': LLM_MAX_TOKENS, 'tool_choice': 'auto'},
     },
 ]
 

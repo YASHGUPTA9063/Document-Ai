@@ -890,7 +890,9 @@ async def generate_template_from_sample(
         response = mistral_client.chat.complete(
             model="mistral-large-latest",
             messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"}
+            response_format={"type": "json_object"},
+            temperature=settings.LLM_TEMPERATURE,
+            max_tokens=settings.LLM_MAX_TOKENS
         )
         
         content = response.choices[0].message.content
