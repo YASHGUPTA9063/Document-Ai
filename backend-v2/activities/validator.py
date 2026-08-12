@@ -78,7 +78,13 @@ async def validator_activity(
             f"Do NOT flag optional fields that are empty or null — they are expected to be blank sometimes.\n\n"
             f"IMPORTANT: When cross-checking amount_in_words against amount_in_numbers, compare only the actual numerical value. "
             f"Ignore trivial formatting differences such as a missing 'Only' suffix, 'Rupees' prefix, decimal '.00', or minor phrasing variations. "
-            f"Only flag a mismatch if the numerical values genuinely differ."
+            f"Only flag a mismatch if the numerical values genuinely differ.\n\n"
+            f"IMPORTANT: Only include ACTUAL errors or problems in 'validation_errors'. "
+            f"Do NOT include passed checks, informational notes, or observations that are not errors. "
+            f"If a check passes (e.g. dates are consistent), do NOT mention it at all.\n\n"
+            f"IMPORTANT: The fields 'signature_detected', 'photo_detected', 'signature_image', and 'photo_image' are "
+            f"system-injected KYC metadata fields — they are NOT extracted from the document text. "
+            f"Do NOT compare them against other document fields or flag contradictions with them."
         )
 
         messages = [{"role": "user", "content": prompt}]
