@@ -1554,9 +1554,19 @@ async def cross_validate_latest():
     pan_data = (pan_doc.extracted_data.validated_data or {}) if pan_doc.extracted_data else {}
     aad_data = (aadhaar_doc.extracted_data.validated_data or {}) if aadhaar_doc.extracted_data else {}
 
-    pan_name = pan_data.get("full_name", "")
+    pan_name = (
+        pan_data.get("full_name") or
+        pan_data.get("full_name_english") or
+        pan_data.get("name") or
+        ""
+    )
     pan_dob  = pan_data.get("date_of_birth", "")
-    aad_name = aad_data.get("full_name_english", "")
+    aad_name = (
+        aad_data.get("full_name_english") or
+        aad_data.get("full_name") or
+        aad_data.get("name") or
+        ""
+    )
     aad_dob  = aad_data.get("date_of_birth", "")
 
     name_check = _fuzzy_name(pan_name, aad_name)
