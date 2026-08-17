@@ -257,6 +257,8 @@ def _locate_kyc_bboxes(
                     "strict": True,
                 },
             },
+            temperature=settings.LLM_TEMPERATURE,
+            max_tokens=settings.LLM_MAX_TOKENS,
         )
         raw = response.choices[0].message.content
         d = json.loads(raw) if isinstance(raw, str) else dict(raw)

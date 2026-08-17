@@ -226,7 +226,9 @@ def vllm_reextract_required_fields(
         response = client.chat.complete(
             model="mistral-large-latest",
             messages=[{"role": "user", "content": content}],
-            response_format={"type": "json_object"}
+            response_format={"type": "json_object"},
+            temperature=settings.LLM_TEMPERATURE,
+            max_tokens=settings.LLM_MAX_TOKENS
         )
         response_text = response.choices[0].message.content
 

@@ -184,7 +184,9 @@ def _vlm_verify_fields(file_path: str, vlm_fields: list, ocr_raw_text: str) -> d
         response = client.chat.complete(
             model="mistral-large-latest",
             messages=[{"role": "user", "content": content}],
-            response_format={"type": "json_object"}
+            response_format={"type": "json_object"},
+            temperature=settings.LLM_TEMPERATURE,
+            max_tokens=settings.LLM_MAX_TOKENS
         )
         response_text = response.choices[0].message.content
         result_json = json.loads(response_text)
@@ -288,9 +290,9 @@ def build_ocr_prompt_from_fields(fields_list: list) -> str:
 def _chat_extract_fields(raw_markdown: str, fields_list: list, doc_type: str) -> dict:
     """
     Step 2 of the two-step extraction pipeline.
-    Uses mistral-large-latest at temperature=0 with json_schema structured output
-    to deterministically extract fields from the raw OCR Markdown.
-    Full control: temperature=0, retries, no 8-page limit.
+    Uses mistral-large-latest with json_schema structured output to extract
+    fields from the raw OCR Markdown.
+    Full control: temperature from LLM_TEMPERATURE (.env), retries, no 8-page limit.
     """
     schema = build_json_schema_from_fields(fields_list)
     prompt = build_ocr_prompt_from_fields(fields_list)
@@ -318,7 +320,8 @@ def _chat_extract_fields(raw_markdown: str, fields_list: list, doc_type: str) ->
                     {"role": "user",   "content": user_msg}
                 ],
                 response_format=schema,
-                temperature=0
+                temperature=settings.LLM_TEMPERATURE,
+                max_tokens=settings.LLM_MAX_TOKENS
             )
             return json.loads(resp.choices[0].message.content)
         except Exception as e:
@@ -362,7 +365,7 @@ def extract_text_from_document(file_path: str, doc_type: str, document_id: str =
     if document_id and blocks:
         _save_ocr_blocks(document_id, blocks)
 
-    # Step 2: Deterministic structured extraction at temperature=0
+    # Step 2: Structured extraction at the configured LLM_TEMPERATURE
     # Uses mistral-large-latest with json_schema response_format — full control over output
     doc_annotation = {}
     if raw_text:

@@ -10,14 +10,64 @@ import pypdf
 logger = logging.getLogger(__name__)
 client = Mistral(api_key=settings.MISTRAL_API_KEY)
 
+# Tables in page.markdown are rendered as markdown pipe tables (the API also
+# supports "html"). Markdown keeps the OCR text one consistent format for the
+# downstream chat extraction prompts.
+TABLE_FORMAT = "markdown"
+
+# Document annotation is always requested as JSON, never plain text.
+JSON_OBJECT_FORMAT = {"type": "json_object"}
+
+# json_object mode requires the model to be told to emit JSON, so a prompt is
+# always sent alongside the format.
+DEFAULT_DOCUMENT_ANNOTATION_PROMPT = (
+    "Extract the useful information from this document and return it as a single JSON object."
+)
+
+
+def _as_json_annotation_format(document_annotation_format: dict = None) -> dict:
+    """
+    Coerce a caller-supplied annotation format into a JSON ResponseFormat.
+
+    Accepts None (-> json_object), a bare JSON Schema (-> wrapped as json_schema),
+    or an already-built ResponseFormat dict. A "text" type is upgraded to
+    json_object so the annotation is never returned as free text.
+    """
+    if not document_annotation_format:
+        return dict(JSON_OBJECT_FORMAT)
+
+    fmt_type = document_annotation_format.get("type")
+
+    # A bare JSON Schema (no ResponseFormat wrapper) — wrap it.
+    if "json_schema" not in document_annotation_format and fmt_type not in ("json_object", "json_schema", "text"):
+        return {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "document_annotation",
+                "schema": document_annotation_format,
+                "strict": True,
+            },
+        }
+
+    if fmt_type == "json_schema" and document_annotation_format.get("json_schema"):
+        return document_annotation_format
+
+    return dict(JSON_OBJECT_FORMAT)
+
+
 def extract_with_ocr(
     file_path: str,
     doc_type: str,
     pages: list = None,
+    document_annotation_format: dict = None,
+    document_annotation_prompt: str = None,
 ) -> dict:
     """
     Extract text using Mistral OCR or python-docx for DOCX files.
-    Supports structured document annotation via document_annotation_format/prompt.
+    Tables are returned as markdown (table_format="markdown").
+    Structured document annotation is requested only when a caller passes
+    document_annotation_format and/or document_annotation_prompt, and is always
+    requested in a JSON format (json_object, or json_schema when a schema is given).
     Returns: {"raw_text": str, "confidence": float, "pages": list, "document_annotation": dict, "blocks": list, ...}
     blocks: list of {page, content, type, top_left_x, top_left_y, bottom_right_x, bottom_right_y, page_width, page_height}
     """
@@ -66,21 +116,32 @@ def extract_with_ocr(
 
     # Call Mistral OCR
     ocr_args = {
-        "model": "mistral-ocr-latest",
+        "model": "mistral-ocr-4-1",
         "document": {
             "type": "document_url",
             "document_url": document_url
         },
         "confidence_scores_granularity": "word",
+        # Render tables in page.markdown as markdown instead of HTML.
+        "table_format": TABLE_FORMAT,
         # include_blocks returns paragraph-level bounding boxes for citation highlighting.
         # Only effective for image/PDF files — DOCX is handled above before this point.
         "include_blocks": True
     }
-    
+
     if actual_pages is not None:
         ocr_args["pages"] = actual_pages
 
-    logger.info(f"Calling Mistral OCR: model={ocr_args['model']}, pages={ocr_args.get('pages')}")
+    # Annotation is opt-in per call, but whenever it is requested the format is JSON.
+    annotate = document_annotation_format is not None or document_annotation_prompt is not None
+    if annotate:
+        ocr_args["document_annotation_format"] = _as_json_annotation_format(document_annotation_format)
+        ocr_args["document_annotation_prompt"] = document_annotation_prompt or DEFAULT_DOCUMENT_ANNOTATION_PROMPT
+
+    logger.info(
+        f"Calling Mistral OCR: model={ocr_args['model']}, pages={ocr_args.get('pages')}, "
+        f"table_format={TABLE_FORMAT}, annotated={annotate}"
+    )
     ocr_response = client.ocr.process(**ocr_args)
 
     # Parse response
@@ -139,11 +200,27 @@ def extract_with_ocr(
             })
     
     avg_confidence = (total_confidence / valid_pages_count) if valid_pages_count > 0 else 0.0
-    
+
+    # document_annotation comes back as a JSON string — parse it to a dict.
+    document_annotation = None
+    raw_annotation = getattr(ocr_response, "document_annotation", None)
+    if raw_annotation:
+        if isinstance(raw_annotation, str):
+            try:
+                document_annotation = json.loads(raw_annotation)
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse document_annotation as JSON: {e}")
+                document_annotation = raw_annotation
+        elif hasattr(raw_annotation, "model_dump"):
+            document_annotation = raw_annotation.model_dump()
+        else:
+            document_annotation = raw_annotation
+
     return {
         "raw_text": raw_text.strip(),
         "confidence": avg_confidence,
         "pages": pages_list,
         "word_confidence_scores": all_word_confidences,
         "blocks": all_blocks,  # bounding box blocks for field citation highlighting
+        "document_annotation": document_annotation,
     }

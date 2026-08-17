@@ -453,14 +453,45 @@ export function Templates() {
             {/* Template specific actions aligned next to the search */}
             <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
               {activeTab && (
-                <button 
-                  className={`btn btn-sm ${isActiveVlm ? 'btn-primary' : 'btn-outline'}`}
-                  onClick={handleToggleTemplateVlm}
+                <label
                   title="Enable or disable VLM visual extraction for visual checkboxes / tick marks in this template"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 8,
+                    cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                    color: isActiveVlm ? 'var(--accent)' : 'var(--muted)',
+                    padding: '5px 12px',
+                    borderRadius: 6,
+                    background: isActiveVlm ? 'rgba(79, 110, 247, 0.08)' : 'var(--surface)',
+                    border: isActiveVlm ? '1px solid rgba(79, 110, 247, 0.3)' : '1px solid var(--border)',
+                    transition: 'all 0.2s ease',
+                    userSelect: 'none',
+                  }}
                 >
-                  <Eye size={12} /> {isActiveVlm ? 'VLM Enabled' : 'Enable VLM'}
-                </button>
+                  <div
+                    onClick={handleToggleTemplateVlm}
+                    style={{
+                      position: 'relative',
+                      width: 34, height: 18,
+                      borderRadius: 9,
+                      background: isActiveVlm ? 'var(--accent)' : 'rgba(255,255,255,0.12)',
+                      border: isActiveVlm ? 'none' : '1px solid var(--border)',
+                      transition: 'background 0.2s ease',
+                      cursor: 'pointer',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <div style={{
+                      position: 'absolute',
+                      top: 2, left: isActiveVlm ? 17 : 2,
+                      width: 14, height: 14,
+                      borderRadius: '50%',
+                      background: '#fff',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                      transition: 'left 0.2s ease',
+                    }} />
+                  </div>
+                  Custom Extraction
+                </label>
               )}
               {activeTab && (
                 <button 
