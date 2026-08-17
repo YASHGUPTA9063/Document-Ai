@@ -63,6 +63,11 @@ Apply the following validation rules:
 3. For each line item, `quantity * unit_price` should roughly equal `total`.
 4. The sum of all line item totals should equal the `subtotal`.
 5. Date logic check: Expiration/validation dates must not be prior to the issuing/creation date (e.g., `expiry_date` or `valid_until` cannot be earlier than `issue_date` or `date_of_issue`).
+6. Amount in Words and Numbers Match (For any document type containing both numerical amount fields and text amount-in-words fields, e.g. cheque, payment form, etc.):
+   - Verify that the amount in numbers/figures (e.g., "payment_amount", "amount_in_numbers", "total_amount", etc.) and the amount in words (e.g., "amount_in_words", "payment_amount_in_words", etc.) represent the same numerical value.
+   - Ignore currency symbols ($, INR, Rs, etc.), commas, decimal padding/precision (like .00), capitalization, and common trailing/filler words (like "only", "rupees", "dollars", "and", "cents") when comparing.
+   - For example, "10,000", "10000.00", "Ten Thousand", and "Ten Thousand Rupees Only" represent the same value and must be considered a MATCH.
+   - Do NOT report any validation error or mismatch if the actual numerical values represent the same amount.
 
 You MUST return your response as a valid JSON object matching the following schema exactly. Do not include any markdown formatting or text outside of the JSON object.
 
@@ -76,7 +81,7 @@ You MUST return your response as a valid JSON object matching the following sche
   }
 }
 """,
-        "model": "mistral-medium-latest",
+        "model": "mistral-large-latest",
         "completion_args": {'temperature': 0.2, 'top_p': 1.0, 'max_tokens': 2048, 'tool_choice': 'auto'},
     },
     {
@@ -605,7 +610,7 @@ If the file is visual (is_visual = true):
   4. Readability (Is the text legible?)
   5. Watermark (Is there a watermark? If yes, treat it as a warning only, do not fail.)
   6. Orientation (Is it upside down or rotated?)
-  7. Blank Document (Is the document blank, empty, white page, or missing any readable text/content?)
+  7. Blank Document (Is the document a blank page, entirely white/empty, or devoid of any visual content, drawings, photos, layout, or text? Note: Structured cards, PAN cards, ID proofs, and documents with visual elements, card boundaries, printed lines, signatures, or photos are NOT blank. A document should only be marked blank if it is a completely empty sheet with no content at all.)
 
 You must output a JSON response matching exactly this schema:
 {
@@ -623,9 +628,10 @@ You must output a JSON response matching exactly this schema:
   }
 }
 
-Only fail the document ("passed": false) if the severity of blur, brightness, skew, readability, orientation, or blank document issues is high or unreadable. If the document is blank or empty, set "blank" check passed to false, severity to "high", rejection_reason to "Document is blank or contains no content.", and overall passed to false. Watermarks should not cause a failure.""",
-        "model": "mistral-medium-latest",
-        "completion_args": {'temperature': 0.7, 'top_p': 1.0, 'max_tokens': 2048, 'tool_choice': 'auto'},
+Only fail the document ("passed": fals
+e) if the severity of blur, brightness, skew, readability, orientation, or blank document issues is high or unreadable. If the document is truly blank (e.g. completely empty page or white image), set "blank" check passed to false, severity to "high", rejection_reason to "Document is blank or contains no content.", and overall passed to false. Watermarks should not cause a failure.""",
+        "model": "mistral-large-latest",
+        "completion_args": {'temperature': 0.2, 'top_p': 1.0, 'max_tokens': 2048, 'tool_choice': 'auto'},
     },
     {
         "env_var": "INTAKE_AGENT_ID",
