@@ -49,18 +49,23 @@ fi
 echo "▶ Building and starting containers..."
 $DOCKER compose $COMPOSE_PROFILES_ARG up --build -d
 
-# 2. Database migrations (Alembic).
+# 2. Database migrations (Alembic) — opt-in via WITH_MIGRATIONS=1.
 #
-# The SQLAlchemy models still self-create on startup via init_db(), so this is
-# a no-op on a fresh volume and only matters for versioned schema changes.
-# Non-fatal: a migration failure must not block an otherwise healthy deploy.
-echo ""
-echo "▶ Applying database migrations..."
-if $DOCKER compose exec -T backend alembic upgrade head; then
-  echo "   ✅ migrations applied"
-else
-  echo "   ⚠️  alembic upgrade failed or was skipped — tables are still created"
-  echo "      automatically by init_db(); check: $DOCKER compose logs backend"
+# Off by default on purpose. The backend's init_db() already creates every
+# table from the SQLAlchemy models at startup, and it does so without writing
+# an alembic_version stamp — so `alembic upgrade head` would hit "table
+# already exists" on a normal deploy and report a failure that means nothing.
+#
+# Turn this on only once you adopt versioned migrations as the source of
+# truth (typically alongside moving off SQLite to Postgres).
+if [ "${WITH_MIGRATIONS:-0}" = "1" ]; then
+  echo ""
+  echo "▶ Applying database migrations..."
+  if $DOCKER compose exec -T backend alembic upgrade head; then
+    echo "   ✅ migrations applied"
+  else
+    echo "   ⚠️  alembic upgrade failed — check: $DOCKER compose logs backend"
+  fi
 fi
 
 echo ""
