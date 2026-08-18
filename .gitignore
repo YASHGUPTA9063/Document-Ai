@@ -42,7 +42,9 @@ scratch.*
 # Log and debug output files
 *.log
 *.txt
-#!requirements.txt
+# Negation must not be commented out — a leading '#' makes it a comment, which
+# left requirements.txt matched by *.txt above.
+!requirements.txt
 
 # Agent customizations (skills, rules — local dev config only)
 .agents/
