@@ -16810,3 +16810,21 @@
 2026-08-12 23:50:33,590 - INFO - [PERF] [TOOL_START] persist_final_extraction started
 2026-08-12 23:50:33,617 - INFO - [PERF] [TOOL_END] persist_final_extraction took 0.027s
 2026-08-12 23:50:33,618 - INFO - [PERF] [ACTIVITY_END] output_activity took 0.027s
+2026-08-18 11:36:25,973 - INFO - Initializing performance timing hooks...
+2026-08-18 11:36:27,420 - INFO - Successfully patched Mistral Agents API client methods
+2026-08-18 11:36:35,116 - INFO - Successfully patched mistralai.workflows activity decorator
+2026-08-18 11:36:45,802 - INFO - Successfully patched document workflow tool functions
+2026-08-18 11:36:45,803 - INFO - Successfully patched claim workflow tool functions
+2026-08-18 11:36:45,823 - INFO - Successfully patched claim DB operation functions
+2026-08-18 11:36:55,953 - INFO - Initializing performance timing hooks...
+2026-08-18 11:36:56,821 - INFO - Successfully patched Mistral Agents API client methods
+2026-08-18 11:36:58,480 - INFO - Successfully patched mistralai.workflows activity decorator
+2026-08-18 11:37:01,093 - INFO - Successfully patched document workflow tool functions
+2026-08-18 11:37:01,094 - INFO - Successfully patched claim workflow tool functions
+2026-08-18 11:37:01,096 - INFO - Successfully patched claim DB operation functions
+2026-08-18 11:37:20,896 - INFO - Initializing performance timing hooks...
+2026-08-18 11:37:21,812 - INFO - Successfully patched Mistral Agents API client methods
+2026-08-18 11:37:23,335 - INFO - Successfully patched mistralai.workflows activity decorator
+2026-08-18 11:37:25,606 - INFO - Successfully patched document workflow tool functions
+2026-08-18 11:37:25,607 - INFO - Successfully patched claim workflow tool functions
+2026-08-18 11:37:25,608 - INFO - Successfully patched claim DB operation functions

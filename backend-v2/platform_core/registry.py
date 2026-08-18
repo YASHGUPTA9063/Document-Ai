@@ -56,6 +56,13 @@ def _register_builtin_providers():
     except ImportError:
         pass
 
+    # vLLM fallback re-extraction (branch-vm3 feature, provider-wrapped)
+    try:
+        from platform_core.providers.llm.vllm_fallback import VLLMFallbackProvider
+        PROVIDER_CLASSES["llm"]["vllm_fallback"] = VLLMFallbackProvider
+    except ImportError:
+        pass
+
     # OCR providers
     try:
         from platform_core.providers.ocr.mistral_ocr import MistralOCR

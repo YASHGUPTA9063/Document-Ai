@@ -19,7 +19,8 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from mistralai.client import Mistral
+from mistralai.client import Mistral  # retained for type annotations only
+from platform_core.adapters.resilient_mistral import get_mistral_client
 from pydantic import BaseModel, Field
 
 from config import settings
@@ -334,7 +335,7 @@ def extract_signature_and_photo(
     """
     from PIL import Image
 
-    client = Mistral(api_key=settings.MISTRAL_API_KEY)
+    client = get_mistral_client()
 
     # Default output dir
     if output_dir is None:

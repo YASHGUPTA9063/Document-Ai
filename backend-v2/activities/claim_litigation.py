@@ -15,12 +15,12 @@ Tools called:
 import json
 import logging
 import mistralai.workflows as workflows
-from mistralai.client import Mistral
+from platform_core.adapters.resilient_mistral import get_mistral_client
 from config import settings
 from tools.claim_tools import CLAIM_TOOLS, dispatch_claim_tool
 
 logger = logging.getLogger(__name__)
-client = Mistral(api_key=settings.MISTRAL_API_KEY)
+client = get_mistral_client()
 
 
 def _extract_text(content) -> str:

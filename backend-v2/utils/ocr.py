@@ -1,14 +1,14 @@
 import os
 import json
 import logging
-from mistralai.client import Mistral
+from platform_core.adapters.resilient_mistral import get_mistral_client
 from config import settings
 from utils.file_handler import get_file_as_base64
 import docx
 import pypdf
 
 logger = logging.getLogger(__name__)
-client = Mistral(api_key=settings.MISTRAL_API_KEY)
+client = get_mistral_client()
 
 # Tables in page.markdown are rendered as markdown pipe tables (the API also
 # supports "html"). Markdown keeps the OCR text one consistent format for the

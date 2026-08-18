@@ -4,7 +4,7 @@ import logging
 import base64
 import re
 import fitz  # PyMuPDF
-from mistralai.client import Mistral
+from platform_core.adapters.resilient_mistral import get_mistral_client
 from config import settings
 from tools.extractor import get_template_fields, get_template_metadata
 from utils.file_handler import get_file_as_base64
@@ -218,7 +218,7 @@ def vllm_reextract_required_fields(
     content.append({"type": "text", "text": prompt})
 
     try:
-        client = Mistral(api_key=settings.MISTRAL_API_KEY)
+        client = get_mistral_client()
         logger.info(
             f"[Document {document_id}] Calling Mistral VLM (mistral-large-latest) "
             f"for vLLM fallback on {len(fallback_fields)} fields"

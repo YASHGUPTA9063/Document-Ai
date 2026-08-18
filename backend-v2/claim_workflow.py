@@ -115,9 +115,9 @@ async def generate_claim_suggestion_activity(claim_id: str, agent_results: dict)
             "suggestion": "..."
         }
     """
-    from mistralai.client import Mistral
+    from platform_core.adapters.resilient_mistral import get_mistral_client
 
-    client = Mistral(api_key=settings.MISTRAL_API_KEY)
+    client = get_mistral_client()
 
     if not settings.CLAIM_REPORT_AGENT_ID:
         logger.warning(f"[Claim {claim_id}] CLAIM_REPORT_AGENT_ID not set — generating fallback suggestion.")

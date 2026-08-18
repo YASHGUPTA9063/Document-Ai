@@ -3,7 +3,7 @@ import json
 import logging
 import base64
 import fitz  # PyMuPDF
-from mistralai.client import Mistral
+from platform_core.adapters.resilient_mistral import get_mistral_client
 from config import settings
 from utils.ocr import extract_with_ocr
 from utils.file_handler import get_file_as_base64
@@ -179,7 +179,7 @@ def _vlm_verify_fields(file_path: str, vlm_fields: list, ocr_raw_text: str) -> d
     content.append({"type": "text", "text": prompt})
 
     try:
-        client = Mistral(api_key=settings.MISTRAL_API_KEY)
+        client = get_mistral_client()
         logger.info(f"Calling Mistral VLM (mistral-large-latest) for {len(vlm_fields)} visual fields")
         response = client.chat.complete(
             model="mistral-large-latest",
@@ -310,7 +310,7 @@ def _chat_extract_fields(raw_markdown: str, fields_list: list, doc_type: str) ->
         f"--- DOCUMENT TEXT ---\n{raw_markdown}\n--- END ---"
     )
 
-    chat_client = Mistral(api_key=settings.MISTRAL_API_KEY)
+    chat_client = get_mistral_client()
     for attempt in range(3):
         try:
             resp = chat_client.chat.complete(

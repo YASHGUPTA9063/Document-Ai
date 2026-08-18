@@ -22,6 +22,16 @@ providers:
         api_key: "${MISTRAL_API_KEY}"
         model: "mistral-large-latest"
 
+    # Second-pass extraction for required template fields that came back
+    # missing or below the confidence threshold. Wraps tools/vllm_fallback.py.
+    # Runtime toggles (enabled, confidence_threshold, triggers) are read live
+    # from storage/vllm_settings.json via GET/PUT /settings/vllm — leave the
+    # params below unset to let the Settings UI stay authoritative.
+    vllm_fallback:
+      type: vllm_fallback
+      params:
+        model: "mistral-large-latest"
+
     # Uncomment to add additional LLM providers:
     # openai:
     #   type: openai
@@ -87,7 +97,9 @@ providers:
 fallback_chains:
   llm.default:        [mistral]
   llm.classifier:     [mistral]
-  llm.extractor:      [mistral]
+  # Primary extraction is the two-step chat pipeline on `mistral`; vllm_fallback
+  # is the second link, re-extracting required fields that came back weak.
+  llm.extractor:      [mistral, vllm_fallback]
   llm.validator:      [mistral]
   llm.reviewer:       [mistral]
   llm.fraud_checker:  [mistral]

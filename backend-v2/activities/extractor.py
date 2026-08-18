@@ -3,7 +3,7 @@ import json
 import logging
 import re
 import mistralai.workflows as workflows
-from mistralai.client import Mistral
+from platform_core.adapters.resilient_mistral import get_mistral_client
 from config import settings
 from utils.norm_config import build_normalization_rules_prompt
 import db.operations as db
@@ -15,7 +15,7 @@ from tools.extractor import (
 )
 
 logger = logging.getLogger(__name__)
-client = Mistral(api_key=settings.MISTRAL_API_KEY)
+client = get_mistral_client()
 
 
 def _extract_text(content) -> str:

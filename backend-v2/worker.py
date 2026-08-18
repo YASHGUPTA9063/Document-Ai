@@ -161,7 +161,7 @@ async def _run_mistral_document_pipeline(
     workflow created in Mistral Studio. This dispatches execution to
     Mistral's managed cloud, making it visible in the Studio dashboard.
     """
-    from mistralai.client import Mistral
+    from platform_core.adapters.resilient_mistral import get_mistral_client
 
     workflow_id = settings.MISTRAL_WORKFLOW_ID
     if not workflow_id:
@@ -170,7 +170,7 @@ async def _run_mistral_document_pipeline(
             "Copy the workflow ID from Mistral Studio and add it to .env"
         )
 
-    mistral_client = Mistral(api_key=settings.MISTRAL_API_KEY)
+    mistral_client = get_mistral_client()
 
     pipeline_config = platform_config.get("pipelines", {}).get("document_processing", {})
 

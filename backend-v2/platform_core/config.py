@@ -67,6 +67,20 @@ def _load_dotenv(env_path: str | None = None):
             if (value.startswith('"') and value.endswith('"')) or \
                (value.startswith("'") and value.endswith("'")):
                 value = value[1:-1]
+            else:
+                # Strip trailing inline comments from unquoted values, matching
+                # python-dotenv: a '#' only starts a comment when preceded by
+                # whitespace, so values that legitimately contain '#' (API keys,
+                # URL fragments) survive intact.
+                #
+                # Without this, a line like
+                #     ENABLE_PREPROCESSING=true   # turn on the step
+                # lands in os.environ verbatim and makes pydantic's Settings
+                # bool parsing fail for any module that imports `config` after
+                # load_config() has run.
+                comment = re.search(r"\s+#", value)
+                if comment:
+                    value = value[: comment.start()].rstrip()
             os.environ.setdefault(key, value)
 
     logger.info(f"[Config] Loaded .env from {env_path}")

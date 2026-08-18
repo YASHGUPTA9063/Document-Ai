@@ -1,215 +1,273 @@
 """
-Settings & Templates Routes (v1)
-================================
-Handles system settings, classification config, normalization config,
-and document template generation.
+Settings, Templates & Agents Router
+===================================
+Normalization / classification / vLLM settings, extraction template CRUD and
+AI-assisted template generation, plus the agent pipeline listing.
+
+Moved verbatim from branch-vm3's monolithic main.py. The vLLM settings
+endpoints are a branch-vm3 feature with no counterpart on `development`; they
+drive the vLLM fallback re-extraction pass
+(platform_core/providers/llm/vllm_fallback.py).
 """
 
+import json
 import logging
-from fastapi import APIRouter, HTTPException, File, UploadFile
-from typing import List
 
+from fastapi import APIRouter, UploadFile, File, HTTPException, Query
+
+from config import settings
+from utils.file_handler import save_file, delete_file
 from utils.norm_config import load_normalization_config, save_normalization_config
 from utils.classification_config import load_classification_config, save_classification_config
-from utils.file_handler import get_file_as_base64
-from config import settings
+from utils.templates import load_templates, save_templates_to_file
+from api.deps import get_mistral_client
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Settings & Templates"])
 
 
+# ─── Settings ────────────────────────────────────────────────────────────────
+
 @router.get("/settings/normalization")
 async def get_normalization_settings():
-    """Get the field normalization configuration."""
     return load_normalization_config()
 
 
 @router.put("/settings/normalization")
 async def update_normalization_settings(config: dict):
-    """Update the field normalization configuration."""
     save_normalization_config(config)
-    return {"message": "Normalization settings updated successfully"}
+    return {"success": True}
 
 
 @router.get("/settings/classification")
 async def get_classification_settings():
-    """Get the supported document types."""
     return load_classification_config()
 
 
 @router.put("/settings/classification")
 async def update_classification_settings(doc_types: list[str]):
-    """Update the supported document types."""
     save_classification_config(doc_types)
-    return {"message": "Classification settings updated successfully"}
+    return {"success": True}
 
+
+@router.get("/settings/vllm")
+async def get_vllm_settings():
+    from utils.vllm_settings import load_vllm_settings
+    return load_vllm_settings()
+
+
+@router.put("/settings/vllm")
+async def update_vllm_settings(config: dict):
+    from utils.vllm_settings import save_vllm_settings
+    save_vllm_settings(config)
+    return {"success": True}
+
+
+# ─── Templates ───────────────────────────────────────────────────────────────
 
 @router.get("/templates")
 async def get_templates():
-    """Get all extraction templates."""
-    from utils.templates import load_templates
     return load_templates()
 
 
 @router.put("/templates")
-async def save_templates_route(templates_data: dict):
-    """Save extraction templates."""
-    from utils.templates import save_templates_to_file
+async def save_templates(templates_data: dict):
     save_templates_to_file(templates_data)
-    return {"message": "Templates saved successfully"}
+    return {"success": True}
 
 
 @router.delete("/templates/{template_name}")
 async def delete_template(template_name: str):
-    """Delete an extraction template."""
-    from utils.templates import load_templates, save_templates_to_file
     templates = load_templates()
-    if template_name not in templates:
-        raise HTTPException(status_code=404, detail="Template not found")
-    del templates[template_name]
-    save_templates_to_file(templates)
-    return {"message": f"Template {template_name} deleted successfully"}
+    normalized_name = template_name.strip().lower().replace(" ", "_")
+    if normalized_name in templates:
+        del templates[normalized_name]
+        save_templates_to_file(templates)
+        return {"success": True}
+    else:
+        raise HTTPException(status_code=404, detail=f"Template '{template_name}' not found")
 
 
 @router.post("/templates/generate")
 async def generate_template_from_sample(
-    template_name: str,
-    is_kyc: bool = False,
-    kyc_boxes: str | None = None,
+    template_name: str = Query(...),
+    is_kyc: bool = Query(False),
+    use_vlm: bool = Query(False),
+    kyc_boxes: str = Query(None, description="JSON string of {signature: {x1,y1,x2,y2}, photo: {x1,y1,x2,y2}} percentages"),
     file: UploadFile = File(...)
 ):
-    """
-    Generate a template configuration by analyzing a sample document.
-    Uses the Vision/LLM provider to extract a schema.
-    """
-    import os
-    import tempfile
-    
-    ALLOWED_TYPES = {"application/pdf", "image/jpeg", "image/png", "image/webp"}
-    if file.content_type not in ALLOWED_TYPES:
-        raise HTTPException(status_code=400, detail="Unsupported file type")
-        
-    temp_path = ""
-    try:
-        suffix = os.path.splitext(file.filename)[1]
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
-            content = await file.read()
-            temp_file.write(content)
-            temp_path = temp_file.name
+    # Save the file temporarily
+    file_path, file_hash = await save_file(file, settings.STORAGE_DIR)
 
-        if file.content_type == "application/pdf":
-            import fitz
-            doc = fitz.open(temp_path)
-            page = doc.load_page(0)
-            pix = page.get_pixmap()
-            png_bytes = pix.tobytes("png")
-            import base64
-            base64_data = base64.b64encode(png_bytes).decode('utf-8')
-            mime_type = "image/png"
-        else:
-            base64_data = get_file_as_base64(temp_path)
-            mime_type = file.content_type
-        
-        # Use new ProviderRegistry
-        from platform_core.registry import ProviderRegistry
-        registry = ProviderRegistry.get()
-        llm = registry.get_llm_chain("template_generator")
-        
-        prompt = f"""
-        Analyze this sample document of type '{template_name}'.
-        Generate a comprehensive list of all fields that can be extracted from this type of document.
-        For each field, determine its logical name (snake_case) and data type (string, date, number, boolean, array).
-        Also provide a concise description for the AI to understand what this field represents.
-        
-        Return the result as a JSON array of objects with keys: name, type, description.
-        Only output the valid JSON array, without markdown formatting.
-        """
-        
-        # We need a vision model to analyze the image/PDF
-        vision = registry.get_vision_chain("template_generator")
-        
-        # If the vision provider supports data URLs:
-        data_url = f"data:{mime_type};base64,{base64_data}"
-        
-        response = await vision.call(
-            method="analyze",
-            images=[data_url],
-            prompt=prompt,
-            response_format={"type": "json_object"}
+    try:
+        from utils.ocr import extract_with_ocr
+        # Perform OCR
+        ocr_result = extract_with_ocr(file_path, "unknown")
+        raw_text = ocr_result.get("raw_text", "")
+
+        if not raw_text.strip():
+            raise HTTPException(status_code=400, detail="Could not extract text from the sample document.")
+
+        # Send OCR text to Mistral LLM to generate the fields schema
+        prompt = (
+            f"You are a document extraction expert. Analyze the following document text extracted from a sample "
+            f"'{template_name}' document. Identify the key structured fields that would be useful to extract "
+            f"from this type of document (e.g. names, dates, amounts, item tables, identifiers).\n\n"
+            f"Document Content:\n{raw_text}\n\n"
+            f"Generate a document extraction schema as a JSON list of field configurations. "
+            f"Each field in the list must be an object with the following fields:\n"
+            f"- 'key': Unique field identifier in snake_case (e.g., 'invoice_date', 'total_amount'). Must only contain lowercase letters, numbers, and underscores.\n"
+            f"- 'label': Human-readable label (e.g., 'Invoice Date', 'Total Amount').\n"
+            f"- 'type': Data type. Must be exactly one of: 'Text', 'Number', 'Date', 'Boolean', 'Array of Text', 'Array of Objects'.\n"
+            f"- 'required': Boolean indicating whether this field is essential and always expected in similar documents.\n"
+            f"- 'description': Short description explaining what this field is and how it should be identified.\n\n"
+            f"Output a valid JSON list of objects. Do not include any explanation or markdown formatting, just the raw JSON list."
         )
-        
-        import json
-        import re
-        
-        text = response.content
-        match = re.search(r'\[.*\]', text, re.DOTALL)
-        if match:
-            text = match.group(0)
-            
-        try:
-            fields_list = json.loads(text)
-        except json.JSONDecodeError:
-            if isinstance(text, dict):
-                fields_list = text.get("fields", [])
-            else:
-                fields_list = []
-                
-        # Format the result to match the expected template structure
-        generated_template = {
+
+        response = get_mistral_client().chat.complete(
+            model="mistral-large-latest",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            temperature=settings.LLM_TEMPERATURE,
+            max_tokens=settings.LLM_MAX_TOKENS
+        )
+
+        content = response.choices[0].message.content
+        logger.info(f"Generated schema for template '{template_name}': {content}")
+
+        # Parse generated fields
+        parsed = json.loads(content)
+        if isinstance(parsed, dict) and "fields" in parsed:
+            fields = parsed["fields"]
+        elif isinstance(parsed, dict):
+            # Try to find a list inside the dictionary
+            fields = None
+            for k, v in parsed.items():
+                if isinstance(v, list):
+                    fields = v
+                    break
+            if fields is None:
+                if all(isinstance(v, dict) and 'label' in v for v in parsed.values()):
+                    fields = []
+                    for k, v in parsed.items():
+                        fields.append({
+                            "key": k,
+                            "label": v.get("label", k),
+                            "type": v.get("type", "Text"),
+                            "required": v.get("required", False),
+                            "description": v.get("description", "")
+                        })
+                else:
+                    fields = list(parsed.values())
+        else:
+            fields = parsed
+
+        if not isinstance(fields, list):
+            raise ValueError("Invalid schema format generated by AI. Expected a list of fields.")
+
+        valid_types = {"Text", "Number", "Date", "Boolean", "Array of Text", "Array of Objects"}
+        validated_fields = []
+        for f in fields:
+            if not isinstance(f, dict) or "key" not in f or "label" not in f:
+                continue
+            key = str(f["key"]).strip().lower().replace(" ", "_")
+            key = "".join([c for c in key if c.isalnum() or c == "_"])
+            if not key:
+                continue
+            t = str(f.get("type", "Text")).strip()
+            if t not in valid_types:
+                t = "Text"
+            validated_fields.append({
+                "key": key,
+                "label": str(f["label"]).strip(),
+                "type": t,
+                "required": bool(f.get("required", False)),
+                "description": str(f.get("description", "")).strip()
+            })
+
+        if not validated_fields:
+            raise ValueError("No valid fields could be parsed from the generated schema.")
+
+        # If KYC, auto-append signature_image and photo_image fields
+        if is_kyc:
+            kyc_image_fields = [
+                {
+                    "key": "signature_image",
+                    "label": "Signature",
+                    "type": "Image",
+                    "required": False,
+                    "description": "Handwritten signature extracted from the KYC document."
+                },
+                {
+                    "key": "photo_image",
+                    "label": "Photo",
+                    "type": "Image",
+                    "required": False,
+                    "description": "Cardholder photograph extracted from the KYC document."
+                },
+                {
+                    "key": "signature_detected",
+                    "label": "Signature Detected",
+                    "type": "Boolean",
+                    "required": False,
+                    "description": "Whether a handwritten signature was found in the document."
+                },
+                {
+                    "key": "photo_detected",
+                    "label": "Photo Detected",
+                    "type": "Boolean",
+                    "required": False,
+                    "description": "Whether a cardholder photo was found in the document."
+                }
+            ]
+            # Remove any duplicates (in case AI already generated these)
+            existing_keys = {f["key"] for f in validated_fields}
+            for kf in kyc_image_fields:
+                if kf["key"] not in existing_keys:
+                    validated_fields.append(kf)
+
+        # Save to templates (new format with is_kyc metadata)
+        templates = load_templates()
+        normalized_name = template_name.strip().lower().replace(" ", "_")
+        template_entry = {
+            "fields": validated_fields,
             "is_kyc": is_kyc,
-            "fields": []
+            "use_vlm": use_vlm
         }
-        
+
+        # Parse and attach kyc_boxes if provided
         if kyc_boxes:
             try:
-                generated_template["kyc_boxes"] = json.loads(kyc_boxes)
-            except json.JSONDecodeError:
-                pass
-        
-        for field in fields_list:
-            if isinstance(field, dict) and "name" in field:
-                name = field["name"]
-                generated_template["fields"].append({
-                    "key": name,
-                    "label": name.replace("_", " ").title(),
-                    "type": field.get("type", "string"),
-                    "description": field.get("description", f"Extracted {name}"),
-                    "required": True
-                })
-                
-        from utils.templates import load_templates, save_templates_to_file
-        from tools.extractor import _normalize_template_key
+                parsed_boxes = json.loads(kyc_boxes)
+                if isinstance(parsed_boxes, dict):
+                    template_entry["kyc_boxes"] = parsed_boxes
+                    logger.info(f"Saved kyc_boxes for template '{normalized_name}': {parsed_boxes}")
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning(f"Failed to parse kyc_boxes: {e}")
 
-        # Store under the same normalized key the extractor looks templates up
-        # by, so a template named "Pan Card" is found for doc_type "pan_card".
-        normalized_name = _normalize_template_key(template_name)
-        templates = load_templates()
-        templates[normalized_name] = generated_template
+        templates[normalized_name] = template_entry
         save_templates_to_file(templates)
 
-        return {
-            "message": "Template generated successfully",
-            "template_name": normalized_name,
-            "template": generated_template
-        }
-        
+        return {"success": True, "template_name": normalized_name, "fields": validated_fields, "is_kyc": is_kyc}
     except Exception as e:
-        logger.error(f"Error generating template: {e}")
+        logger.error(f"Error generating template from sample: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        if temp_path and os.path.exists(temp_path):
-            os.remove(temp_path)
-
+        # Cleanup sample file
+        import os
+        if os.path.exists(file_path):
+            delete_file(file_path)
 
 
 # ─── Pipeline metadata enrichment ────────────────────────────────────────────
 # Maps each agent role to static info that Mistral's API doesn't store:
 # step index, icon, accent color, and the workflow tools it runs alongside.
+
 AGENT_PIPELINE_META = {
     "intake": {
         "step": 1,
-        "role": "Document intake and duplicate checking",
+        "role": "Document ingestion and duplicate checking",
         "emoji": "📥",
         "color": "rgba(6,192,219,0.15)",
         "border": "#06c0db",
@@ -217,7 +275,7 @@ AGENT_PIPELINE_META = {
     },
     "pre_validator": {
         "step": 2,
-        "role": "Document quality gate",
+        "role": "Document quality check",
         "emoji": "🛡️",
         "color": "rgba(6,182,212,0.15)",
         "border": "#06b6d4",
@@ -225,7 +283,7 @@ AGENT_PIPELINE_META = {
     },
     "preprocessing": {
         "step": 2.5,
-        "role": "Document image enhancement",
+        "role": "Document pre-processing",
         "emoji": "⚙️",
         "color": "rgba(16,185,129,0.15)",
         "border": "#10b981",
@@ -233,7 +291,7 @@ AGENT_PIPELINE_META = {
     },
     "classifier": {
         "step": 3,
-        "role": "Document type identification",
+        "role": "Document classification",
         "emoji": "🏷️",
         "color": "rgba(124,58,237,0.15)",
         "border": "#7c3aed",
@@ -241,23 +299,25 @@ AGENT_PIPELINE_META = {
     },
     "fraud_checker": {
         "step": 3.5,
-        "role": "KYC forensic fraud check",
+        "role": "KYC  fraud check",
         "emoji": "🛡️",
         "color": "rgba(225,29,72,0.15)",
         "border": "#e11d48",
         "pipeline_tools": ["run_identity_proofing"],
     },
+    # ── Extractor (step 4) ──────────────────
     "others_extractor": {
         "step": 4,
-        "role": "General document extraction",
+        "role": "Document extraction",
         "emoji": "📄",
         "color": "rgba(107,114,128,0.15)",
         "border": "#6b7280",
         "pipeline_tools": ["extract_text_from_document", "crop_kyc_images"],
     },
+    # ─────────────────────────────────────────────────────────────────────────
     "validator": {
         "step": 5,
-        "role": "Data quality assurance",
+        "role": "Document validation & quality assurance",
         "emoji": "✅",
         "color": "rgba(245,158,11,0.15)",
         "border": "#f59e0b",
@@ -321,7 +381,7 @@ AGENT_PIPELINE_META = {
     },
     "reviewer": {
         "step": 6,
-        "role": "Human-in-the-loop review",
+        "role": "Human review",
         "emoji": "👤",
         "color": "rgba(240,64,96,0.15)",
         "border": "#f04060",
@@ -329,7 +389,7 @@ AGENT_PIPELINE_META = {
     },
     "output": {
         "step": 7,
-        "role": "Result persistence and export",
+        "role": "Document output persistence and export",
         "emoji": "📤",
         "color": "rgba(79,110,247,0.15)",
         "border": "#4f6ef7",
@@ -337,19 +397,18 @@ AGENT_PIPELINE_META = {
     },
 }
 
+# Static agents that don't have Mistral agent IDs (they're pure workflow activities)
+STATIC_AGENTS = []
+
 
 @router.get("/agents")
 async def list_agents():
     """
     Returns the full agent pipeline — all live Mistral agents.
     Includes the pre-validator, preprocessing, classifier, fraud checker,
-    extractor, validator, auto-verifier, sub-verifiers, reviewer, and output agents.
+    all 6 type-specific extractors, validator, auto-verifier, sub-verifiers, reviewer, and output agents.
     Each agent is fetched from the Mistral API to get its real name, description, and model.
     """
-    from mistralai.client import Mistral
-
-    mistral_client = Mistral(api_key=settings.MISTRAL_API_KEY)
-
     agent_configs = [
         ("intake",                 settings.INTAKE_AGENT_ID),
         ("pre_validator",          settings.PRE_VALIDATOR_AGENT_ID),
@@ -369,16 +428,28 @@ async def list_agents():
         ("output",                 settings.OUTPUT_AGENT_ID),
     ]
 
+    name_mapping = {
+        "intake": "Ingestion Agent",
+        "pre_validator": "Quality Check Agent",
+        "preprocessing": "Pre Processing Agent",
+        "classifier": "Classification Agent",
+        "others_extractor": "Extraction Agent",
+        "validator": "Validation Agent",
+        "reviewer": "Human Review Agent",
+        "output": "Output Agent"
+    }
+
+    client = get_mistral_client()
     mistral_agents = []
     for key, agent_id in agent_configs:
         if not agent_id:
             continue
-        meta = AGENT_PIPELINE_META.get(key)
-        if not meta:
-            continue
+        meta = AGENT_PIPELINE_META[key]
+        display_name = " ".join(w.capitalize() for w in key.split("_"))
+        agent_default_name = name_mapping.get(key, display_name + " Agent")
         try:
-            agent_data = mistral_client.beta.agents.get(agent_id=agent_id)
-            # Extract tool names from agent_data.tools
+            agent_data = client.beta.agents.get(agent_id=agent_id)
+            # agent_data.tools is a list of tool objects; extract names safely
             tool_names = []
             if agent_data.tools:
                 for t in agent_data.tools:
@@ -388,10 +459,9 @@ async def list_agents():
                         tool_names.append(str(t.type))
                     else:
                         tool_names.append(str(t))
-            display_name = " ".join(w.capitalize() for w in key.split("_"))
             mistral_agents.append({
                 "key": key,
-                "name": agent_data.name or display_name + " Agent",
+                "name": agent_data.name or agent_default_name,
                 "step": meta["step"],
                 "role": meta["role"],
                 "description": agent_data.description or f"Mistral-hosted agent for {display_name.lower()} tasks.",
@@ -405,11 +475,10 @@ async def list_agents():
             })
         except Exception as e:
             logger.warning(f"Failed to fetch Mistral agent '{key}' ({agent_id}): {e}")
-            display_name = " ".join(w.capitalize() for w in key.split("_"))
             # Graceful fallback — still show the agent with static data
             mistral_agents.append({
                 "key": key,
-                "name": display_name + " Agent",
+                "name": agent_default_name,
                 "step": meta["step"],
                 "role": meta["role"],
                 "description": f"Mistral-hosted agent for {display_name.lower()} tasks. (Metadata fetch failed)",
@@ -422,5 +491,8 @@ async def list_agents():
                 "source": "mistral_fallback",
             })
 
-    mistral_agents.sort(key=lambda a: a["step"])
-    return mistral_agents
+    # Merge: static agents + mistral agents, sorted by pipeline step
+    all_agents = STATIC_AGENTS + mistral_agents
+
+    all_agents.sort(key=lambda a: a["step"])
+    return all_agents

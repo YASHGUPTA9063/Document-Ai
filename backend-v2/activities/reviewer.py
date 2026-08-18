@@ -1,13 +1,13 @@
 import json
 import logging
 import mistralai.workflows as workflows
-from mistralai.client import Mistral
+from platform_core.adapters.resilient_mistral import get_mistral_client
 from config import settings
 import db.operations as db
 from tools.reviewer import REVIEWER_TOOLS, get_review_context
 
 logger = logging.getLogger(__name__)
-client = Mistral(api_key=settings.MISTRAL_API_KEY)
+client = get_mistral_client()
 
 
 def _extract_text(content) -> str:

@@ -2,13 +2,13 @@ import os
 import json
 import logging
 import mistralai.workflows as workflows
-from mistralai.client import Mistral
+from platform_core.adapters.resilient_mistral import get_mistral_client
 from config import settings
 from utils.file_handler import get_file_as_base64
 import db.operations as db
 
 logger = logging.getLogger(__name__)
-client = Mistral(api_key=settings.MISTRAL_API_KEY)
+client = get_mistral_client()
 
 def _extract_text(content) -> str:
     if isinstance(content, str):

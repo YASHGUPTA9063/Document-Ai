@@ -30,7 +30,8 @@ from typing import Optional
 import cv2
 import numpy as np
 
-from mistralai.client import Mistral
+from mistralai.client import Mistral  # retained for type annotations only
+from platform_core.adapters.resilient_mistral import get_mistral_client
 
 from config import settings
 
@@ -291,7 +292,7 @@ async def run_face_verification_pipeline(
     """
     import tempfile
 
-    client = Mistral(api_key=settings.MISTRAL_API_KEY)
+    client = get_mistral_client()
 
     # ── Step 1: Preprocess images ──────────────────────────────
     logger.info("[FaceVerify] Preprocessing images...")

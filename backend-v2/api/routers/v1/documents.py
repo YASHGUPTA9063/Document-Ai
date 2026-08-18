@@ -1,124 +1,104 @@
 """
-Document Routes (v1)
-====================
-Handles document upload, status, extraction, retry, delete, and file serving.
-Split from the monolithic main.py for API versioning and maintainability.
+Documents Router
+================
+Document upload, status, retrieval, extracted-data editing, KYC crops,
+signature/photo verification, customer references, and cross-document
+validation.
+
+Every endpoint here was moved verbatim out of branch-vm3's monolithic
+main.py. Paths, query parameters, response models and response *shapes* are
+unchanged — the frontend calls these exact paths through nginx, which strips
+the `/api` prefix. The router therefore declares no prefix of its own; main.py
+mounts it twice (at the root and under /api/v1).
 """
 
 import os
-import asyncio
-import base64
+import json
+import re as _re
 import logging
 import mimetypes
-import shutil
 import tempfile
+import asyncio
 from typing import List
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, Query, Request
+from fastapi import APIRouter, UploadFile, File, HTTPException, Query
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
+from sqlalchemy import delete, desc as _desc
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
 from config import settings
 from db.database import AsyncSessionLocal
-from db.models import Document, ExtractedData
-from utils.file_handler import save_file
+from db.models import Document, ExtractedData, CustomerReference
+from utils.file_handler import save_file, delete_file
 from schemas.documents import (
     DocumentUploadResponse,
     WorkflowStatusResponse,
     UpdateExtractedDataRequest,
 )
+import db.claim_operations as claim_db
+from api.deps import ALLOWED_TYPES, get_mistral_client
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/documents", tags=["Documents"])
-
-ALLOWED_TYPES = {
-    "application/pdf",
-    "image/jpeg",
-    "image/png",
-    "image/webp",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-}
+router = APIRouter(tags=["Documents"])
 
 
 # ─── Upload ──────────────────────────────────────────────────────────────────
 
 @router.post("/upload", response_model=DocumentUploadResponse)
 async def upload_document(
-    request: Request,
     file: UploadFile = File(...),
-    customer_id: str = Query(None, description="Optional customer ID"),
-    claim_id: str = Query(None, description="Optional claim ID"),
-    doc_type: str = Query(None, description="Document type label for claim"),
+    customer_id: str = Query(None, description="Optional customer ID to associate with the document"),
+    claim_id: str = Query(None, description="Optional claim ID — links this document to a claim and triggers field sync after OCR"),
+    doc_type: str = Query(None, description="Document type label for claim (e.g. medical_report, claim_form)"),
 ):
-    """Upload a single document and start processing pipeline."""
     if file.content_type not in ALLOWED_TYPES:
         raise HTTPException(status_code=400, detail="Unsupported file type")
 
     file_path, file_hash = await save_file(file, settings.STORAGE_DIR)
 
     async with AsyncSessionLocal() as session:
+        # Create Document record
         doc = Document(
             filename=file.filename,
             file_path=file_path,
             file_hash=file_hash,
             status="pending",
-            customer_id=customer_id,
+            customer_id=customer_id
         )
         session.add(doc)
         await session.commit()
         await session.refresh(doc)
 
-        # The pipeline is keyed by document id, and the HITL resume endpoints
-        # address it by workflow_run_id — leaving this NULL made the UI post to
-        # /workflow/null/resume/...
-        doc.workflow_run_id = doc.id
-        await session.commit()
+        # Trigger Workflow asynchronously using mistralai SDK
+        # We start the workflow by its registered name
+        run_response = await get_mistral_client().workflows.execute_workflow_async(
+            workflow_identifier="document_processing_workflow",
+            input={
+                "document_id": doc.id,
+                "filename": doc.filename,
+                "file_path": doc.file_path
+            }
+        )
 
-        redis_pool = getattr(request.app.state, "redis_pool", None)
-        if redis_pool:
-            # Enqueue to arq background worker
-            await redis_pool.enqueue_job(
-                "run_document_pipeline",
-                document_id=doc.id,
-                filename=doc.filename,
-                file_path=doc.file_path,
-            )
-        else:
-            # Start pipeline
-            from platform_core.pipeline.definitions import build_document_pipeline
-            from platform_core.pipeline.engine import PipelineEngine
-            from platform_core.pipeline.checkpoint import CheckpointManager
-            from platform_core.config import load_config
-    
-            config = load_config()
-            pipeline = build_document_pipeline(config)
-            engine = PipelineEngine(checkpoint_mgr=CheckpointManager())
-    
-            # Run pipeline in background natively
-            asyncio.create_task(
-                engine.run(
-                    pipeline=pipeline,
-                    context={
-                        "document_id": doc.id,
-                        "filename": doc.filename,
-                        "file_path": doc.file_path,
-                    },
-                )
-            )
+        # run_response.execution_id contains the Mistral workflow execution ID
+        run_id = run_response.execution_id if hasattr(run_response, "execution_id") else "unknown_run_id"
+
+        doc.workflow_run_id = run_id
+        await session.commit()
 
         # If this upload is part of a claim, create the link
         if claim_id:
             try:
-                import db.claim_operations as claim_db
-
                 actual_doc_type = doc_type or "classification_pending"
                 await claim_db.link_document_to_claim(
                     claim_id=claim_id,
                     document_id=doc.id,
-                    doc_type=actual_doc_type,
+                    doc_type=actual_doc_type
                 )
+                logger.info(f"Document {doc.id} linked to claim {claim_id} as '{actual_doc_type}'")
             except Exception as link_err:
                 logger.warning(f"Failed to link document to claim: {link_err}")
 
@@ -126,18 +106,22 @@ async def upload_document(
             document_id=doc.id,
             filename=doc.filename,
             status=doc.status,
-            message="Upload successful, pipeline started.",
-            workflow_run_id=doc.id,  # Use document ID as pipeline reference
+            message="Upload successful, workflow started.",
+            workflow_run_id=run_id
         )
 
 
 @router.post("/upload/batch")
 async def upload_documents_batch(
-    request: Request,
     files: List[UploadFile] = File(...),
-    customer_id: str = Query(None, description="Optional customer ID"),
+    customer_id: str = Query(None, description="Optional customer ID to associate with all documents in batch")
 ):
-    """Batch upload — accepts multiple files in a single request."""
+    """
+    Batch upload endpoint — accepts multiple files in a single multipart request.
+    Each file gets its own DB record and Mistral workflow run.
+    All files are saved and workflow-triggered concurrently via asyncio.gather.
+    Returns per-file results plus a summary (total, succeeded, failed).
+    """
     if not files:
         raise HTTPException(status_code=400, detail="No files provided.")
 
@@ -145,127 +129,121 @@ async def upload_documents_batch(
     if len(files) > MAX_BATCH_SIZE:
         raise HTTPException(
             status_code=400,
-            detail=f"Batch too large. Maximum {MAX_BATCH_SIZE} files.",
+            detail=f"Batch too large. Maximum {MAX_BATCH_SIZE} files per request, got {len(files)}."
         )
 
+    # Validate all file types upfront — fail fast before any IO
     for file in files:
         if file.content_type not in ALLOWED_TYPES:
             raise HTTPException(
                 status_code=400,
-                detail=f"Unsupported file type for '{file.filename}': {file.content_type}",
+                detail=f"Unsupported file type for '{file.filename}': {file.content_type}"
             )
 
     async def _process_single(file: UploadFile) -> dict:
+        """Save one file, create a DB record, and kick off a Mistral workflow."""
         try:
             file_path, file_hash = await save_file(file, settings.STORAGE_DIR)
+
             async with AsyncSessionLocal() as session:
                 doc = Document(
                     filename=file.filename,
                     file_path=file_path,
                     file_hash=file_hash,
                     status="pending",
-                    customer_id=customer_id,
+                    customer_id=customer_id
                 )
                 session.add(doc)
                 await session.commit()
                 await session.refresh(doc)
 
-                doc.workflow_run_id = doc.id
-                await session.commit()
+                run_response = await get_mistral_client().workflows.execute_workflow_async(
+                    workflow_identifier="document_processing_workflow",
+                    input={
+                        "document_id": doc.id,
+                        "filename": doc.filename,
+                        "file_path": doc.file_path
+                    }
+                )
 
-                redis_pool = getattr(request.app.state, "redis_pool", None)
-                if redis_pool:
-                    await redis_pool.enqueue_job(
-                        "run_document_pipeline",
-                        document_id=doc.id,
-                        filename=doc.filename,
-                        file_path=doc.file_path,
-                    )
-                else:
-                    # Start pipeline in background natives
-                    from platform_core.pipeline.definitions import build_document_pipeline
-                    from platform_core.pipeline.engine import PipelineEngine
-                    from platform_core.pipeline.checkpoint import CheckpointManager
-                    from platform_core.config import load_config
-    
-                    config = load_config()
-                    pipeline = build_document_pipeline(config)
-                    engine = PipelineEngine(checkpoint_mgr=CheckpointManager())
-                    asyncio.create_task(
-                        engine.run(
-                            pipeline=pipeline,
-                            context={
-                                "document_id": doc.id,
-                                "filename": doc.filename,
-                                "file_path": doc.file_path,
-                            },
-                        )
-                    )
+                run_id = (
+                    run_response.execution_id
+                    if hasattr(run_response, "execution_id")
+                    else "unknown_run_id"
+                )
+                doc.workflow_run_id = run_id
+                await session.commit()
 
                 return {
                     "document_id": doc.id,
-                    "filename": file.filename,
-                    "status": doc.status,
-                    "success": True,
-                    "error": None,
+                    "filename":    file.filename,
+                    "status":      doc.status,
+                    "workflow_run_id": run_id,
+                    "success":     True,
+                    "error":       None,
                 }
+
         except Exception as e:
             logger.error(f"Batch upload failed for '{file.filename}': {e}")
             return {
-                "document_id": None,
-                "filename": file.filename,
-                "status": "error",
-                "success": False,
-                "error": str(e),
+                "document_id":    None,
+                "filename":       file.filename,
+                "status":         "error",
+                "workflow_run_id": None,
+                "success":        False,
+                "error":          str(e),
             }
 
+    # Run all file uploads concurrently
     results = list(await asyncio.gather(*[_process_single(f) for f in files]))
+
     succeeded = sum(1 for r in results if r["success"])
+    failed    = len(results) - succeeded
+
+    logger.info(
+        f"Batch upload done — {succeeded} succeeded, {failed} failed "
+        f"out of {len(files)} files."
+    )
 
     return {
-        "total": len(files),
+        "total":     len(files),
         "succeeded": succeeded,
-        "failed": len(results) - succeeded,
-        "results": results,
+        "failed":    failed,
+        "results":   results,
     }
 
 
-# ─── Status & Data ──────────────────────────────────────────────────────────
+# ─── Status & listing ────────────────────────────────────────────────────────
 
-@router.get("/{document_id}/status", response_model=WorkflowStatusResponse)
+@router.get("/status/{document_id}", response_model=WorkflowStatusResponse)
 async def get_status(document_id: str):
-    """Get current status and extracted data for a document."""
     async with AsyncSessionLocal() as session:
         result = await session.execute(
-            select(Document)
-            .options(selectinload(Document.extracted_data))
-            .where(Document.id == document_id)
+            select(Document).options(selectinload(Document.extracted_data)).where(Document.id == document_id)
         )
         doc = result.scalar_one_or_none()
-        if not doc or doc.status == "deleted":
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+        # Treat soft-deleted documents as gone (fix #4)
+        if doc.status == "deleted":
             raise HTTPException(status_code=404, detail="Document not found")
 
         return WorkflowStatusResponse(
             document_id=doc.id,
-            # Fall back to the document id for rows created before the column
-            # was populated — the resume endpoints are keyed by it either way.
-            workflow_run_id=doc.workflow_run_id or doc.id,
+            workflow_run_id=doc.workflow_run_id,
             status=doc.status,
             doc_type=doc.doc_type,
             confidence_score=doc.extracted_data.confidence_score if doc.extracted_data else None,
             extracted_data=doc.extracted_data.validated_data if doc.extracted_data else None,
-            message=doc.error_details.get("error", "") if doc.error_details else "",
+            message=doc.error_details.get("error", "") if doc.error_details else ""
         )
 
 
-@router.get("")
-async def list_documents(
-    page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
-):
-    """List all documents with pagination."""
+@router.get("/documents")
+async def list_documents(page: int = Query(1, ge=1), limit: int = Query(20, ge=1, le=100)):
     async with AsyncSessionLocal() as session:
         offset = (page - 1) * limit
+        # Exclude soft-deleted documents so they don't pollute the list (fix #4)
         result = await session.execute(
             select(Document)
             .where(Document.status != "deleted")
@@ -280,16 +258,17 @@ async def list_documents(
                 "filename": d.filename,
                 "status": d.status,
                 "doc_type": d.doc_type,
-                "workflow_run_id": d.workflow_run_id or d.id,
-                "message": d.error_details.get("error", "") if d.error_details else "",
+                "workflow_run_id": d.workflow_run_id,
+                "message": d.error_details.get("error", "") if d.error_details else ""
             }
             for d in docs
         ]
 
 
-@router.get("/{document_id}/extracted")
+# ─── Extracted data ──────────────────────────────────────────────────────────
+
+@router.get("/documents/{document_id}/extracted")
 async def get_extracted_data(document_id: str):
-    """Get extracted and validated data for a document."""
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(ExtractedData).where(ExtractedData.document_id == document_id)
@@ -310,9 +289,8 @@ async def get_extracted_data(document_id: str):
         }
 
 
-@router.put("/{document_id}/extracted")
+@router.put("/documents/{document_id}/extracted")
 async def update_extracted_data(document_id: str, payload: UpdateExtractedDataRequest):
-    """Update validated data with corrections."""
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(ExtractedData).where(ExtractedData.document_id == document_id)
@@ -321,36 +299,39 @@ async def update_extracted_data(document_id: str, payload: UpdateExtractedDataRe
         if not data:
             raise HTTPException(status_code=404, detail="Extracted data not found")
 
-        old_data = data.validated_data or {}
-        new_data = payload.validated_data
+        new_raw_fields = payload.raw_fields
 
+        # Patch raw_extracted.raw_fields in-place, preserving field_confidences etc.
+        raw_extracted = dict(data.raw_extracted) if data.raw_extracted else {}
+        old_raw_fields = raw_extracted.get("raw_fields", {})
+        raw_extracted["raw_fields"] = new_raw_fields
+
+        # Track reviewer corrections (delta vs previous raw_fields)
         corrections = dict(data.reviewer_corrections) if data.reviewer_corrections else {}
-        for k, v in new_data.items():
-            if str(old_data.get(k)) != str(v):
+        for k, v in new_raw_fields.items():
+            if str(old_raw_fields.get(k)) != str(v):
                 corrections[k] = v
 
-        data.validated_data = new_data
+        data.raw_extracted = raw_extracted
         data.reviewer_corrections = corrections
 
         from sqlalchemy.orm.attributes import flag_modified
-
-        flag_modified(data, "validated_data")
+        flag_modified(data, "raw_extracted")
         flag_modified(data, "reviewer_corrections")
 
         await session.commit()
         return {
             "success": True,
             "document_id": document_id,
-            "validated_data": data.validated_data,
+            "raw_extracted": data.raw_extracted,
             "reviewer_corrections": data.reviewer_corrections,
         }
 
 
-# ─── File Serving ────────────────────────────────────────────────────────────
+# ─── Files, OCR blocks & crops ───────────────────────────────────────────────
 
-@router.get("/{document_id}/file")
+@router.get("/documents/{document_id}/file")
 async def get_document_file(document_id: str):
-    """Serve the original document file."""
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(Document).where(Document.id == document_id)
@@ -360,29 +341,34 @@ async def get_document_file(document_id: str):
             raise HTTPException(status_code=404, detail="Document not found")
 
         if not doc.file_path or not os.path.exists(doc.file_path):
-            raise HTTPException(status_code=404, detail="File not found on disk")
+            raise HTTPException(status_code=404, detail="Document file not found on disk")
 
         mime_type, _ = mimetypes.guess_type(doc.file_path)
         if not mime_type:
             mime_type = "application/octet-stream"
 
+        # Use inline disposition so the browser renders PDFs/images directly
+        # instead of triggering a file download.
         headers = {
-            "Content-Disposition": f'inline; filename="{doc.filename}"',
+            "Content-Disposition": f"inline; filename=\"{doc.filename}\"",
             "Cache-Control": "no-cache",
         }
         return FileResponse(doc.file_path, media_type=mime_type, headers=headers)
 
 
-@router.get("/{document_id}/ocr-blocks")
+@router.get("/documents/{document_id}/ocr-blocks")
 async def get_ocr_blocks(document_id: str):
-    """Get OCR bounding blocks for citation highlighting."""
+    """
+    Return saved OCR bounding box blocks for field citation highlighting.
+    Only available for image documents (PNG/JPEG/WEBP) processed after this feature was added.
+    Returns { blocks: [...], available: false } gracefully for PDFs, DOCX, or older documents.
+    """
     blocks_path = os.path.join(
         settings.STORAGE_DIR, "ocr_blocks", f"{document_id}_blocks.json"
     )
     if not os.path.exists(blocks_path):
         return {"blocks": [], "available": False}
     try:
-        import json
         with open(blocks_path, "r") as f:
             blocks = json.load(f)
         return {"blocks": blocks, "available": True}
@@ -391,9 +377,65 @@ async def get_ocr_blocks(document_id: str):
         return {"blocks": [], "available": False}
 
 
-# ─── Manual Verification ─────────────────────────────────────────────────────
+@router.get("/documents/{document_id}/crops/{filename}")
+async def get_document_crop(document_id: str, filename: str):
+    """Serve cropped signature/photo images from storage/crops/{document_id}/."""
+    # Sanitize filename to prevent directory traversal
+    if not _re.match(r'^[a-zA-Z0-9_.-]+$', filename):
+        raise HTTPException(status_code=400, detail="Invalid filename")
 
-@router.post("/{document_id}/verify-signature")
+    crop_path = os.path.join(settings.STORAGE_DIR, "crops", document_id, filename)
+    if not os.path.exists(crop_path):
+        raise HTTPException(status_code=404, detail="Crop file not found")
+
+    return FileResponse(
+        crop_path,
+        media_type="image/png",
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Cache-Control": "public, max-age=3600",
+        }
+    )
+
+
+# ─── Deletion ────────────────────────────────────────────────────────────────
+
+@router.delete("/documents/{document_id}")
+async def delete_document(document_id: str):
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Document).where(Document.id == document_id))
+        doc = result.scalar_one_or_none()
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        doc.status = "deleted"
+
+        # 1. Delete associated ExtractedData record to clean up database space
+        await session.execute(
+            delete(ExtractedData).where(ExtractedData.document_id == document_id)
+        )
+
+        await session.commit()
+
+        # 2. Cancel running workflow run in Mistral cloud scheduler
+        if doc.workflow_run_id and doc.workflow_run_id != "unknown_run_id":
+            try:
+                await get_mistral_client().workflows.executions.cancel_workflow_execution_async(
+                    execution_id=doc.workflow_run_id
+                )
+                logger.info(f"Canceled workflow run {doc.workflow_run_id} for deleted document {document_id}")
+            except Exception as e:
+                logger.warning(f"Failed to cancel workflow run {doc.workflow_run_id} for deleted document {document_id}: {e}")
+
+        if doc.file_path:
+            delete_file(doc.file_path)
+
+        return {"success": True}
+
+
+# ─── Signature / photo verification ──────────────────────────────────────────
+
+@router.post("/documents/{document_id}/verify-signature")
 async def verify_signature(
     document_id: str,
     file: UploadFile = File(...),
@@ -403,7 +445,7 @@ async def verify_signature(
     Compare an extracted signature/photo against a user-uploaded reference image.
 
     Runs the full verification pipeline:
-      DINO embeddings (thread) ∥ Vision Agent (async) → Judge Agent → final verdict
+      DINO embeddings (thread) ∥ Mistral Vision Agent (async) → Judge Agent → final verdict
 
     The result is persisted on the ExtractedData row for future retrieval.
     """
@@ -424,21 +466,21 @@ async def verify_signature(
         if not data.validated_data or not data.validated_data.get(image_key):
             raise HTTPException(
                 status_code=400,
-                detail=(
-                    f"No {verification_type} image found in extracted data. "
-                    f"Ensure the document has been processed as a KYC document."
-                ),
+                detail=f"No {verification_type} image found in extracted data. Ensure the document has been processed as a KYC document."
             )
 
-        base64_data = data.validated_data[image_key]
+    base64_data = data.validated_data[image_key]
 
     # 2. Save both images to temp files
     tmp_dir = tempfile.mkdtemp(prefix="sig_verify_")
     try:
+        # Save extracted image (from base64)
+        import base64 as b64mod
         doc_img_path = os.path.join(tmp_dir, f"extracted_{verification_type}.png")
         with open(doc_img_path, "wb") as f:
-            f.write(base64.b64decode(base64_data))
+            f.write(b64mod.b64decode(base64_data))
 
+        # Save uploaded reference image
         ref_img_path = os.path.join(tmp_dir, f"reference_{verification_type}.png")
         ref_content = await file.read()
         with open(ref_img_path, "wb") as f:
@@ -448,12 +490,16 @@ async def verify_signature(
         if verification_type == "photo":
             from utils.face_verifier import run_face_verification_pipeline
             pipeline_result = await run_face_verification_pipeline(
-                doc_path=doc_img_path, ref_path=ref_img_path, debug_dir=None
+                doc_path=doc_img_path,
+                ref_path=ref_img_path,
+                debug_dir=None,
             )
         else:
             from utils.signature_verifier import run_verification_pipeline
             pipeline_result = await run_verification_pipeline(
-                doc_path=doc_img_path, ref_path=ref_img_path, debug_dir=None
+                doc_path=doc_img_path,
+                ref_path=ref_img_path,
+                debug_dir=None,
             )
 
         # 4. Persist result to database
@@ -480,75 +526,220 @@ async def verify_signature(
         logger.error(f"Signature verification failed for document {document_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Verification failed: {str(e)}")
     finally:
+        # Cleanup temp files
+        import shutil
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-# ─── Retry & Delete ─────────────────────────────────────────────────────────
+# ─── Customer reference records ──────────────────────────────────────────────
 
-@router.post("/{document_id}/retry")
-async def retry_document(request: Request, document_id: str):
-    """Retry a failed document processing pipeline."""
+class CustomerReferenceCreate(BaseModel):
+    customer_id: str
+    full_name: str | None = None
+    national_id: str | None = None
+    reference_signature: str | None = None  # Base64 encoded signature image
+    reference_photo: str | None = None      # Base64 encoded photo image
+
+
+@router.post("/customers/references")
+async def register_customer_reference(ref: CustomerReferenceCreate):
     async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Document).where(Document.id == document_id)
+        # Check if already exists
+        existing = await session.execute(
+            select(CustomerReference).where(CustomerReference.customer_id == ref.customer_id)
         )
-        doc = result.scalar_one_or_none()
-        if not doc:
-            raise HTTPException(status_code=404, detail="Document not found")
-
-        if doc.status not in ("failed", "rejected", "error"):
-            raise HTTPException(
-                status_code=409,
-                detail=f"Cannot retry document in '{doc.status}' state",
-            )
-
-        doc.status = "pending"
-        doc.error_details = None
-        await session.commit()
-
-        redis_pool = getattr(request.app.state, "redis_pool", None)
-        if redis_pool:
-            await redis_pool.enqueue_job(
-                "run_document_pipeline",
-                document_id=doc.id,
-                filename=doc.filename,
-                file_path=doc.file_path,
-            )
+        existing_ref = existing.scalar_one_or_none()
+        if existing_ref:
+            existing_ref.full_name = ref.full_name
+            existing_ref.national_id = ref.national_id
+            existing_ref.reference_signature = ref.reference_signature
+            existing_ref.reference_photo = ref.reference_photo
+            await session.commit()
+            return {"status": "updated", "customer_id": ref.customer_id}
         else:
-            # Re-run pipeline natively
-            from platform_core.pipeline.definitions import build_document_pipeline
-            from platform_core.pipeline.engine import PipelineEngine
-            from platform_core.pipeline.checkpoint import CheckpointManager
-            from platform_core.config import load_config
-    
-            config = load_config()
-            pipeline = build_document_pipeline(config)
-            engine = PipelineEngine(checkpoint_mgr=CheckpointManager())
-            asyncio.create_task(
-                engine.run(
-                    pipeline=pipeline,
-                    context={
-                        "document_id": doc.id,
-                        "filename": doc.filename,
-                        "file_path": doc.file_path,
-                    },
-                )
+            new_ref = CustomerReference(
+                customer_id=ref.customer_id,
+                full_name=ref.full_name,
+                national_id=ref.national_id,
+                reference_signature=ref.reference_signature,
+                reference_photo=ref.reference_photo
             )
+            session.add(new_ref)
+            await session.commit()
+            return {"status": "created", "customer_id": ref.customer_id}
 
-        return {"message": f"Document {document_id} queued for retry"}
+
+# ─── Cross-Document Validation ───────────────────────────────────────────────
+#
+# Name matching is EXACT token matching, not fuzzy: every token of the shorter
+# name must have an exact (or single-initial) counterpart in the longer name.
+# This replaced difflib-based fuzzy matching on branch-vm3 — typos are not
+# tolerated for official IDs. Do not reintroduce a similarity ratio here.
+
+_NAME_THRESHOLD = 0.85
 
 
-@router.delete("/{document_id}")
-async def delete_document(document_id: str):
-    """Soft-delete a document."""
+def _norm_name(s: str) -> str:
+    return _re.sub(r'[^a-z ]', '', (s or '').lower().strip())
+
+
+def _norm_dob(s: str) -> str:
+    return _re.sub(r'[^0-9]', '', s or '')
+
+
+def _fuzzy_name(a: str, b: str) -> dict:
+    na, nb = _norm_name(a), _norm_name(b)
+    if not na or not nb:
+        return {"result": "NOT_FOUND", "score": None, "threshold": 1.0}
+
+    words_a = na.split()
+    words_b = nb.split()
+
+    # Identify shorter and longer word lists
+    if len(words_a) <= len(words_b):
+        shorter, longer = words_a, words_b
+    else:
+        shorter, longer = words_b, words_a
+
+    if not shorter:
+        return {"result": "MISMATCH", "score": 0.0, "threshold": 1.0}
+
+    available_longer = list(longer)
+    matched_count = 0
+
+    for ws in shorter:
+        matched_idx = -1
+        for idx, wl in enumerate(available_longer):
+            if ws == wl:
+                matched_idx = idx
+                break
+            elif len(ws) == 1 and wl.startswith(ws):
+                matched_idx = idx
+                break
+            elif len(wl) == 1 and ws.startswith(wl):
+                matched_idx = idx
+                break
+
+        if matched_idx != -1:
+            matched_count += 1
+            available_longer.pop(matched_idx)
+
+    all_words_matched = (matched_count == len(shorter))
+
+    # Safeguard: if shorter name is 1 word and longer name has multiple, mismatch to prevent false positives
+    # ponytail: exact token subset verification for official IDs. Typos not allowed.
+    if len(shorter) == 1 and len(longer) > 1:
+        is_match = False
+    else:
+        is_match = all_words_matched
+
+    score = round(matched_count / len(shorter), 3)
+
+    return {
+        "result": "MATCH" if is_match else "MISMATCH",
+        "score": score,
+        "threshold": 1.0
+    }
+
+
+def _exact_dob(a: str, b: str) -> dict:
+    da, db = _norm_dob(a), _norm_dob(b)
+    if not da or not db:
+        return {"result": "NOT_FOUND"}
+    return {"result": "MATCH" if da == db else "MISMATCH"}
+
+
+@router.get("/cross-validate/latest")
+async def cross_validate_latest():
+    """
+    Cross-validates Name and DOB between the most recently completed
+    PAN Card and Aadhaar Card documents in the system.
+
+    No customer_id required — always picks the latest of each doc type.
+    Uses exact token matching for name, normalised exact match for DOB.
+    """
     async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Document).where(Document.id == document_id)
+        pan_result = await session.execute(
+            select(Document)
+            .options(selectinload(Document.extracted_data))
+            .where(Document.doc_type == "pan_card")
+            .where(Document.status == "completed")
+            .order_by(_desc(Document.updated_at))
+            .limit(1)
         )
-        doc = result.scalar_one_or_none()
-        if not doc:
-            raise HTTPException(status_code=404, detail="Document not found")
+        pan_doc = pan_result.scalar_one_or_none()
 
-        doc.status = "deleted"
-        await session.commit()
-        return {"message": f"Document {document_id} deleted"}
+        aad_result = await session.execute(
+            select(Document)
+            .options(selectinload(Document.extracted_data))
+            .where(Document.doc_type == "aadhar_card")
+            .where(Document.status == "completed")
+            .order_by(_desc(Document.updated_at))
+            .limit(1)
+        )
+        aadhaar_doc = aad_result.scalar_one_or_none()
+
+    missing = []
+    if not pan_doc:
+        missing.append("pan_card")
+    if not aadhaar_doc:
+        missing.append("aadhar_card")
+
+    if missing:
+        return {
+            "overall": "INCOMPLETE",
+            "missing": missing,
+            "pan": None,
+            "aadhaar": None,
+            "checks": None,
+        }
+
+    pan_data = (pan_doc.extracted_data.validated_data or {}) if pan_doc.extracted_data else {}
+    aad_data = (aadhaar_doc.extracted_data.validated_data or {}) if aadhaar_doc.extracted_data else {}
+
+    pan_name = (
+        pan_data.get("full_name") or
+        pan_data.get("full_name_english") or
+        pan_data.get("name") or
+        ""
+    )
+    pan_dob  = pan_data.get("date_of_birth", "")
+    aad_name = (
+        aad_data.get("full_name_english") or
+        aad_data.get("full_name") or
+        aad_data.get("name") or
+        ""
+    )
+    aad_dob  = aad_data.get("date_of_birth", "")
+
+    name_check = _fuzzy_name(pan_name, aad_name)
+    dob_check  = _exact_dob(pan_dob, aad_dob)
+
+    overall = (
+        "PASS"
+        if name_check["result"] == "MATCH" and dob_check["result"] == "MATCH"
+        else "FAIL"
+    )
+
+    return {
+        "overall": overall,
+        "missing": [],
+        "pan": {
+            "document_id": pan_doc.id,
+            "filename": pan_doc.filename,
+            "name": pan_name,
+            "dob": pan_dob,
+            "uploaded_at": pan_doc.updated_at.isoformat() if pan_doc.updated_at else None,
+        },
+        "aadhaar": {
+            "document_id": aadhaar_doc.id,
+            "filename": aadhaar_doc.filename,
+            "name": aad_name,
+            "dob": aad_dob,
+            "uploaded_at": aadhaar_doc.updated_at.isoformat() if aadhaar_doc.updated_at else None,
+        },
+        "checks": {
+            "name": name_check,
+            "dob":  dob_check,
+        },
+    }

@@ -33,7 +33,8 @@ from skimage.filters import threshold_sauvola
 from torchvision import transforms
 import torch
 from transformers import AutoModel
-from mistralai.client import Mistral
+from mistralai.client import Mistral  # retained for type annotations only
+from platform_core.adapters.resilient_mistral import get_mistral_client
 
 from config import settings
 
@@ -324,7 +325,7 @@ async def run_verification_pipeline(doc_path: str, ref_path: str, debug_dir: str
             "verdict": "genuine"|"forged"|"uncertain"
         }
     """
-    client = Mistral(api_key=settings.MISTRAL_API_KEY)
+    client = get_mistral_client()
 
     # -- Run DINO in a thread (it's CPU-bound / synchronous) ----------------
     loop = asyncio.get_running_loop()
