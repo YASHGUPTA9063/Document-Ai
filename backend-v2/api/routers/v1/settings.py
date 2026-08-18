@@ -20,9 +20,13 @@ from utils.file_handler import save_file, delete_file
 from utils.norm_config import load_normalization_config, save_normalization_config
 from utils.classification_config import load_classification_config, save_classification_config
 from utils.templates import load_templates, save_templates_to_file
+from platform_core.prompts.manager import PromptManager
 from api.deps import get_mistral_client
 
 logger = logging.getLogger(__name__)
+
+# Managed prompt template — see platform_core/prompts/template_generator.md
+PROMPTS = PromptManager()
 
 router = APIRouter(tags=["Settings & Templates"])
 
@@ -110,19 +114,8 @@ async def generate_template_from_sample(
             raise HTTPException(status_code=400, detail="Could not extract text from the sample document.")
 
         # Send OCR text to Mistral LLM to generate the fields schema
-        prompt = (
-            f"You are a document extraction expert. Analyze the following document text extracted from a sample "
-            f"'{template_name}' document. Identify the key structured fields that would be useful to extract "
-            f"from this type of document (e.g. names, dates, amounts, item tables, identifiers).\n\n"
-            f"Document Content:\n{raw_text}\n\n"
-            f"Generate a document extraction schema as a JSON list of field configurations. "
-            f"Each field in the list must be an object with the following fields:\n"
-            f"- 'key': Unique field identifier in snake_case (e.g., 'invoice_date', 'total_amount'). Must only contain lowercase letters, numbers, and underscores.\n"
-            f"- 'label': Human-readable label (e.g., 'Invoice Date', 'Total Amount').\n"
-            f"- 'type': Data type. Must be exactly one of: 'Text', 'Number', 'Date', 'Boolean', 'Array of Text', 'Array of Objects'.\n"
-            f"- 'required': Boolean indicating whether this field is essential and always expected in similar documents.\n"
-            f"- 'description': Short description explaining what this field is and how it should be identified.\n\n"
-            f"Output a valid JSON list of objects. Do not include any explanation or markdown formatting, just the raw JSON list."
+        prompt = PROMPTS.render(
+            "template_generator", template_name=template_name, raw_text=raw_text
         )
 
         response = get_mistral_client().chat.complete(

@@ -1,3 +1,13 @@
+# Document-AI — full-stack single-host deployment.
+#
+# Document and claim processing run on the Mistral Workflows SDK inside the
+# backend container, so `docker compose up` needs only backend + frontend.
+# Redis and the arq worker exist for the platform_core pipeline/queue path and
+# are opt-in via the `queue` profile:
+#
+#   docker compose up -d                      # backend + frontend (default)
+#   docker compose --profile queue up -d      # + redis + arq worker
+
 services:
   backend:
     build:
@@ -8,11 +18,17 @@ services:
     environment:
       DATABASE_URL: sqlite+aiosqlite:////app/data/doc_workflow.db
       STORAGE_DIR: /app/storage
+      # Only consumed by api/queue.py and worker.py. Harmless when Redis is
+      # not running: main.py never opens a connection on the default path.
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     ports:
       - "8000:8000"
     volumes:
       - backend_storage:/app/storage
       - backend_db:/app/data
+      # Platform config is bind-mounted so provider/resilience settings can be
+      # tuned without rebuilding the image.
+      - ./backend-v2/config:/app/config:ro
       # Uncomment if GOOGLE_APPLICATION_CREDENTIALS is set in backend-v2/.env,
       # and drop your service-account key at backend-v2/gcp-key.json:
       # - ./backend-v2/gcp-key.json:/app/gcp-key.json:ro
@@ -23,6 +39,42 @@ services:
       timeout: 10s
       start_period: 180s
       retries: 5
+
+  # ─── Optional: Redis + arq worker (platform_core queue path) ─────────────
+  redis:
+    image: redis:7-alpine
+    profiles: ["queue"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ./backend-v2
+      dockerfile: Dockerfile
+    profiles: ["queue"]
+    command: ["arq", "worker.WorkerSettings"]
+    env_file:
+      - ./backend-v2/.env
+    environment:
+      DATABASE_URL: sqlite+aiosqlite:////app/data/doc_workflow.db
+      STORAGE_DIR: /app/storage
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    volumes:
+      - backend_storage:/app/storage
+      - backend_db:/app/data
+      - ./backend-v2/config:/app/config:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
 
   frontend:
     build:
@@ -41,3 +93,4 @@ services:
 volumes:
   backend_storage:
   backend_db:
+  redis_data:

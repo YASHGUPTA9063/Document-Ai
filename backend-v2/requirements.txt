@@ -106,3 +106,24 @@ watchfiles==1.2.0
 websockets==16.0
 wrapt==1.17.3
 zipp==4.1.0
+
+# ─── Platform core additions (adopted from the `development` architecture) ───
+# Alembic drives migrations/ (the SQLAlchemy models still self-create on
+# startup via init_db(), so this is only needed for versioned schema changes).
+alembic==1.14.0
+
+# Redis-backed job queue used by api/queue.py and worker.py. The live
+# processing path is the Mistral Workflows SDK, so these are only required if
+# you run the arq worker (`arq worker.WorkerSettings`).
+arq==0.26.3
+redis==5.2.1
+
+# Prometheus metrics exposed by observability.py and the pipeline engine.
+prometheus-client==0.21.1
+
+# Postgres drivers — only needed if DATABASE_URL is switched away from SQLite.
+# asyncpg==0.30.0
+# psycopg2-binary==2.9.10
+
+# Load testing (tests/load/locustfile.py) — install separately in CI if needed.
+# locust==2.32.4

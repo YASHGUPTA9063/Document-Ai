@@ -133,6 +133,70 @@ def load_config(
     return config
 
 
+def load_agent_configs() -> list[dict]:
+    """
+    Return the Mistral Studio agent catalogue from root-level agents_config.py.
+
+    `agents_config.py` is the source of truth for every agent's name,
+    description, instructions and model, and is what create_or_update_agents.py
+    provisions from. It deliberately imports nothing from config.py — it is
+    loaded before the Agent IDs it defines exist in .env — so this accessor
+    reaches into it rather than the other way round, keeping that one-way
+    dependency intact.
+
+    Returns an empty list if the module is unavailable, so platform config
+    loading never hard-depends on it.
+    """
+    try:
+        import agents_config
+
+        return list(getattr(agents_config, "AGENT_CONFIGS", []))
+    except Exception as e:
+        logger.warning(f"[Config] Could not load agents_config.py: {e}")
+        return []
+
+
+def load_config_with_agents(
+    config_path: str | None = None,
+    env_path: str | None = None,
+) -> dict:
+    """
+    `load_config()` plus an `agents` section built from agents_config.py.
+
+    The merged dict gains:
+        agents:
+          all:       [ ...every agent definition... ]
+          by_env_var: { CLASSIFIER_AGENT_ID: {...}, ... }
+          claim:     [ ... ]   # CLAIM_* agents
+          face:      [ ... ]   # FACE_*  agents
+          signature: [ ... ]   # SIGNATURE_* agents
+
+    An explicit `agents` block already present in platform.yaml wins, so the
+    YAML stays authoritative if someone overrides it there.
+    """
+    config = load_config(config_path=config_path, env_path=env_path)
+
+    if "agents" in config:
+        return config
+
+    agents = load_agent_configs()
+    if not agents:
+        return config
+
+    def _group(prefix: str) -> list[dict]:
+        return [a for a in agents if str(a.get("env_var", "")).startswith(prefix)]
+
+    config["agents"] = {
+        "all": agents,
+        "by_env_var": {a["env_var"]: a for a in agents if a.get("env_var")},
+        "claim": _group("CLAIM_"),
+        "face": _group("FACE_"),
+        "signature": _group("SIGNATURE_"),
+    }
+    logger.info(f"[Config] Merged {len(agents)} agent definitions from agents_config.py")
+    return config
+
+
 def get_config_value(config: dict, path: str, default: Any = None) -> Any:
     """
     Get a nested config value using dot notation.

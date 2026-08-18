@@ -1,0 +1,1 @@
+Extract structured data: document_title, document_date, summary, and copy the full OCR text into the full_ocr_text field.

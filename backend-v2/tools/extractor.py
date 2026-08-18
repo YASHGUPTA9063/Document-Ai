@@ -4,11 +4,16 @@ import logging
 import base64
 import fitz  # PyMuPDF
 from platform_core.adapters.resilient_mistral import get_mistral_client
+from platform_core.prompts.manager import PromptManager
 from config import settings
 from utils.ocr import extract_with_ocr
 from utils.file_handler import get_file_as_base64
 
 logger = logging.getLogger(__name__)
+
+# Extraction prompts live as managed templates in platform_core/prompts/*.md
+# rather than inline here, so they can be tuned without a code change.
+PROMPTS = PromptManager()
 
 # ─── TOOL SCHEMAS ───
 EXTRACTOR_TOOLS = [
@@ -153,22 +158,7 @@ def _vlm_verify_fields(file_path: str, vlm_fields: list, ocr_raw_text: str) -> d
 
     fields_text = "\n".join(field_instructions)
 
-    prompt = (
-        f"You are a visual document inspection expert.\n\n"
-        f"INSTRUCTIONS:\n"
-        f"1. Carefully inspect the provided document IMAGE(S).\n"
-        f"2. For each field listed below, locate the relevant section on the document and examine the checkboxes, tick marks (✓, ✗), radio buttons, or filled boxes visually.\n"
-        f"3. STRIKETHROUGH / CROSSED-OUT vs ACTIVE SELECTION RULES:\n"
-        f"   - STRIKETHROUGH / CROSSED OUT: Look closely for any horizontal or diagonal line drawn through an option word, text, or its checkbox. A line crossing through an option means it has been DE-SELECTED or CANCELLED. Do NOT extract struck-through options.\n"
-        f"   - ACTIVE TICK MARK: Look for a checkmark (✓), tick mark, cross (✗), or filled box. The option that has a checkmark and is NOT struck through is the ACTIVE SELECTED option.\n"
-        f"   - MULTIPLE OPTIONS IN A ROW: When multiple choices appear horizontally or vertically, carefully distinguish options that are struck through vs options that have a checkmark/tick.\n\n"
-        f"Fields to visually inspect:\n{fields_text}\n\n"
-        f"Return ONLY a valid JSON object mapping each field key to an object containing 'value' and 'confidence' (0.0 to 1.0).\n"
-        f"Example output format:\n"
-        f"{{\n"
-        f'  "payment_method": {{"value": "Debit/Credit Card", "confidence": 0.99}}\n'
-        f"}}\n"
-    )
+    prompt = PROMPTS.render("extractor_vlm_fields", fields_text=fields_text)
 
     content = []
     for b64 in page_images_b64:
@@ -270,7 +260,7 @@ def build_json_schema_from_fields(fields_list: list) -> dict:
 
 def build_ocr_prompt_from_fields(fields_list: list) -> str:
     if not fields_list:
-        return "Extract structured data: document_title, document_date, summary, and copy the full OCR text into the full_ocr_text field."
+        return PROMPTS.get("extractor_two_step_fields_empty")
 
     desc_lines = []
     for f in fields_list:
@@ -278,12 +268,8 @@ def build_ocr_prompt_from_fields(fields_list: list) -> str:
         desc_lines.append(f"- '{f['key']}' ({f.get('type', 'Text')}, {req_str}): {f.get('description', '')}")
 
     fields_instruction = "\n".join(desc_lines)
-    return (
-        f"Extract key fields from the document following this schema:\n{fields_instruction}\n\n"
-        f"Rules:\n"
-        f"- Return the exact text as written in the document without normalization or cleaning.\n"
-        f"- For every field, return a value even if not found — use empty string for required fields, null for optional fields.\n"
-        f"- Never omit a field from the output."
+    return PROMPTS.render(
+        "extractor_two_step_fields", fields_instruction=fields_instruction
     )
 
 
@@ -297,13 +283,7 @@ def _chat_extract_fields(raw_markdown: str, fields_list: list, doc_type: str) ->
     schema = build_json_schema_from_fields(fields_list)
     prompt = build_ocr_prompt_from_fields(fields_list)
 
-    system = (
-        "You are a document data extraction specialist. "
-        "Extract fields exactly as written in the document. "
-        "If a required field is not present, return empty string. "
-        "If an optional field is not present, return null. "
-        "Never omit a field."
-    )
+    system = PROMPTS.get("extractor_two_step_system")
     user_msg = (
         f"Document type: {doc_type}\n\n"
         f"{prompt}\n\n"

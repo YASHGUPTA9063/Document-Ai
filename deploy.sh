@@ -35,8 +35,33 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 # 1. Build and start containers
+#
+# Set WITH_QUEUE=1 to also bring up Redis and the arq worker (the
+# platform_core queue path). The default stack runs document and claim
+# processing on the Mistral Workflows SDK inside the backend container and
+# needs neither.
+COMPOSE_PROFILES_ARG=""
+if [ "${WITH_QUEUE:-0}" = "1" ]; then
+  COMPOSE_PROFILES_ARG="--profile queue"
+  echo "▶ Queue profile enabled — Redis and the arq worker will start too."
+fi
+
 echo "▶ Building and starting containers..."
-$DOCKER compose up --build -d
+$DOCKER compose $COMPOSE_PROFILES_ARG up --build -d
+
+# 2. Database migrations (Alembic).
+#
+# The SQLAlchemy models still self-create on startup via init_db(), so this is
+# a no-op on a fresh volume and only matters for versioned schema changes.
+# Non-fatal: a migration failure must not block an otherwise healthy deploy.
+echo ""
+echo "▶ Applying database migrations..."
+if $DOCKER compose exec -T backend alembic upgrade head; then
+  echo "   ✅ migrations applied"
+else
+  echo "   ⚠️  alembic upgrade failed or was skipped — tables are still created"
+  echo "      automatically by init_db(); check: $DOCKER compose logs backend"
+fi
 
 echo ""
 echo "▶ Waiting for services to become healthy..."
@@ -72,6 +97,8 @@ echo ""
 echo "  Frontend:     http://${PUBLIC_IP}:5173"
 echo "  Backend API:  http://${PUBLIC_IP}:8000"
 echo "  API Docs:     http://${PUBLIC_IP}:8000/docs"
+echo "  Health:       http://${PUBLIC_IP}:8000/health"
+echo "  Versioned API: http://${PUBLIC_IP}:8000/api/v1"
 echo ""
 echo "  Logs:  $DOCKER compose logs -f"
 echo "  Stop:  $DOCKER compose down"

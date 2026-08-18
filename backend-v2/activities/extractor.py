@@ -18,6 +18,68 @@ logger = logging.getLogger(__name__)
 client = get_mistral_client()
 
 
+async def _run_vllm_fallback(
+    file_path: str,
+    doc_type: str,
+    document_id: str,
+    normalized_extracted: dict,
+    field_confidences: dict,
+) -> dict:
+    """
+    Run the vLLM fallback re-extraction pass via the registered provider.
+
+    Disabled by default. On branch-vm3 this call site was commented out, so
+    the shipped behaviour is "no fallback pass"; that behaviour is preserved
+    here behind an explicit config gate rather than behind commented-out code,
+    which kept the feature from being reachable at all.
+
+    To turn it on, set in config/platform.yaml:
+
+        pipelines:
+          document_processing:
+            enable_vllm_fallback: true
+
+    Once enabled, the per-field threshold and triggers come from
+    storage/vllm_settings.json — i.e. the Settings UI / GET|PUT /settings/vllm.
+
+    Always non-fatal: any failure returns {} and leaves extraction untouched.
+    """
+    try:
+        from platform_core.config import load_config
+
+        pipeline_cfg = (
+            load_config().get("pipelines", {}).get("document_processing", {})
+        )
+        if not pipeline_cfg.get("enable_vllm_fallback", False):
+            logger.info(
+                f"[Document {document_id}] vLLM fallback disabled "
+                f"(pipelines.document_processing.enable_vllm_fallback=false)"
+            )
+            return {}
+
+        from platform_core.registry import ProviderRegistry
+
+        provider = ProviderRegistry.get().get_llm("vllm_fallback")
+        results = await provider.reextract_fields(
+            file_path=file_path,
+            doc_type=doc_type,
+            document_id=document_id,
+            normalized_extracted=normalized_extracted,
+            field_confidences=field_confidences,
+        )
+        if results:
+            logger.info(
+                f"[Document {document_id}] vLLM fallback produced results for "
+                f"{len(results)} fields: {list(results.keys())}"
+            )
+        return results
+    except Exception as e:
+        logger.warning(
+            f"[Document {document_id}] vLLM fallback step failed (non-fatal): {e}"
+        )
+        return {}
+
+
 def _extract_text(content) -> str:
     if isinstance(content, str):
         return content
@@ -285,41 +347,18 @@ async def extractor_activity(document_id: str, file_path: str, doc_type: str) ->
                 for k in extra_keys:
                     f_dict.pop(k, None)
 
-        # ─── vLLM Fallback: COMMENTED OUT — retaining old extraction-only logic ───
-        vllm_fallback_results = {}
-        # try:
-        #     from utils.vllm_settings import load_vllm_settings
-        #     from tools.vllm_fallback import vllm_reextract_required_fields
-        #
-        #     vllm_settings = load_vllm_settings()
-        #     if vllm_settings.get("enabled", False):
-        #         vllm_threshold = vllm_settings.get("confidence_threshold", 75)
-        #         vllm_trigger_missing = vllm_settings.get("trigger_on_missing", True)
-        #         vllm_trigger_low_conf = vllm_settings.get("trigger_on_low_confidence", True)
-        #         logger.info(
-        #             f"[Document {document_id}] vLLM fallback enabled (threshold: {vllm_threshold}%, "
-        #             f"trigger_on_missing: {vllm_trigger_missing}, trigger_on_low_confidence: {vllm_trigger_low_conf}). "
-        #             f"Checking required fields..."
-        #         )
-        #         vllm_fallback_results = vllm_reextract_required_fields(
-        #             file_path=file_path,
-        #             doc_type=doc_type,
-        #             document_id=document_id,
-        #             normalized_extracted=normalized_extracted,
-        #             field_confidences=field_confidences,
-        #             threshold=vllm_threshold,
-        #             trigger_on_missing=vllm_trigger_missing,
-        #             trigger_on_low_confidence=vllm_trigger_low_conf
-        #         )
-        #         if vllm_fallback_results:
-        #             logger.info(
-        #                 f"[Document {document_id}] vLLM fallback produced results for "
-        #                 f"{len(vllm_fallback_results)} fields: {list(vllm_fallback_results.keys())}"
-        #             )
-        #     else:
-        #         logger.info(f"[Document {document_id}] vLLM fallback is disabled in settings")
-        # except Exception as e:
-        #     logger.warning(f"[Document {document_id}] vLLM fallback step failed (non-fatal): {e}")
+        # ─── vLLM fallback re-extraction ─────────────────────────────────
+        # Second pass over required fields that came back missing or below the
+        # confidence threshold. Routed through the registry-managed provider
+        # (platform_core/providers/llm/vllm_fallback.py), which wraps
+        # tools/vllm_fallback.py without altering its logic.
+        vllm_fallback_results = await _run_vllm_fallback(
+            file_path=file_path,
+            doc_type=doc_type,
+            document_id=document_id,
+            normalized_extracted=normalized_extracted,
+            field_confidences=field_confidences,
+        )
 
         logger.info(f"[Document {document_id}] Normalized fields from extractor: {normalized_extracted}")
         return {

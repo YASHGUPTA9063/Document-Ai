@@ -62,6 +62,20 @@ class PromptManager:
             logger.info(f"[PromptManager] Loaded prompt: {agent_name} ({len(self._cache[agent_name])} chars)")
         return self._cache[agent_name]
 
+    def render(self, agent_name: str, **params) -> str:
+        """
+        Load a prompt and substitute ``${placeholder}`` variables into it.
+
+        Uses string.Template rather than str.format because these prompts are
+        full of literal JSON braces (``{"value": ...}``) that str.format would
+        try to interpret. `safe_substitute` also leaves any unrecognised ``$``
+        untouched instead of raising, so prompt text can contain currency
+        symbols without special handling.
+        """
+        from string import Template
+
+        return Template(self.get(agent_name)).safe_substitute(**params)
+
     def get_or_default(self, agent_name: str, default: str = "") -> str:
         """Load a prompt, returning `default` if the file doesn't exist."""
         try:

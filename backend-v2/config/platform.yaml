@@ -138,6 +138,13 @@ pipelines:
     enable_pre_validation: true
     enable_preprocessing: false
     enable_fraud_check: true
+    # Second-pass re-extraction of required fields that came back missing or
+    # low-confidence, via the `vllm_fallback` provider. Defaults to false to
+    # match branch-vm3's shipped behaviour, where this step was commented out
+    # in activities/extractor.py. Turning it on adds one vision call per
+    # document that has weak required fields; the threshold and triggers are
+    # then read from storage/vllm_settings.json (Settings UI).
+    enable_vllm_fallback: false
     review_confidence_threshold: 0.80
     step_timeout_seconds: 300
     max_file_size_mb: 50
