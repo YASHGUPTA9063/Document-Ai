@@ -9,6 +9,14 @@ class Settings(BaseSettings):
     APP_PORT: int = Field(8000, description="FastAPI port")
     DEBUG: bool = Field(True, description="Enable debug mode")
 
+    # Optional: platform_core queue path (worker.py + api/queue.py). Neither is
+    # used by the default deployment, where document and claim processing run
+    # on the Mistral Workflows SDK inside the app process. Declared with empty
+    # defaults so worker.py can report a clear "not set" error instead of
+    # dying with AttributeError.
+    MISTRAL_WORKFLOW_ID: str = Field(default="", description="Workflow ID from Mistral Studio — only needed by the arq worker")
+    REDIS_URL: str = Field(default="redis://localhost:6379/0", description="Redis URL — only needed by the arq worker / api.queue")
+
     # LLM sampling
     LLM_TEMPERATURE: float = Field(0.1, ge=0.0, le=1.0, description="Sampling temperature applied to every Mistral agent and chat completion call")
     LLM_MAX_TOKENS: int = Field(20480, gt=0, description="Max output tokens applied to every Mistral agent and chat completion call")
