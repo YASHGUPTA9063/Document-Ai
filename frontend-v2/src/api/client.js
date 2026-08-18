@@ -60,6 +60,43 @@ export async function uploadDocumentsBatch(files, onProgress) {
 }
 
 /**
+ * Mistral Batch API Upload — sends files to /batch/upload for asynchronous bulk processing.
+ * @param {File[]} files
+ * @param {(pct: number) => void} onProgress
+ * @returns {Promise<{ batch_id, total, succeeded, failed, results: Array }>}
+ */
+export async function uploadMistralBatch(files, onProgress) {
+  const form = new FormData();
+  files.forEach((f) => form.append('files', f));
+  const { data } = await api.post('/batch/upload', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 300_000,
+    onUploadProgress: (e) => {
+      if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100));
+    },
+  });
+  return data;
+}
+
+/**
+ * Trigger Mistral Batch processing on a server directory.
+ * @param {string} folderPath
+ */
+export async function uploadFolderBatch(folderPath) {
+  const { data } = await api.post('/batch/folder', { folder_path: folderPath });
+  return data;
+}
+
+/**
+ * Get Mistral Batch job status.
+ * @param {string} batchId
+ */
+export async function getBatchStatus(batchId) {
+  const { data } = await api.get(`/batch/status/${batchId}`);
+  return data;
+}
+
+/**
  * Get workflow status for a document.
  * @param {string} documentId
  * @returns {Promise<WorkflowStatusResponse>}

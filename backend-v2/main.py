@@ -31,6 +31,8 @@ from schemas.documents import (
 )
 from workflow import DocumentProcessingWorkflow
 from claim_workflow import ClaimProcessingWorkflow
+from batch_workflow import BatchDocumentProcessingWorkflow
+from batch_routes import batch_router
 from schemas.claims import (
     CreateClaimRequest, ClaimResponse, ClaimStatusResponse,
     ClaimReportResponse, ClaimDecisionRequest
@@ -68,7 +70,7 @@ async def lifespan(app: FastAPI):
     
     logger.info("Starting Mistral Workflow worker...")
     global worker_task
-    worker_task = asyncio.create_task(workflows.run_worker([DocumentProcessingWorkflow, ClaimProcessingWorkflow]))
+    worker_task = asyncio.create_task(workflows.run_worker([DocumentProcessingWorkflow, ClaimProcessingWorkflow, BatchDocumentProcessingWorkflow]))
     
     yield
     
@@ -90,6 +92,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(batch_router)
 
 ALLOWED_TYPES = {
     "application/pdf", 
@@ -291,64 +295,98 @@ async def get_status(document_id: str):
 async def resume_duplicate(workflow_run_id: str, decision: DuplicateDecisionRequest):
     """
     Resume a workflow paused at wait_for_input (duplicate check).
-    The Mistral InteractiveWorkflow SDK uses Temporal *Updates* (NOT signals).
-    Protocol:
-      1. Query '__get_pending_inputs' to get the task_id for the pending input.
-      2. Call update '__submit_input' with that task_id and the user's decision payload.
+    If interactive workflow is active in Temporal, submits the update.
+    Otherwise, applies the decision directly to the database.
     """
     try:
-        # Step 1: get the pending task_id
         query_result = await mistral_client.workflows.executions.query_workflow_execution_async(
             execution_id=workflow_run_id,
             name="__get_pending_inputs",
         )
         pending_inputs = (query_result.result or {}).get("pending_inputs", [])
-        if not pending_inputs:
-            raise HTTPException(status_code=409, detail="No pending inputs found. Workflow may not be paused yet.")
-        task_id = pending_inputs[0]["task_id"]
-
-        # Step 2: submit the decision
-        await mistral_client.workflows.executions.update_workflow_execution_async(
-            execution_id=workflow_run_id,
-            name="__submit_input",
-            input={"task_id": task_id, "input": decision.model_dump()},
-        )
-        return {"message": "Workflow resumed"}
-    except HTTPException:
-        raise
+        if pending_inputs:
+            task_id = pending_inputs[0]["task_id"]
+            await mistral_client.workflows.executions.update_workflow_execution_async(
+                execution_id=workflow_run_id,
+                name="__submit_input",
+                input={"task_id": task_id, "input": decision.model_dump()},
+            )
+            return {"message": "Workflow resumed"}
     except Exception as e:
-        logger.error(f"Error resuming duplicate: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.info(f"Interactive workflow duplicate resume fallback: {e}")
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Document).where(
+                (Document.workflow_run_id == workflow_run_id) | (Document.id == workflow_run_id)
+            )
+        )
+        docs = result.scalars().all()
+        if not docs:
+            raise HTTPException(status_code=404, detail="Document not found")
+        for doc in docs:
+            if decision.override:
+                doc.status = "processing"
+            else:
+                doc.status = "rejected"
+        await session.commit()
+        return {"message": "Duplicate decision applied"}
 
 @app.post("/workflow/{workflow_run_id}/resume/review")
 async def resume_review(workflow_run_id: str, decision: ReviewerDecisionRequest):
     """
     Resume a workflow paused at wait_for_input (human review).
-    Same two-step protocol: query pending inputs, then submit via update.
+    If interactive workflow is active in Temporal, submits the update.
+    If workflow is already completed (e.g. batch processing), applies approval/rejection directly to DB.
     """
     try:
-        # Step 1: get the pending task_id
         query_result = await mistral_client.workflows.executions.query_workflow_execution_async(
             execution_id=workflow_run_id,
             name="__get_pending_inputs",
         )
         pending_inputs = (query_result.result or {}).get("pending_inputs", [])
-        if not pending_inputs:
-            raise HTTPException(status_code=409, detail="No pending inputs found. Workflow may not be paused yet.")
-        task_id = pending_inputs[0]["task_id"]
-
-        # Step 2: submit the decision
-        await mistral_client.workflows.executions.update_workflow_execution_async(
-            execution_id=workflow_run_id,
-            name="__submit_input",
-            input={"task_id": task_id, "input": decision.model_dump()},
-        )
-        return {"message": "Workflow resumed"}
-    except HTTPException:
-        raise
+        if pending_inputs:
+            task_id = pending_inputs[0]["task_id"]
+            await mistral_client.workflows.executions.update_workflow_execution_async(
+                execution_id=workflow_run_id,
+                name="__submit_input",
+                input={"task_id": task_id, "input": decision.model_dump()},
+            )
+            return {"message": "Workflow resumed"}
     except Exception as e:
-        logger.error(f"Error resuming review: {e}")
-        raise HTTPException(status_code=500, detail=str(e))# ─── Pipeline metadata enrichment ────────────────────────────────────────────
+        logger.info(f"Interactive workflow review resume fallback: {e}")
+
+    # Fallback direct DB update for batch-processed documents
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Document).where(
+                (Document.workflow_run_id == workflow_run_id) | (Document.id == workflow_run_id)
+            )
+        )
+        docs = result.scalars().all()
+        if not docs:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        for doc in docs:
+            if decision.approved:
+                doc.status = "completed"
+                # Apply human corrections if provided
+                ext_res = await session.execute(select(ExtractedData).where(ExtractedData.document_id == doc.id))
+                ext_data = ext_res.scalar_one_or_none()
+                if ext_data:
+                    if decision.corrections:
+                        new_data = dict(ext_data.validated_data) if ext_data.validated_data else {}
+                        new_data.update(decision.corrections)
+                        ext_data.validated_data = new_data
+                        ext_data.reviewer_corrections = decision.corrections
+            else:
+                doc.status = "rejected"
+                new_details = dict(doc.error_details) if doc.error_details else {}
+                new_details["error"] = decision.rejection_reason or "Rejected by reviewer."
+                doc.error_details = new_details
+
+        await session.commit()
+        return {"message": "Review decision applied successfully."}# ─── Pipeline metadata enrichment ────────────────────────────────────────────
 # Maps each agent role to static info that Mistral's API doesn't store:
 # step index, icon, accent color, and the workflow tools it runs alongside.
 AGENT_PIPELINE_META = {

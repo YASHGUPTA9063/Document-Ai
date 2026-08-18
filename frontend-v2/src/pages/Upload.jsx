@@ -5,7 +5,7 @@ import {
   CheckCircle2, ScanSearch, Brain, ShieldCheck, UserCheck, Share2,
   XCircle, Layers, RefreshCw, AlertTriangle, Zap,
 } from 'lucide-react';
-import { uploadDocumentsBatch } from '../api/client';
+import { uploadDocumentsBatch, uploadMistralBatch } from '../api/client';
 import { useApp } from '../store/AppStore';
 import { useDocumentPoller } from '../hooks/useDocumentPoller';
 
@@ -127,6 +127,7 @@ export function Upload() {
   const [isDragover, setIsDragover]     = useState(false);
   const [queue, setQueue]               = useState([]);
   const [uploading, setUploading]       = useState(false);
+  const [useMistralBatchApi, setUseMistralBatchApi] = useState(true);
   const [batchProgress, setBatchProgress] = useState(0);
   const [batchResult, setBatchResult]   = useState(null);
   const [uploadedIds, setUploadedIds]   = useState([]);
@@ -204,7 +205,8 @@ export function Upload() {
 
     try {
       const files  = ready.map((i) => i.file);
-      const result = await uploadDocumentsBatch(files, (pct) => setBatchProgress(pct));
+      const uploader = useMistralBatchApi ? uploadMistralBatch : uploadDocumentsBatch;
+      const result = await uploader(files, (pct) => setBatchProgress(pct));
 
       setBatchResult(result);
 
@@ -404,8 +406,55 @@ export function Upload() {
               ))}
             </div>
 
+            {/* Mistral Batch API Toggle */}
+            <div style={{
+              marginTop: 14,
+              padding: '10px 14px',
+              background: useMistralBatchApi ? 'rgba(79, 110, 247, 0.07)' : 'rgba(255, 255, 255, 0.02)',
+              border: `1px solid ${useMistralBatchApi ? 'rgba(79, 110, 247, 0.25)' : 'var(--border)'}`,
+              borderRadius: 8,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              transition: 'all 0.2s ease'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{
+                  width: 28, height: 28, borderRadius: 6,
+                  background: useMistralBatchApi ? 'rgba(79, 110, 247, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  color: useMistralBatchApi ? 'var(--accent)' : 'var(--muted)'
+                }}>
+                  <Zap size={15} />
+                </div>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    Mistral Batch API Mode
+                    {useMistralBatchApi && (
+                      <span className="badge badge-blue" style={{ fontSize: 9, padding: '1px 6px' }}>50% OFF</span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--muted)', marginTop: 1 }}>
+                    {useMistralBatchApi
+                      ? 'Vision-First Classification (No OCR) + Batch OCR & Extraction'
+                      : 'Standard real-time single-doc processing'}
+                  </div>
+                </div>
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', userSelect: 'none' }}>
+                <input
+                  type="checkbox"
+                  checked={useMistralBatchApi}
+                  onChange={(e) => setUseMistralBatchApi(e.target.checked)}
+                  disabled={uploading}
+                  style={{ width: 16, height: 16, cursor: 'pointer', accentColor: 'var(--accent)' }}
+                />
+              </label>
+            </div>
+
             {/* Action footer */}
-            <div style={{ marginTop: 16, display: 'flex', gap: 10 }}>
+            <div style={{ marginTop: 14, display: 'flex', gap: 10 }}>
               <button
                 id="batch-upload-btn"
                 className="btn btn-primary"
@@ -420,12 +469,12 @@ export function Upload() {
                       border: '2px solid rgba(255,255,255,0.3)', borderTopColor: 'white',
                       borderRadius: '50%', animation: 'spin 0.8s linear infinite',
                     }} />
-                    Uploading Batch…
+                    {useMistralBatchApi ? 'Submitting Batch Job…' : 'Uploading Batch…'}
                   </>
                 ) : (
                   <>
                     <Layers size={14} />
-                    Send {readyCount} File{readyCount !== 1 ? 's' : ''} for Extraction
+                    {useMistralBatchApi ? '⚡ Process with Mistral Batch API' : `Send ${readyCount} File${readyCount !== 1 ? 's' : ''} for Extraction`}
                   </>
                 )}
               </button>
