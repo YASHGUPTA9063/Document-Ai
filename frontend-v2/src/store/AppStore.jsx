@@ -132,12 +132,19 @@ export function AppProvider({ children }) {
 
   const completedDocs = state.documents.filter((d) => d.status === 'completed');
 
+  // Includes completed docs + split parent packets so the Extraction page can
+  // build a tree: parent packet ▸ child 1, child 2, …
+  const extractionDocs = state.documents.filter(
+    (d) => d.status === 'completed' || (d.is_split_parent && d.status === 'split')
+  );
+
   return (
     <AppContext.Provider value={{
       ...state,
       pendingDocs,
       reviewDocs,
       completedDocs,
+      extractionDocs,
       setDocuments,
       addDocument,
       updateDocument,

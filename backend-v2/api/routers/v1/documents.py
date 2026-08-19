@@ -387,11 +387,16 @@ async def get_document_file(document_id: str):
 
         # Use inline disposition so the browser renders PDFs/images directly
         # instead of triggering a file download.
-        headers = {
-            "Content-Disposition": f"inline; filename=\"{doc.filename}\"",
-            "Cache-Control": "no-cache",
-        }
-        return FileResponse(doc.file_path, media_type=mime_type, headers=headers)
+        # Sanitize filename for HTTP headers: replace non-ASCII chars (e.g. em
+        # dash \u2014) with underscores — HTTP headers are restricted to Latin-1.
+        safe_filename = doc.filename.encode('ascii', 'replace').decode('ascii').replace('?', '_')
+        return FileResponse(
+            doc.file_path,
+            media_type=mime_type,
+            filename=safe_filename,
+            content_disposition_type="inline",
+            headers={"Cache-Control": "no-cache"},
+        )
 
 
 @router.get("/documents/{document_id}/ocr-blocks")

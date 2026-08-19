@@ -1973,7 +1973,7 @@ function getAverageWordConfidence(extracted) {
 }
 
 export function Extraction() {
-  const { completedDocs, confidenceMode, fieldHighlightThreshold, autoApproveThreshold, confHighThreshold, confMedThreshold } = useApp();
+  const { completedDocs, extractionDocs, confidenceMode, fieldHighlightThreshold, autoApproveThreshold, confHighThreshold, confMedThreshold } = useApp();
   const { refresh } = useDocumentList();
   const [activeId, setActiveId] = useState(null);
   const [extracted, setExtracted] = useState(null);
@@ -2014,15 +2014,62 @@ export function Extraction() {
 
   useEffect(() => { refresh(); }, []);
 
+  // ── Build hierarchical tab items: standalone docs + split packets with children ──
+  const [expandedPackets, setExpandedPackets] = useState(new Set());
+
+  const tabItems = useMemo(() => {
+    const items = [];
+    const childrenByParent = {};
+
+    // Group completed children by their parent_document_id
+    extractionDocs.forEach((d) => {
+      if (d.parent_document_id) {
+        if (!childrenByParent[d.parent_document_id]) childrenByParent[d.parent_document_id] = [];
+        childrenByParent[d.parent_document_id].push(d);
+      }
+    });
+
+    // Build ordered items list
+    const seenChildIds = new Set();
+    extractionDocs.forEach((d) => {
+      if (d.parent_document_id) return; // skip children — they are nested under parents
+      if (d.is_split_parent && d.status === 'split') {
+        // Split parent: render as a group header with its children
+        const children = childrenByParent[d.id] || [];
+        children.forEach(c => seenChildIds.add(c.id));
+        items.push({ type: 'packet', parent: d, children });
+      } else {
+        items.push({ type: 'doc', doc: d });
+      }
+    });
+
+    return items;
+  }, [extractionDocs]);
+
+  // Flat list of all selectable (completed) docs for lookups
+  const selectableDocs = useMemo(() => {
+    const docs = [];
+    tabItems.forEach((item) => {
+      if (item.type === 'doc') docs.push(item.doc);
+      else if (item.type === 'packet') docs.push(...item.children.filter(c => c.status === 'completed'));
+    });
+    return docs;
+  }, [tabItems]);
+
   useEffect(() => {
-    if (completedDocs.length === 0) return;
+    if (selectableDocs.length === 0) return;
     const navDocId = location.state?.docId;
-    if (navDocId && completedDocs.some((d) => d.id === navDocId)) {
+    if (navDocId && selectableDocs.some((d) => d.id === navDocId)) {
       setActiveId(navDocId);
-    } else if (!activeId) {
-      setActiveId(completedDocs[0].id);
+      // Auto-expand the parent packet if navigating to a split child
+      const navDoc = selectableDocs.find(d => d.id === navDocId);
+      if (navDoc?.parent_document_id) {
+        setExpandedPackets(prev => new Set([...prev, navDoc.parent_document_id]));
+      }
+    } else if (!activeId || !selectableDocs.some(d => d.id === activeId)) {
+      setActiveId(selectableDocs[0].id);
     }
-  }, [completedDocs, location.state?.docId]);
+  }, [selectableDocs, location.state?.docId]);
 
   useEffect(() => {
     if (!activeId) return;
@@ -2113,7 +2160,7 @@ export function Extraction() {
     }
   };
 
-  const activeDoc = completedDocs.find((d) => d.id === activeId);
+  const activeDoc = selectableDocs.find((d) => d.id === activeId) || completedDocs.find((d) => d.id === activeId);
 
   const fieldThresholds = useMemo(() => {
     const map = {};
@@ -2165,7 +2212,7 @@ export function Extraction() {
     return weightedSum / totalWeight; // 0–1 scale
   }, [extracted, templates, activeDoc?.doc_type]);
 
-  if (completedDocs.length === 0) {
+  if (selectableDocs.length === 0) {
     return (
       <div className="page">
         <div className="card">
@@ -2186,19 +2233,103 @@ export function Extraction() {
 
   return (
     <div className="page">
-      {/* Document Tabs */}
-      <div className="tabs">
-        {completedDocs.slice(0, 8).map((doc) => (
-          <div
-            key={doc.id}
-            className={`tab ${activeId === doc.id ? 'active' : ''}`}
-            onClick={() => setActiveId(doc.id)}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-          >
-            <FileText size={13} />
-            {doc.filename.length > 24 ? doc.filename.slice(0, 24) + '…' : doc.filename}
-          </div>
-        ))}
+      {/* Document Tabs — hierarchical with split packet groups */}
+      <div className="tabs" style={{ flexWrap: 'wrap', gap: 4 }}>
+        {tabItems.map((item) => {
+          if (item.type === 'doc') {
+            const doc = item.doc;
+            return (
+              <div
+                key={doc.id}
+                className={`tab ${activeId === doc.id ? 'active' : ''}`}
+                onClick={() => setActiveId(doc.id)}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <FileText size={13} />
+                {doc.filename.length > 24 ? doc.filename.slice(0, 24) + '…' : doc.filename}
+              </div>
+            );
+          }
+
+          // Split packet group
+          const { parent, children } = item;
+          const isExpanded = expandedPackets.has(parent.id);
+          const completedChildren = children.filter(c => c.status === 'completed');
+          const hasActiveChild = children.some(c => c.id === activeId);
+
+          return (
+            <div key={parent.id} style={{ display: 'contents' }}>
+              {/* Packet header tab */}
+              <div
+                className={`tab ${hasActiveChild ? 'active' : ''}`}
+                onClick={() => {
+                  setExpandedPackets(prev => {
+                    const next = new Set(prev);
+                    if (next.has(parent.id)) next.delete(parent.id);
+                    else next.add(parent.id);
+                    return next;
+                  });
+                  // Auto-select first completed child when expanding
+                  if (!isExpanded && completedChildren.length > 0 && !hasActiveChild) {
+                    setActiveId(completedChildren[0].id);
+                  }
+                }}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  borderLeft: '2px solid var(--accent)',
+                  paddingLeft: 10,
+                }}
+                title={`Split packet: ${parent.filename} (${completedChildren.length} documents)`}
+              >
+                {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                <FileText size={13} />
+                {parent.filename.length > 20 ? parent.filename.slice(0, 20) + '…' : parent.filename}
+                <span style={{
+                  fontSize: 10, fontWeight: 700,
+                  background: 'rgba(99, 102, 241, 0.15)',
+                  color: 'var(--accent)',
+                  padding: '1px 6px', borderRadius: 99,
+                  marginLeft: 2,
+                }}>
+                  {completedChildren.length} split
+                </span>
+              </div>
+
+              {/* Child tabs (shown when expanded) */}
+              {isExpanded && completedChildren.map((child, idx) => (
+                <div
+                  key={child.id}
+                  className={`tab ${activeId === child.id ? 'active' : ''}`}
+                  onClick={() => setActiveId(child.id)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    paddingLeft: 24,
+                    fontSize: 12,
+                    borderLeft: '2px solid rgba(99, 102, 241, 0.2)',
+                    marginLeft: 4,
+                  }}
+                >
+                  <span style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 600, minWidth: 14, textAlign: 'right' }}>
+                    {idx + 1}.
+                  </span>
+                  <FileText size={12} />
+                  {(child.doc_type || child.filename).length > 22
+                    ? (child.doc_type || child.filename).slice(0, 22) + '…'
+                    : (child.doc_type || child.filename)}
+                  {child.page_range && (
+                    <span style={{
+                      fontSize: 9, color: 'var(--muted)',
+                      background: 'rgba(107,114,128,0.1)',
+                      padding: '1px 5px', borderRadius: 4,
+                    }}>
+                      pp {child.page_range}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          );
+        })}
       </div>
 
       {/* ── Full-screen overlay viewer ── */}
