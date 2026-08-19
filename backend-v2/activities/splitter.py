@@ -155,7 +155,11 @@ async def splitter_activity(document_id: str, file_path: str) -> dict:
             )
             return {"split": False, "reason": "agent_not_configured"}
 
-        ok, reason, page_count = is_splittable(file_path, config["max_pages"])
+        # Reading the PDF is blocking I/O, and this worker shares its event loop
+        # with the API — doing it inline stalls the status polls the UI lives on.
+        ok, reason, page_count = await asyncio.to_thread(
+            is_splittable, file_path, config["max_pages"]
+        )
         if not ok:
             logger.info(f"[Document {document_id}] Not a split candidate: {reason}")
             return {"split": False, "reason": reason, "page_count": page_count}
@@ -206,7 +210,7 @@ async def splitter_activity(document_id: str, file_path: str) -> dict:
         segments = segment_pages(classifications)
         if config["merge_orphans"]:
             segments = merge_orphans(segments, threshold)
-        segments = verify_segments(segments, pages_md)
+        segments = await asyncio.to_thread(verify_segments, segments, pages_md)
 
         if len(segments) < 2:
             logger.info(f"[Document {document_id}] Single document detected — no split.")

@@ -1,4 +1,5 @@
 import { createContext, useContext, useReducer, useCallback } from 'react';
+import { ACTIVE_STATUSES, REVIEW_STATUSES, SPLIT_REVIEW_STATUS } from './documentStatus';
 
 // ─── Initial State ───────────────────────────────
 function lsGet(key, fallback) {
@@ -127,8 +128,9 @@ export function AppProvider({ children }) {
   const dismissToast = useCallback((id) => dispatch({ type: 'REMOVE_TOAST', payload: id }), []);
 
   // ─── Derived helpers ────────────────────────────
-  const pendingDocs = state.documents.filter((d) => ['pending','pre_validating','processing','preprocessing','classifying','fraud_checking','extracting','validating'].includes(d.status));
-  const reviewDocs  = state.documents.filter((d) => ['awaiting_review', 'duplicate'].includes(d.status));
+  const pendingDocs = state.documents.filter((d) => ACTIVE_STATUSES.includes(d.status));
+  const reviewDocs  = state.documents.filter((d) => REVIEW_STATUSES.includes(d.status));
+  const splitReviewDocs = state.documents.filter((d) => d.status === SPLIT_REVIEW_STATUS);
 
   const completedDocs = state.documents.filter((d) => d.status === 'completed');
 
@@ -143,6 +145,7 @@ export function AppProvider({ children }) {
       ...state,
       pendingDocs,
       reviewDocs,
+      splitReviewDocs,
       completedDocs,
       extractionDocs,
       setDocuments,

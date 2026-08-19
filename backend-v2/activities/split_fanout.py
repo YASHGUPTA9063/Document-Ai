@@ -21,6 +21,7 @@ children it already created rather than duplicating them.
 """
 
 import os
+import asyncio
 import hashlib
 import logging
 
@@ -83,7 +84,10 @@ async def split_fanout_activity(document_id: str, filename: str, file_path: str,
     # written to disk for a split the reviewer may still reject.
     from tools.splitter import split_pdf
     segment_models = [Segment(**segment) for segment in segments]
-    segment_models = split_pdf(file_path, segment_models, out_dir)
+    # Writing one PDF per segment is blocking I/O on an event loop shared with the
+    # API, so it goes to a thread — otherwise the UI's status polls hang until the
+    # whole packet has been carved up.
+    segment_models = await asyncio.to_thread(split_pdf, file_path, segment_models, out_dir)
 
     # A packet linked to a claim hands its links down to the documents inside it.
     claim_links = await claim_db.get_claim_links_for_document(document_id)
@@ -96,7 +100,7 @@ async def split_fanout_activity(document_id: str, filename: str, file_path: str,
             parent_id=document_id,
             filename=child_name,
             file_path=segment.output_file,
-            file_hash=_sha256(segment.output_file),
+            file_hash=await asyncio.to_thread(_sha256, segment.output_file),
             page_range=segment.page_range_label,
             doc_type_hint=segment.doc_type,
             split_confidence=segment.min_confidence,

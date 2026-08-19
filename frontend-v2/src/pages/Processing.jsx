@@ -1,11 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { RefreshCw, Cpu, CheckCircle, ListTodo, FileText, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { RefreshCw, Cpu, CheckCircle, ListTodo, FileText, AlertCircle, ChevronDown, ChevronUp, Scissors } from 'lucide-react';
 import { useApp } from '../store/AppStore';
+import { ACTIVE_STATUSES, REVIEW_STATUSES, SPLIT_REVIEW_STATUS } from '../store/documentStatus';
 import { useDocumentList } from '../hooks/useDocumentList';
 import { useDocumentPoller } from '../hooks/useDocumentPoller';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { PipelineSteps } from '../components/ui/PipelineSteps';
+import { SplitReviewModal } from '../components/ui/SplitReviewModal';
+
+// While anything is in flight the list is re-fetched on this cadence. A packet
+// split creates its child documents server-side, and they only become visible
+// to the queue on the next fetch — the per-document poller never sees them.
+const LIST_REFRESH_INTERVAL = 4000; // ms
+
+// The queue is briefly empty at the seam between a packet finishing its split
+// and its children appearing in the list. Confirm the drain against the server
+// before treating it as "everything is done".
+const DRAIN_SETTLE_DELAY = 1500; // ms
 
 /** Renders a rejection/failure reason with expand/collapse if the text is long */
 function ExpandableReason({ reason }) {
@@ -52,11 +64,20 @@ function SinglePoller({ docId }) {
 }
 
 export function Processing() {
-  const { documents, pendingDocs, reviewDocs } = useApp();
+  const { documents, pendingDocs, reviewDocs, toast } = useApp();
   const { refresh, loading } = useDocumentList();
   const navigate = useNavigate();
+  const [reviewingSplit, setReviewingSplit] = useState(null);
 
   useEffect(() => { refresh(); }, []);
+
+  // Keep the list in sync while work is in flight, so documents that appear
+  // out of band — the children of a split packet — join the queue on their own.
+  useEffect(() => {
+    if (pendingDocs.length === 0) return;
+    const id = setInterval(() => refresh(), LIST_REFRESH_INTERVAL);
+    return () => clearInterval(id);
+  }, [pendingDocs.length, refresh]);
 
   // Redirect to /validation when any doc needs human review
   useEffect(() => {
@@ -66,25 +87,53 @@ export function Processing() {
   // Redirect to /extraction when all queued docs finish processing
   const prevPendingCount = useRef(0);
   const prevPendingIds = useRef([]);
+  const settleTimer = useRef(null);
   useEffect(() => {
     if (prevPendingCount.current > 0 && pendingDocs.length === 0 && reviewDocs.length === 0) {
-      // Find the first doc that just completed from the previous pending set
-      const justCompleted = documents.find(
-        (d) => prevPendingIds.current.includes(d.id) && d.status === 'completed'
-      );
-      navigate('/extraction', { state: { docId: justCompleted?.id } });
+      const drainedIds = prevPendingIds.current;
+      clearTimeout(settleTimer.current);
+      settleTimer.current = setTimeout(async () => {
+        // Re-check against the server: a packet that just finished splitting
+        // empties the local queue a beat before its children show up, and
+        // navigating away on that gap is what made the page look broken.
+        const docs = await refresh();
+        if (!docs) return;  // fetch failed — stay put rather than guess
+        const stillWorking = docs.some(
+          (d) => ACTIVE_STATUSES.includes(d.status) || REVIEW_STATUSES.includes(d.status)
+        );
+        if (stillWorking) return;
+
+        // Find the first doc that just completed from the previous pending set
+        const justCompleted = docs.find(
+          (d) => drainedIds.includes(d.id) && d.status === 'completed'
+        );
+        navigate('/extraction', { state: { docId: justCompleted?.id } });
+      }, DRAIN_SETTLE_DELAY);
     }
     prevPendingCount.current = pendingDocs.length;
     prevPendingIds.current = pendingDocs.map((d) => d.id);
   }, [pendingDocs.length, reviewDocs.length]);
 
-  // Most recently active doc for the live pipeline display
-  const featured = pendingDocs[0];
+  useEffect(() => () => clearTimeout(settleTimer.current), []);
+
+  // Most recently active doc for the live pipeline display. A packet waiting on
+  // a split decision is the one thing worth looking at, so it wins the slot.
+  const featured = pendingDocs.find((d) => d.status === SPLIT_REVIEW_STATUS) || pendingDocs[0];
 
   return (
     <div className="page">
       {/* Activate pollers for all pending docs */}
       <PollersRenderer ids={pendingDocs.map((d) => d.id)} />
+
+      {reviewingSplit && (
+        <SplitReviewModal
+          documentId={reviewingSplit}
+          open
+          toast={toast}
+          onClose={() => setReviewingSplit(null)}
+          onDecided={() => refresh()}
+        />
+      )}
 
       {/* Live Pipeline for featured doc */}
       {featured ? (
@@ -160,7 +209,20 @@ export function Processing() {
                         ? <span className="badge badge-cyan">{doc.doc_type}</span>
                         : <span style={{ color: 'var(--muted)', fontSize: 11 }}>Classifying…</span>}
                     </td>
-                    <td><StatusBadge status={doc.status} /></td>
+                    <td>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+                        <StatusBadge status={doc.status} />
+                        {doc.status === SPLIT_REVIEW_STATUS && (
+                          <button
+                            className="btn btn-primary btn-sm"
+                            style={{ padding: '3px 8px', fontSize: 11 }}
+                            onClick={() => setReviewingSplit(doc.id)}
+                          >
+                            <Scissors size={11} /> Review split
+                          </button>
+                        )}
+                      </div>
+                    </td>
                     <td>
                       <span style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'monospace' }}>
                         {doc.workflow_run_id?.slice(0, 16) || '—'}…
