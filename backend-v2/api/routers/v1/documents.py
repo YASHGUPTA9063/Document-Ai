@@ -36,6 +36,7 @@ from schemas.documents import (
     DocumentUploadResponse,
     WorkflowStatusResponse,
     UpdateExtractedDataRequest,
+    SplitDecisionRequest,
 )
 import db.claim_operations as claim_db
 from api.deps import ALLOWED_TYPES, get_mistral_client
@@ -53,6 +54,7 @@ async def upload_document(
     customer_id: str = Query(None, description="Optional customer ID to associate with the document"),
     claim_id: str = Query(None, description="Optional claim ID — links this document to a claim and triggers field sync after OCR"),
     doc_type: str = Query(None, description="Document type label for claim (e.g. medical_report, claim_form)"),
+    auto_split: bool = Query(True, description="Detect multi-document packets and split them into one document per contained file"),
 ):
     if file.content_type not in ALLOWED_TYPES:
         raise HTTPException(status_code=400, detail="Unsupported file type")
@@ -79,7 +81,8 @@ async def upload_document(
             input={
                 "document_id": doc.id,
                 "filename": doc.filename,
-                "file_path": doc.file_path
+                "file_path": doc.file_path,
+                "auto_split": auto_split
             }
         )
 
@@ -114,7 +117,8 @@ async def upload_document(
 @router.post("/upload/batch")
 async def upload_documents_batch(
     files: List[UploadFile] = File(...),
-    customer_id: str = Query(None, description="Optional customer ID to associate with all documents in batch")
+    customer_id: str = Query(None, description="Optional customer ID to associate with all documents in batch"),
+    auto_split: bool = Query(True, description="Detect multi-document packets and split them into one document per contained file")
 ):
     """
     Batch upload endpoint — accepts multiple files in a single multipart request.
@@ -162,7 +166,8 @@ async def upload_documents_batch(
                     input={
                         "document_id": doc.id,
                         "filename": doc.filename,
-                        "file_path": doc.file_path
+                        "file_path": doc.file_path,
+                        "auto_split": auto_split
                     }
                 )
 
@@ -228,6 +233,13 @@ async def get_status(document_id: str):
         if doc.status == "deleted":
             raise HTTPException(status_code=404, detail="Document not found")
 
+        child_count = 0
+        if doc.is_split_parent:
+            count_result = await session.execute(
+                select(Document).where(Document.parent_document_id == doc.id)
+            )
+            child_count = len(count_result.scalars().all())
+
         return WorkflowStatusResponse(
             document_id=doc.id,
             workflow_run_id=doc.workflow_run_id,
@@ -235,31 +247,57 @@ async def get_status(document_id: str):
             doc_type=doc.doc_type,
             confidence_score=doc.extracted_data.confidence_score if doc.extracted_data else None,
             extracted_data=doc.extracted_data.validated_data if doc.extracted_data else None,
-            message=doc.error_details.get("error", "") if doc.error_details else ""
+            message=doc.error_details.get("error", "") if doc.error_details else "",
+            parent_document_id=doc.parent_document_id,
+            is_split_parent=bool(doc.is_split_parent),
+            page_range=doc.page_range,
+            child_count=child_count,
         )
 
 
 @router.get("/documents")
-async def list_documents(page: int = Query(1, ge=1), limit: int = Query(20, ge=1, le=100)):
+async def list_documents(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    include_children: bool = Query(True, description="Include documents produced by splitting a packet"),
+):
     async with AsyncSessionLocal() as session:
         offset = (page - 1) * limit
         # Exclude soft-deleted documents so they don't pollute the list (fix #4)
+        query = select(Document).where(Document.status != "deleted")
+        if not include_children:
+            query = query.where(Document.parent_document_id.is_(None))
+
         result = await session.execute(
-            select(Document)
-            .where(Document.status != "deleted")
-            .order_by(Document.created_at.desc())
-            .offset(offset)
-            .limit(limit)
+            query.order_by(Document.created_at.desc()).offset(offset).limit(limit)
         )
-        docs = result.scalars().all()
+        docs = list(result.scalars().all())
+
+        # One extra query for the child counts, so the UI can nest a packet and its
+        # contents without an N+1 round trip per row.
+        parent_ids = [d.id for d in docs if d.is_split_parent]
+        child_counts: dict[str, int] = {}
+        if parent_ids:
+            child_rows = await session.execute(
+                select(Document.parent_document_id)
+                .where(Document.parent_document_id.in_(parent_ids))
+                .where(Document.status != "deleted")
+            )
+            for (parent_id,) in child_rows.all():
+                child_counts[parent_id] = child_counts.get(parent_id, 0) + 1
+
         return [
             {
                 "id": d.id,
                 "filename": d.filename,
                 "status": d.status,
-                "doc_type": d.doc_type,
+                "doc_type": d.doc_type or d.split_doc_type_hint,
                 "workflow_run_id": d.workflow_run_id,
-                "message": d.error_details.get("error", "") if d.error_details else ""
+                "message": d.error_details.get("error", "") if d.error_details else "",
+                "parent_document_id": d.parent_document_id,
+                "is_split_parent": bool(d.is_split_parent),
+                "page_range": d.page_range,
+                "child_count": child_counts.get(d.id, 0),
             }
             for d in docs
         ]
@@ -398,7 +436,125 @@ async def get_document_crop(document_id: str, filename: str):
     )
 
 
+# ─── Multi-document packet splitting ─────────────────────────────────────────
+
+@router.get("/documents/{document_id}/split")
+async def get_split_manifest(document_id: str):
+    """
+    The split outcome for a packet: the detected segments, the per-page audit
+    trail, and the live state of each child document.
+
+    404s for a document that was never split, so the caller can treat that as
+    "ordinary single document".
+    """
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Document).where(Document.id == document_id))
+        doc = result.scalar_one_or_none()
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+        if not doc.is_split_parent and doc.status != "awaiting_split_review":
+            raise HTTPException(status_code=404, detail="This document was not split")
+
+        child_result = await session.execute(
+            select(Document)
+            .where(Document.parent_document_id == document_id)
+            .where(Document.status != "deleted")
+            .order_by(Document.created_at)
+        )
+        children = child_result.scalars().all()
+
+        manifest = doc.split_manifest or {}
+        return {
+            "document_id": doc.id,
+            "filename": doc.filename,
+            "status": doc.status,
+            "segments": manifest.get("segments", []),
+            "pages": manifest.get("pages", []),
+            "children": [
+                {
+                    "document_id": c.id,
+                    "filename": c.filename,
+                    "status": c.status,
+                    "doc_type": c.doc_type or c.split_doc_type_hint,
+                    "split_doc_type_hint": c.split_doc_type_hint,
+                    "page_range": c.page_range,
+                    "split_confidence": c.split_confidence,
+                    "workflow_run_id": c.workflow_run_id,
+                }
+                for c in children
+            ],
+        }
+
+
+@router.post("/documents/{document_id}/split-decision")
+async def submit_split_decision(document_id: str, decision: SplitDecisionRequest):
+    """
+    Resume a packet paused at the split review gate.
+
+    approved=false processes the file whole; approved=true with no segments
+    accepts the detected boundaries; approved=true with segments applies the
+    reviewer boundaries instead. Uses the same two-step Temporal update protocol
+    as the duplicate and review resumes — see api/routers/v1/workflow.py.
+    """
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Document).where(Document.id == document_id))
+        doc = result.scalar_one_or_none()
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+        if doc.status != "awaiting_split_review":
+            raise HTTPException(
+                status_code=409,
+                detail=f"Document is not awaiting split review (status: {doc.status})."
+            )
+        run_id = doc.workflow_run_id
+
+    if not run_id or run_id == "unknown_run_id":
+        raise HTTPException(status_code=409, detail="No workflow run to resume for this document.")
+
+    try:
+        client = get_mistral_client()
+        query_result = await client.workflows.executions.query_workflow_execution_async(
+            execution_id=run_id,
+            name="__get_pending_inputs",
+        )
+        pending_inputs = (query_result.result or {}).get("pending_inputs", [])
+        if not pending_inputs:
+            raise HTTPException(status_code=409, detail="No pending inputs found. Workflow may not be paused yet.")
+
+        await client.workflows.executions.update_workflow_execution_async(
+            execution_id=run_id,
+            name="__submit_input",
+            input={"task_id": pending_inputs[0]["task_id"], "input": decision.model_dump()},
+        )
+        return {"message": "Split decision submitted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error submitting split decision for {document_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ─── Deletion ────────────────────────────────────────────────────────────────
+
+async def _teardown_document(session, doc: Document) -> None:
+    """Soft-delete one document: drop its extraction, cancel its run, remove its file."""
+    doc.status = "deleted"
+    await session.execute(
+        delete(ExtractedData).where(ExtractedData.document_id == doc.id)
+    )
+
+    if doc.workflow_run_id and doc.workflow_run_id != "unknown_run_id":
+        try:
+            await get_mistral_client().workflows.executions.cancel_workflow_execution_async(
+                execution_id=doc.workflow_run_id
+            )
+            logger.info(f"Canceled workflow run {doc.workflow_run_id} for deleted document {doc.id}")
+        except Exception as e:
+            logger.warning(f"Failed to cancel workflow run {doc.workflow_run_id} for deleted document {doc.id}: {e}")
+
+    if doc.file_path:
+        delete_file(doc.file_path)
+
 
 @router.delete("/documents/{document_id}")
 async def delete_document(document_id: str):
@@ -408,29 +564,28 @@ async def delete_document(document_id: str):
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
 
-        doc.status = "deleted"
-
-        # 1. Delete associated ExtractedData record to clean up database space
-        await session.execute(
-            delete(ExtractedData).where(ExtractedData.document_id == document_id)
+        # Deleting a packet takes the documents found inside it with it — they have
+        # no meaning on their own. Deleting one child leaves the packet alone.
+        child_result = await session.execute(
+            select(Document)
+            .where(Document.parent_document_id == document_id)
+            .where(Document.status != "deleted")
         )
+        children = list(child_result.scalars().all())
+
+        for child in children:
+            await _teardown_document(session, child)
+        await _teardown_document(session, doc)
 
         await session.commit()
 
-        # 2. Cancel running workflow run in Mistral cloud scheduler
-        if doc.workflow_run_id and doc.workflow_run_id != "unknown_run_id":
-            try:
-                await get_mistral_client().workflows.executions.cancel_workflow_execution_async(
-                    execution_id=doc.workflow_run_id
-                )
-                logger.info(f"Canceled workflow run {doc.workflow_run_id} for deleted document {document_id}")
-            except Exception as e:
-                logger.warning(f"Failed to cancel workflow run {doc.workflow_run_id} for deleted document {document_id}: {e}")
+        if children:
+            split_dir = os.path.join(settings.STORAGE_DIR, "splits", document_id)
+            if os.path.isdir(split_dir):
+                import shutil
+                shutil.rmtree(split_dir, ignore_errors=True)
 
-        if doc.file_path:
-            delete_file(doc.file_path)
-
-        return {"success": True}
+        return {"success": True, "deleted_children": len(children)}
 
 
 # ─── Signature / photo verification ──────────────────────────────────────────

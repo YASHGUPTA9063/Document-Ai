@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useApp } from '../store/AppStore';
-import { getNormConfig, saveNormConfig, getClassificationConfig, saveClassificationConfig, getVllmSettings, saveVllmSettings } from '../api/client';
+import { getNormConfig, saveNormConfig, getClassificationConfig, saveClassificationConfig, getVllmSettings, saveVllmSettings, getSplitSettings, saveSplitSettings } from '../api/client';
 import {
   Settings as SettingsIcon, SlidersHorizontal, BarChart3,
   CheckCircle2, Circle, ChevronRight, Zap, Eye, ShieldCheck,
-  Palette, Info, RotateCcw, Save, Tag, Trash2, Plus, Bot, ToggleLeft, ToggleRight,
+  Palette, Info, RotateCcw, Save, Tag, Trash2, Plus, Bot, ToggleLeft, ToggleRight, Scissors,
 } from 'lucide-react';
 
 /* ─────────────────────────────────────────────────────────────
@@ -15,6 +15,7 @@ const NAV = [
   { id: 'thresholds',  label: 'Thresholds',         icon: SlidersHorizontal, desc: 'Highlight & approval limits' },
   { id: 'normalization', label: 'Normalization Format', icon: Palette,      desc: 'Date, number & name rules' },
   { id: 'classification', label: 'Classification Types', icon: Tag,          desc: 'Supported document types' },
+  { id: 'splitting',      label: 'Document Splitting',   icon: Scissors,     desc: 'Multi-document packet handling' },
   // { id: 'vllm',           label: 'vLLM Fallback',        icon: Bot,          desc: 'Re-extract low-confidence fields' },
 ];
 
@@ -956,6 +957,183 @@ function ClassificationSection({ toast }) {
 /* ─────────────────────────────────────────────────────────────
    VLLM FALLBACK SECTION
 ───────────────────────────────────────────────────────────── */
+function SplitToggle({ config, setConfig, field, title, on, off }) {
+  const active = config[field];
+  return (
+    <div
+      onClick={() => setConfig((prev) => ({ ...prev, [field]: !prev[field] }))}
+      style={{
+        background: 'var(--card-alt)', borderRadius: 10,
+        border: `1.5px solid ${active ? '#d97706' : 'var(--border)'}`,
+        padding: '14px 16px', marginBottom: 12,
+        display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer',
+        transition: 'all 0.18s ease',
+      }}
+    >
+      <div style={{
+        width: 34, height: 34, borderRadius: 8, flexShrink: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: active ? 'rgba(217,119,6,0.12)' : 'var(--surface)',
+        border: `1px solid ${active ? 'rgba(217,119,6,0.25)' : 'var(--border)'}`,
+        color: active ? '#d97706' : 'var(--muted)',
+      }}>
+        {active ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
+      </div>
+      <div style={{ flex: 1, textAlign: 'left' }}>
+        <div style={{ fontWeight: 600, fontSize: 13, color: active ? '#d97706' : 'var(--text)', marginBottom: 3 }}>
+          {title}
+        </div>
+        <div style={{ fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.55 }}>
+          {active ? on : off}
+        </div>
+      </div>
+      {active ? <CheckCircle2 size={17} color="#d97706" /> : <Circle size={17} color="var(--muted)" />}
+    </div>
+  );
+}
+
+
+function SplitNumberField({ config, setConfig, field, label, hint, min, max, step = 1 }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>{label}</div>
+      <input
+        type="number"
+        min={min} max={max} step={step}
+        value={config[field]}
+        onChange={(e) => setConfig((prev) => ({ ...prev, [field]: Number(e.target.value) }))}
+        style={{
+          width: 120, padding: '7px 10px', borderRadius: 8,
+          border: '1px solid var(--border)', background: 'var(--card)',
+          color: 'var(--text)', fontSize: 13,
+        }}
+      />
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, lineHeight: 1.5 }}>{hint}</div>
+    </div>
+  );
+}
+
+
+function SplittingSection({ toast }) {
+  const [config, setConfig] = useState({
+    enabled: false, confidence_threshold: 0.75, page_batch_size: 8,
+    max_pages: 50, require_review: true, merge_orphans: true,
+  });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const data = await getSplitSettings();
+        if (active) { setConfig(data); setLoading(false); }
+      } catch (err) {
+        if (active) { toast(err.message || 'Failed to load splitting settings', 'error'); setLoading(false); }
+      }
+    })();
+    return () => { active = false; };
+  }, [toast]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const saved = await saveSplitSettings(config);
+      setConfig(saved);
+      toast('Document splitting settings saved ✓', 'success');
+    } catch (err) {
+      toast(err.message || 'Failed to save splitting settings', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 300, color: 'var(--muted)' }}>
+        <div style={{ fontSize: 13, fontWeight: 500 }}>Loading splitting settings...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <SectionHeader
+        icon={Scissors}
+        label="Document Splitting"
+        desc="Detect uploads that contain several documents and process each one separately"
+        color="#d97706"
+      />
+
+      <InfoCallout>
+        When a single upload holds several stitched-together documents, each page is
+        classified and the file is cut into one document per boundary — before any of
+        them is quality-checked or extracted. Each piece then runs the full pipeline on
+        its own, <strong>reusing the classification the split already produced</strong>,
+        so no document is classified twice. Files that hold one document are untouched.
+      </InfoCallout>
+
+      <SplitToggle
+        config={config} setConfig={setConfig}
+        field="enabled"
+        title={config.enabled ? 'Splitting Enabled' : 'Splitting Disabled'}
+        on="Multi-document uploads are split into one document per contained file"
+        off="Every upload is processed as a single document"
+      />
+
+      <div style={{ opacity: config.enabled ? 1 : 0.45, pointerEvents: config.enabled ? 'auto' : 'none', transition: 'opacity 0.2s ease' }}>
+        <SplitToggle
+          config={config} setConfig={setConfig}
+          field="require_review"
+          title="Confirm uncertain boundaries"
+          on="A person confirms the boundaries whenever any page is below the confidence threshold"
+          off="Detected boundaries are applied automatically, however uncertain"
+        />
+        <SplitToggle
+          config={config} setConfig={setConfig}
+          field="merge_orphans"
+          title="Absorb stray pages"
+          on="A low-confidence page sitting between two pages of one document is kept with it"
+          off="Every detected boundary is honoured, including single-page outliers"
+        />
+
+        <SplitNumberField
+          config={config} setConfig={setConfig}
+          field="confidence_threshold"
+          label="Confidence threshold"
+          min={0} max={1} step={0.05}
+          hint="0-1. Below this a page boundary is sent for review, and its document type is re-checked by the classifier instead of being reused."
+        />
+        <SplitNumberField
+          config={config} setConfig={setConfig}
+          field="page_batch_size"
+          label="Pages per classification call"
+          min={1} max={25}
+          hint="How many pages are classified in one request. Higher is cheaper and faster; lower gives the model more room per page."
+        />
+        <SplitNumberField
+          config={config} setConfig={setConfig}
+          field="max_pages"
+          label="Maximum packet length"
+          min={2} max={500}
+          hint="Files longer than this are processed whole rather than split."
+        />
+      </div>
+
+      <button
+        onClick={handleSave}
+        disabled={saving}
+        className="btn btn-primary"
+        style={{ marginTop: 8, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+      >
+        <Save size={13} />
+        {saving ? 'Saving...' : 'Save Configuration'}
+      </button>
+    </div>
+  );
+}
+
+
 function VllmSection({ toast }) {
   const [config, setConfig] = useState({ enabled: true, confidence_threshold: 75, trigger_on_missing: true, trigger_on_low_confidence: true });
   const [loading, setLoading] = useState(true);
@@ -1353,6 +1531,10 @@ export function Settings() {
               toast={toast}
             />
           )}
+          {activeNav === 'splitting' && (
+            <SplittingSection toast={toast} />
+          )}
+
           {activeNav === 'classification' && (
             <ClassificationSection
               toast={toast}

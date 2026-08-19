@@ -19,6 +19,7 @@ from config import settings
 from utils.file_handler import save_file, delete_file
 from utils.norm_config import load_normalization_config, save_normalization_config
 from utils.classification_config import load_classification_config, save_classification_config
+from utils.split_config import load_split_config, save_split_config
 from utils.templates import load_templates, save_templates_to_file
 from platform_core.prompts.manager import PromptManager
 from api.deps import get_mistral_client
@@ -55,6 +56,27 @@ async def update_classification_settings(doc_types: list[str]):
     return {"success": True}
 
 
+@router.get("/settings/splitting")
+async def get_splitting_settings():
+    """
+    Runtime config for the Step 1.5 packet splitter.
+
+    Note the two-level switch: ENABLE_DOC_SPLITTING in the environment is the
+    deploy-level kill switch checked by the workflow, while `enabled` here is the
+    runtime toggle checked inside the splitter activity. With the env flag off,
+    turning this on has no effect.
+    """
+    return load_split_config()
+
+
+@router.put("/settings/splitting")
+async def update_splitting_settings(config: dict):
+    try:
+        return save_split_config(config)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.get("/settings/vllm")
 async def get_vllm_settings():
     from utils.vllm_settings import load_vllm_settings
@@ -77,7 +99,12 @@ async def get_templates():
 
 @router.put("/templates")
 async def save_templates(templates_data: dict):
-    save_templates_to_file(templates_data)
+    # save_templates_to_file validates any optional `id_marker` regex — catching it
+    # here turns an author typo into a 400 instead of a mid-workflow crash later.
+    try:
+        save_templates_to_file(templates_data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return {"success": True}
 
 
@@ -282,6 +309,14 @@ AGENT_PIPELINE_META = {
         "border": "#10b981",
         "pipeline_tools": ["enhance_document_image"],
     },
+    "splitter": {
+        "step": 1.5,
+        "role": "Multi-document packet splitting",
+        "emoji": "\u2702\ufe0f",
+        "color": "rgba(217,119,6,0.15)",
+        "border": "#d97706",
+        "pipeline_tools": ["classify_packet_pages", "split_pdf"],
+    },
     "classifier": {
         "step": 3,
         "role": "Document classification",
@@ -406,6 +441,7 @@ async def list_agents():
         ("intake",                 settings.INTAKE_AGENT_ID),
         ("pre_validator",          settings.PRE_VALIDATOR_AGENT_ID),
         ("preprocessing",          settings.PREPROCESSING_AGENT_ID),
+        ("splitter",               settings.SPLITTER_AGENT_ID),
         ("classifier",             settings.CLASSIFIER_AGENT_ID),
         ("fraud_checker",          settings.FRAUD_AGENT_ID),
         ("others_extractor",       settings.GENERAL_EXTRACTOR_AGENT_ID),
@@ -425,6 +461,7 @@ async def list_agents():
         "intake": "Ingestion Agent",
         "pre_validator": "Quality Check Agent",
         "preprocessing": "Pre Processing Agent",
+        "splitter": "Document Splitter Agent",
         "classifier": "Classification Agent",
         "others_extractor": "Extraction Agent",
         "validator": "Validation Agent",

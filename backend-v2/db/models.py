@@ -1,5 +1,5 @@
-from sqlalchemy import Column, String, Float, JSON, DateTime, ForeignKey, Integer, Text
-from sqlalchemy.orm import relationship
+from sqlalchemy import Column, String, Float, JSON, DateTime, ForeignKey, Integer, Text, Boolean
+from sqlalchemy.orm import relationship, backref
 import uuid
 from datetime import datetime
 from db.database import Base
@@ -37,8 +37,23 @@ class Document(Base):
 
     customer_id = Column(String, ForeignKey("customer_references.customer_id"), nullable=True)
 
+    # ── Multi-document packet splitting (Step 1.5) ──
+    # A packet upload stays here as the immutable parent (status "split"); each
+    # document found inside it becomes a child row with its own file and workflow.
+    parent_document_id = Column(String, ForeignKey("documents.id"), nullable=True, index=True)
+    page_range = Column(String, nullable=True)           # "3-5", 1-based inclusive — children only
+    split_doc_type_hint = Column(String, nullable=True)  # doc_type the splitter assigned to this segment
+    split_confidence = Column(Float, nullable=True)      # lowest page confidence within the segment
+    is_split_parent = Column(Boolean, nullable=False, default=False)
+    split_manifest = Column(JSON, nullable=True)         # parents only: segments + per-page audit trail
+
     extracted_data = relationship("ExtractedData", back_populates="document", uselist=False, cascade="all, delete-orphan")
     customer = relationship("CustomerReference", back_populates="documents")
+    children = relationship(
+        "Document",
+        backref=backref("parent", remote_side=[id]),
+        foreign_keys=[parent_document_id],
+    )
 
 
 class ExtractedData(Base):

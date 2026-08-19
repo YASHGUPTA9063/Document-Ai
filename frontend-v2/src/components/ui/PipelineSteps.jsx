@@ -1,10 +1,11 @@
-import { Check, Cpu, Tag, FileSearch, CheckCircle, UserCheck, Package, Shield, Wand2 } from 'lucide-react';
+import { Check, Cpu, Tag, FileSearch, CheckCircle, UserCheck, Package, Shield, Wand2, Scissors } from 'lucide-react';
 
 const STEPS = [
   { key: 'intake', label: 'Ingestion', icon: Package },
+  { key: 'split', label: 'Packet Split', icon: Scissors },
   { key: 'pre_val', label: 'Quality Check', icon: Shield },
   { key: 'preprocess', label: 'Pre Processing', icon: Wand2 },
-  { key: 'classify', label: 'Split & Classification', icon: Tag },
+  { key: 'classify', label: 'Classification', icon: Tag },
   { key: 'extract', label: 'Extraction', icon: FileSearch },
   { key: 'validate', label: 'Validation', icon: CheckCircle },
   { key: 'review', label: 'Human Review', icon: UserCheck },
@@ -17,21 +18,24 @@ const STEPS = [
 function getStepState(status, idx) {
   const order = {
     pending: -1,
-    processing: 0,  // intake step
-    pre_validating: 1,  // pre-validate step
-    preprocessing: 2,  // preprocess step (NEW)
-    classifying: 3,  // was 2
-    fraud_checking: 3,  // same as classifying (runs in parallel context)
-    extracting: 4,  // was 3
-    validating: 5,  // was 4
-    awaiting_review: 6,  // was 5
-    completed: 8,  // all done (8 steps total)
+    processing: 0,          // intake
+    splitting: 1,           // packet split detection
+    awaiting_split_review: 1,
+    split: 9,               // packet done — its children carry on separately
+    pre_validating: 2,
+    preprocessing: 3,
+    classifying: 4,
+    fraud_checking: 4,      // runs alongside classification
+    extracting: 5,
+    validating: 6,
+    awaiting_review: 7,
+    completed: 9,           // all done (9 steps total)
     rejected: -2,
     error: -2,
   };
 
   const active = order[status] ?? -1;
-  if (active === 7) return 'done';
+  if (active === 8) return 'done';
   if (idx < active) return 'done';
   if (idx === active) return 'running';
   return '';

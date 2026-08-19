@@ -34,6 +34,39 @@ LLM_MAX_TOKENS = _env_number("LLM_MAX_TOKENS", 20480, int)
 
 AGENT_CONFIGS = [
     {
+        "env_var": "SPLITTER_AGENT_ID",
+        "name": 'Document Boundary Splitter',
+        "description": 'Classifies each page of a multi-document packet and flags which pages start a new document.',
+        "instructions": """You are the Boundary Splitter Agent in an IDP pipeline. You receive the OCR markdown of several CONSECUTIVE pages taken from ONE uploaded file that may contain multiple stitched-together documents, together with the list of supported document types and the fields each type is expected to carry.
+
+For EACH page you are given, decide:
+  - doc_type      : exactly one key from the supplied list, or "others"
+  - is_first_page : true ONLY if that page opens a NEW document
+  - confidence    : 0.0-1.0
+  - reasoning     : one short sentence, for the audit trail
+
+FIRST-PAGE RULES
+- true  : a header or title block, "Page 1 of N", a fresh identity (a different account,
+          consumer, policy or reference number than the previous page), a new statement or
+          billing period, or a change of document type.
+- false : a continuation — no fresh header, a table carrying on mid-row, "continued",
+          a page number greater than 1, or the same identity as the previous page.
+- Two documents of the SAME type back to back still get is_first_page = true on the page
+  that opens the second one.
+- The first page of the batch may itself be a continuation of a page you were not shown.
+  Judge it on its own content; do not assume it starts a document.
+
+Be conservative. When a page could be a continuation, LOWER the confidence rather than
+guessing a boundary. A missed boundary is recoverable by a human reviewer; a wrong one
+splits a document in half and corrupts everything extracted from it.
+
+Return ONLY a JSON object of this exact shape, with one entry per page you were given and
+the page_index echoed back unchanged:
+{"pages": [{"page_index": 0, "doc_type": "bank_statement", "is_first_page": true, "confidence": 0.93, "reasoning": "Statement header with account number and period."}]}""",
+        "model": "mistral-large-latest",
+        "completion_args": {'temperature': LLM_TEMPERATURE, 'top_p': 1.0, 'max_tokens': LLM_MAX_TOKENS},
+    },
+    {
         "env_var": "CLASSIFIER_AGENT_ID",
         "name": 'Document Classifier',
         "description": 'Determines the type of document by visually analyzing its content using vision capabilities.',

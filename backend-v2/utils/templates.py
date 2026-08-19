@@ -11,6 +11,7 @@ defaults.
 """
 
 import os
+import re
 import json
 import logging
 
@@ -34,7 +35,7 @@ def load_templates():
                 for key, value in raw.items():
                     if isinstance(value, list):
                         # Old format: bare list of fields
-                        normalized[key] = {"fields": value, "is_kyc": False}
+                        normalized[key] = {"fields": value, "is_kyc": False, "id_marker": None}
                     elif isinstance(value, dict):
                         # New format: already has fields + is_kyc + use_vlm
                         if "fields" not in value:
@@ -43,9 +44,14 @@ def load_templates():
                             value["is_kyc"] = False
                         if "use_vlm" not in value:
                             value["use_vlm"] = False
+                        # id_marker: optional regex used by the packet splitter to
+                        # sanity-check that a segment really is this document type.
+                        # Absent (the common case) means "no marker rule for this type".
+                        if not value.get("id_marker"):
+                            value["id_marker"] = None
                         normalized[key] = value
                     else:
-                        normalized[key] = {"fields": [], "is_kyc": False, "use_vlm": False}
+                        normalized[key] = {"fields": [], "is_kyc": False, "use_vlm": False, "id_marker": None}
                 # Normalize field-level defaults: ensure every field has a weight
                 for tpl in normalized.values():
                     for field in tpl.get("fields", []):
@@ -57,7 +63,28 @@ def load_templates():
     return DEFAULT_TEMPLATES
 
 
+def validate_id_markers(templates_data: dict) -> None:
+    """
+    Reject an unparseable `id_marker` regex at save time.
+
+    The marker is compiled inside the splitter, where a bad pattern would fail a
+    document mid-workflow with an opaque error. Failing here instead turns it
+    into a 400 on the template save the author is looking at.
+    """
+    for name, tpl in (templates_data or {}).items():
+        if not isinstance(tpl, dict):
+            continue
+        marker = tpl.get("id_marker")
+        if not marker:
+            continue
+        try:
+            re.compile(marker)
+        except re.error as e:
+            raise ValueError(f"Template '{name}' has an invalid id_marker regex: {e}")
+
+
 def save_templates_to_file(templates_data):
+    validate_id_markers(templates_data)
     os.makedirs(settings.STORAGE_DIR, exist_ok=True)
     with open(TEMPLATES_FILE, "w") as f:
         json.dump(templates_data, f, indent=2)

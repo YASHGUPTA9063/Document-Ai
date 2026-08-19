@@ -25,12 +25,14 @@ api.interceptors.response.use(
  * Upload a document.
  * @param {File} file
  * @param {(pct: number) => void} onProgress
+ * @param {{autoSplit?: boolean}} options - autoSplit: detect multi-document packets and split them
  * @returns {Promise<{document_id, filename, status, message, workflow_run_id}>}
  */
-export async function uploadDocument(file, onProgress) {
+export async function uploadDocument(file, onProgress, { autoSplit = true } = {}) {
   const form = new FormData();
   form.append('file', file);
   const { data } = await api.post('/upload', form, {
+    params: { auto_split: autoSplit },
     headers: { 'Content-Type': 'multipart/form-data' },
     onUploadProgress: (e) => {
       if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100));
@@ -46,10 +48,11 @@ export async function uploadDocument(file, onProgress) {
  * @param {(pct: number) => void} onProgress  — overall upload progress 0-100
  * @returns {Promise<{ total, succeeded, failed, results: Array }>}
  */
-export async function uploadDocumentsBatch(files, onProgress) {
+export async function uploadDocumentsBatch(files, onProgress, { autoSplit = true } = {}) {
   const form = new FormData();
   files.forEach((f) => form.append('files', f));
   const { data } = await api.post('/upload/batch', form, {
+    params: { auto_split: autoSplit },
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: 300_000, // 5 min — large batches can take a while
     onUploadProgress: (e) => {
@@ -284,6 +287,51 @@ export async function getClassificationConfig() {
  */
 export async function saveClassificationConfig(docTypes) {
   const { data } = await api.put('/settings/classification', docTypes);
+  return data;
+}
+
+// ─── Document splitting ──────────────────────────────
+
+/**
+ * Get the split manifest for a packet: detected segments, the per-page audit
+ * trail, and the live state of each child document.
+ * 404s when the document was never split.
+ * @param {string} documentId
+ * @returns {Promise<{document_id, filename, status, segments: Array, pages: Array, children: Array}>}
+ */
+export async function getSplitManifest(documentId) {
+  const { data } = await api.get(`/documents/${documentId}/split`);
+  return data;
+}
+
+/**
+ * Answer a packet paused at the split review gate.
+ * @param {string} documentId
+ * @param {boolean} approved - false processes the file as one document
+ * @param {Array<{doc_type: string, start: number, end: number}>|null} segments
+ *        null accepts the detected boundaries; otherwise these replace them
+ *        (0-based page indexes, inclusive, contiguous, covering every page)
+ */
+export async function submitSplitDecision(documentId, approved, segments = null) {
+  const { data } = await api.post(`/documents/${documentId}/split-decision`, { approved, segments });
+  return data;
+}
+
+/**
+ * Get document splitting settings.
+ * @returns {Promise<{enabled, confidence_threshold, page_batch_size, max_pages, require_review, merge_orphans}>}
+ */
+export async function getSplitSettings() {
+  const { data } = await api.get('/settings/splitting');
+  return data;
+}
+
+/**
+ * Save document splitting settings.
+ * @param {object} config
+ */
+export async function saveSplitSettings(config) {
+  const { data } = await api.put('/settings/splitting', config);
   return data;
 }
 

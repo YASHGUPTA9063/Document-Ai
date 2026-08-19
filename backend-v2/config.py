@@ -45,6 +45,18 @@ class Settings(BaseSettings):
     # Auto-Verifier Agent
     AUTO_VERIFIER_AGENT_ID: str = Field(default="", description="Auto-Verifier Agent ID from Mistral Studio")
 
+    # Document Splitting (Step 1.5)
+    # Detects multi-document packets (one upload holding 2-N stitched documents),
+    # splits them into per-document PDFs and fans out one child workflow each.
+    # Off by default — with the flag false the pipeline behaves exactly as before.
+    ENABLE_DOC_SPLITTING: bool = Field(default=False, description="Detect and split multi-document packets (Step 1.5)")
+    SPLITTER_AGENT_ID: str = Field(default="", description="Page-Boundary Splitter Agent ID from Mistral Studio")
+    SPLIT_CONFIDENCE_THRESHOLD: float = Field(default=0.75, ge=0.0, le=1.0, description="Below this a page boundary is routed to human review, and the segment's type is not reused downstream")
+    SPLIT_PAGE_BATCH_SIZE: int = Field(default=8, gt=0, description="Pages sent to the splitter agent per call")
+    SPLIT_MAX_PAGES: int = Field(default=50, gt=0, description="Packets longer than this are processed whole instead of split")
+    SPLIT_REQUIRE_REVIEW: bool = Field(default=True, description="Pause for human confirmation of boundaries when any page falls below the confidence threshold")
+    SPLIT_MERGE_ORPHANS: bool = Field(default=True, description="Merge a low-confidence single-page outlier back into the surrounding document")
+
     # Signature Verification Agent IDs
     SIGNATURE_VISION_AGENT_ID: str = Field(..., description="Signature Vision Agent ID from Mistral Studio")
     SIGNATURE_JUDGE_AGENT_ID: str = Field(..., description="Signature Judge Agent ID from Mistral Studio")

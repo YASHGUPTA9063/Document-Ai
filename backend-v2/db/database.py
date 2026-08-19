@@ -37,6 +37,14 @@ async def init_db():
             "ALTER TABLE extracted_data ADD COLUMN signature_verification JSON",
             "ALTER TABLE extracted_data ADD COLUMN photo_verification JSON",
             "ALTER TABLE extracted_data ADD COLUMN fraud_check JSON",
+            # Multi-document packet splitting (Step 1.5)
+            "ALTER TABLE documents ADD COLUMN parent_document_id VARCHAR",
+            "ALTER TABLE documents ADD COLUMN page_range VARCHAR",
+            "ALTER TABLE documents ADD COLUMN split_doc_type_hint VARCHAR",
+            "ALTER TABLE documents ADD COLUMN split_confidence FLOAT",
+            "ALTER TABLE documents ADD COLUMN is_split_parent BOOLEAN DEFAULT 0",
+            "ALTER TABLE documents ADD COLUMN split_manifest JSON",
+            "CREATE INDEX IF NOT EXISTS ix_documents_parent_document_id ON documents (parent_document_id)",
         ]:
             try:
                 await conn.execute(text(col))

@@ -2,7 +2,9 @@ import { useEffect, useRef } from 'react';
 import { getStatus } from '../api/client';
 import { useApp } from '../store/AppStore';
 
-const TERMINAL_STATUSES = new Set(['completed', 'rejected', 'error', 'deleted']);
+// `split` is terminal for a packet: it has no extraction of its own, the child
+// documents it produced carry the work from here.
+const TERMINAL_STATUSES = new Set(['completed', 'rejected', 'error', 'deleted', 'split']);
 const POLL_INTERVAL = 2500; // ms
 
 /**
@@ -33,6 +35,8 @@ export function useDocumentPoller(documentId) {
         if (prevStatus.current && prevStatus.current !== data.status) {
           if (data.status === 'completed') toast(`Document processed successfully!`, 'success');
           if (data.status === 'awaiting_review') toast(`Document needs human review.`, 'warn');
+          if (data.status === 'awaiting_split_review') toast(`Multiple documents detected — confirm the split.`, 'warn');
+          if (data.status === 'split') toast(`Packet split into ${data.child_count || 0} documents.`, 'success');
           if (data.status === 'rejected') toast(`Document rejected: ${data.message || 'See document for reason.'}`, 'error');
           if (data.status === 'error') toast(`Processing error: ${data.message}`, 'error');
         }

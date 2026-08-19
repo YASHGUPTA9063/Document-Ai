@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Trash2, RefreshCw, ChevronLeft, ChevronRight, Folder, FileText, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Trash2, RefreshCw, ChevronLeft, ChevronRight, Folder, FileText, AlertCircle, ChevronDown, ChevronUp, Scissors, CornerDownRight } from 'lucide-react';
 import { deleteDocument, listDocuments } from '../api/client';
 import { useApp } from '../store/AppStore';
 import { StatusBadge } from '../components/ui/StatusBadge';
+import { SplitReviewModal } from '../components/ui/SplitReviewModal';
 
 const STATUS_FILTERS = ['all', 'pending', 'processing', 'awaiting_review', 'completed', 'rejected', 'failed', 'error'];
 
@@ -59,6 +60,8 @@ export function Documents() {
   const [filter, setFilter] = useState('all');
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(null);
+  const [collapsed, setCollapsed] = useState({});   // parent id -> children hidden
+  const [reviewingSplit, setReviewingSplit] = useState(null);
   const navigate = useNavigate();
   const LIMIT = 20;
 
@@ -78,8 +81,35 @@ export function Documents() {
 
   const filtered = filter === 'all' ? documents : documents.filter((d) => d.status === filter);
 
+  // Nest split children under the packet they came from. A child whose parent is
+  // not on this page (pagination, or a filter) still renders on its own so it can
+  // never silently disappear from the list.
+  const rows = (() => {
+    const byParent = {};
+    filtered.forEach((d) => {
+      if (d.parent_document_id) {
+        (byParent[d.parent_document_id] ||= []).push(d);
+      }
+    });
+    const visibleIds = new Set(filtered.map((d) => d.id));
+    const ordered = [];
+    filtered.forEach((d) => {
+      if (d.parent_document_id && visibleIds.has(d.parent_document_id)) return;  // rendered under its parent
+      ordered.push({ doc: d, depth: 0 });
+      if (!collapsed[d.id]) {
+        (byParent[d.id] || []).forEach((child) => ordered.push({ doc: child, depth: 1 }));
+      }
+    });
+    return ordered;
+  })();
+
+  const toggleCollapsed = (id) => setCollapsed((prev) => ({ ...prev, [id]: !prev[id] }));
+
   const handleDelete = async (doc) => {
-    if (!confirm(`Delete "${doc.filename}"?`)) return;
+    const warning = doc.is_split_parent && doc.child_count
+      ? `Delete "${doc.filename}" and the ${doc.child_count} document(s) split out of it?`
+      : `Delete "${doc.filename}"?`;
+    if (!confirm(warning)) return;
     setDeleting(doc.id);
     try {
       await deleteDocument(doc.id);
@@ -94,6 +124,15 @@ export function Documents() {
 
   return (
     <div className="page">
+      {reviewingSplit && (
+        <SplitReviewModal
+          documentId={reviewingSplit}
+          open
+          toast={toast}
+          onClose={() => setReviewingSplit(null)}
+          onDecided={() => load(page)}
+        />
+      )}
       <div className="card">
         <div className="card-header">
           <div>
@@ -150,16 +189,40 @@ export function Documents() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((doc) => (
+                {rows.map(({ doc, depth }) => (
                   <tr key={doc.id}>
                     <td>
-                      <FileText size={14} className="doc-icon" style={{ display: 'inline-block', verticalAlign: 'middle' }} />
-                      <span
-                        className="doc-filename-link"
-                        onClick={() => navigate('/extraction', { state: { docId: doc.id } })}
-                      >
-                        {doc.filename}
-                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: depth * 22 }}>
+                        {depth > 0 && <CornerDownRight size={12} style={{ color: 'var(--muted)', flexShrink: 0 }} />}
+
+                        {doc.is_split_parent ? (
+                          <button
+                            onClick={() => toggleCollapsed(doc.id)}
+                            title={collapsed[doc.id] ? 'Show contained documents' : 'Hide contained documents'}
+                            style={{ all: 'unset', cursor: 'pointer', display: 'inline-flex', color: 'var(--muted)' }}
+                          >
+                            {collapsed[doc.id] ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+                          </button>
+                        ) : (
+                          <FileText size={14} className="doc-icon" style={{ flexShrink: 0 }} />
+                        )}
+
+                        <span
+                          className="doc-filename-link"
+                          onClick={() => navigate('/extraction', { state: { docId: doc.id } })}
+                        >
+                          {doc.filename}
+                        </span>
+
+                        {doc.is_split_parent && (
+                          <span className="badge badge-purple" style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                            <Scissors size={10} /> {doc.child_count} inside
+                          </span>
+                        )}
+                        {doc.page_range && (
+                          <span className="badge badge-gray">p{doc.page_range}</span>
+                        )}
+                      </div>
                     </td>
                     <td>
                       {doc.doc_type
@@ -169,6 +232,15 @@ export function Documents() {
                     <td style={{ whiteSpace: 'normal', overflow: 'visible' }}>
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
                         <StatusBadge status={doc.status} />
+                        {doc.status === 'awaiting_split_review' && (
+                          <button
+                            className="btn btn-primary btn-sm"
+                            style={{ padding: '3px 8px', fontSize: 11 }}
+                            onClick={() => setReviewingSplit(doc.id)}
+                          >
+                            <Scissors size={11} /> Review split
+                          </button>
+                        )}
                         {['rejected', 'failed', 'error'].includes(doc.status) && doc.message && (
                           <ExpandableReason reason={doc.message} />
                         )}

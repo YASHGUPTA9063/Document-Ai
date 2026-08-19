@@ -38,6 +38,11 @@ test.*
 test_*.*
 fake*.*
 scratch.*
+# ...but the real test suites live in backend-v2/tests/ and must be committed.
+# Without this negation, `test_*.*` above silently drops every NEW test file;
+# the existing ones only survive because they were already tracked.
+!backend-v2/tests/
+!backend-v2/tests/*.py
 
 # Log and debug output files
 *.log

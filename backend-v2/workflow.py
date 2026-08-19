@@ -5,6 +5,8 @@ with workflows.workflow.unsafe.imports_passed_through():
     from activities.intake import intake_activity
     from activities.preprocessor import preprocessor_activity
     from activities.classifier import classifier_activity
+    from activities.splitter import splitter_activity
+    from activities.split_fanout import split_fanout_activity
     from activities.extractor import extractor_activity
     from activities.validator import validator_activity
     from activities.reviewer import reviewer_activity
@@ -13,7 +15,7 @@ with workflows.workflow.unsafe.imports_passed_through():
     from activities.fraud_checker import fraud_check_activity
     from activities.auto_verifier import auto_verify_activity
     import db.operations as db
-    from schemas.documents import DuplicateDecisionRequest, ReviewerDecisionRequest
+    from schemas.documents import DuplicateDecisionRequest, ReviewerDecisionRequest, SplitDecisionRequest
     from config import settings
 
 
@@ -38,6 +40,15 @@ async def update_doc_type_activity(document_id: str, doc_type: str) -> str:
     return doc_type
 
 @workflows.activity()
+async def rebuild_segments_activity(overrides: list, total_pages: int) -> list:
+    """Turn reviewer-confirmed boundaries back into segments (validates coverage)."""
+    from tools.splitter import build_segments_from_overrides
+    from tools.classifier import get_supported_doc_types
+    segments = build_segments_from_overrides(overrides, total_pages, get_supported_doc_types())
+    return [s.model_dump() for s in segments]
+
+
+@workflows.activity()
 async def get_template_metadata_activity(doc_type: str) -> dict:
     from tools.extractor import get_template_metadata
     return get_template_metadata(doc_type)
@@ -58,7 +69,19 @@ async def _update_doc_type(document_id: str, doc_type: str) -> str:
 class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
 
     @workflows.workflow.entrypoint
-    async def run(self, document_id: str, filename: str, file_path: str) -> dict:
+    async def run(self, document_id: str, filename: str, file_path: str,
+                  auto_split: bool = True,
+                  preclassified_doc_type: str = "",
+                  preclassified_confidence: float = 0.0,
+                  preclassified_reasoning: str = "") -> dict:
+        """
+        The per-document pipeline.
+
+        `auto_split` and the `preclassified_*` fields are set by the packet
+        splitter when it fans out the documents found inside an upload. They are
+        all defaulted, so an ordinary single-document upload — and any execution
+        already in flight — behaves exactly as it did before splitting existed.
+        """
         logger.info(f"Starting workflow for document {document_id}")
 
         # Step 1 — Intake
@@ -76,6 +99,61 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
                 return {"status": "rejected", "reason": "duplicate_not_overridden"}
             else:
                 await _update_status_and_message(document_id, "processing", "")
+
+        # Step 1.5 — Split detection (multi-document packets)
+        # Runs ahead of pre-validation so each document found inside the packet gets
+        # its own quality gate instead of one verdict for the whole stack. A failure
+        # here degrades to "process the packet whole" rather than failing the upload.
+        # ENABLE_DOC_SPLITTING is the deploy-level kill switch; the runtime toggle
+        # in Settings (storage/splitting_config.json) is checked inside the activity.
+        if auto_split and settings.ENABLE_DOC_SPLITTING:
+            await _update_status(document_id, "splitting")
+            try:
+                split_result = await splitter_activity(document_id, file_path)
+            except Exception as e:
+                logger.warning(
+                    f"[Document {document_id}] Split detection failed, processing as a "
+                    f"single document: {e}"
+                )
+                split_result = {"split": False, "reason": "splitter_error"}
+
+            if split_result.get("split"):
+                segments = split_result["segments"]
+
+                if split_result.get("needs_review"):
+                    logger.info(f"[Document {document_id}] Pausing for split boundary review")
+                    await _update_status_and_message(
+                        document_id, "awaiting_split_review",
+                        f"{len(segments)} documents detected in this file. Confirm the boundaries."
+                    )
+                    split_decision = await self.wait_for_input(SplitDecisionRequest, timeout=timedelta(hours=24))
+
+                    if not split_decision.approved:
+                        logger.info(f"[Document {document_id}] Reviewer rejected the split — processing whole")
+                        split_result["split"] = False
+                        await _update_status_and_message(document_id, "processing", "")
+                    elif split_decision.segments:
+                        segments = await rebuild_segments_activity(
+                            [s.model_dump() for s in split_decision.segments],
+                            split_result.get("page_count", 0),
+                        )
+
+                if split_result.get("split"):
+                    await _update_status(document_id, "splitting")
+                    fanout = await split_fanout_activity(
+                        document_id, filename, file_path, segments, split_result.get("pages")
+                    )
+                    logger.info(
+                        f"Completed workflow for document {document_id} — "
+                        f"split into {len(fanout['children'])} documents"
+                    )
+                    # The parent ends here; each child runs this workflow on its own.
+                    return {"status": "split", **fanout}
+            else:
+                logger.info(
+                    f"[Document {document_id}] No split "
+                    f"({split_result.get('reason') or 'single document'}) — continuing normally."
+                )
 
         # Step 2 — Pre-Validation
         # Checks blur, brightness, skew, readability, watermark (warning), orientation, blank document, and password protection.
@@ -113,9 +191,21 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
             logger.info(f"[Document {document_id}] ENABLE_PREPROCESSING=false — skipping preprocessing step.")
 
         # Step 3 — Classify
-        await _update_status(document_id, "classifying")
-        classifier_result = await classifier_activity(document_id, clean_file_path)
-        doc_type = classifier_result["doc_type"]
+        # A document that came out of a packet split was already classified page by
+        # page during Step 1.5, so it carries its type in and skips this call
+        # entirely. The splitter withholds the type when it resolved to "others" or
+        # landed below the confidence threshold, and the child classifies normally.
+        if preclassified_doc_type:
+            doc_type = preclassified_doc_type
+            logger.info(
+                f"[Document {document_id}] Reusing split classification '{doc_type}' "
+                f"(conf={preclassified_confidence:.2f}) — skipping classifier. "
+                f"{preclassified_reasoning}"
+            )
+        else:
+            await _update_status(document_id, "classifying")
+            classifier_result = await classifier_activity(document_id, clean_file_path)
+            doc_type = classifier_result["doc_type"]
         await _update_doc_type(document_id, doc_type)
 
         # Step 3.5 — Fraud Check (if KYC Document)

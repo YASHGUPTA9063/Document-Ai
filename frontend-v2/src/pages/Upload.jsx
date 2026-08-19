@@ -3,8 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   UploadCloud, X, FileText, Image, File,
   CheckCircle2, ScanSearch, Brain, ShieldCheck, UserCheck, Share2,
-  XCircle, Layers, RefreshCw, AlertTriangle, Zap,
-} from 'lucide-react';
+  XCircle, Layers, RefreshCw, AlertTriangle, Zap, Scissors } from 'lucide-react';
 import { uploadDocumentsBatch } from '../api/client';
 import { useApp } from '../store/AppStore';
 import { useDocumentPoller } from '../hooks/useDocumentPoller';
@@ -130,6 +129,7 @@ export function Upload() {
   const [batchProgress, setBatchProgress] = useState(0);
   const [batchResult, setBatchResult]   = useState(null);
   const [uploadedIds, setUploadedIds]   = useState([]);
+  const [autoSplit, setAutoSplit]       = useState(true);
 
   const fileInputRef = useRef(null);
   const itemIdRef    = useRef(0);
@@ -204,7 +204,7 @@ export function Upload() {
 
     try {
       const files  = ready.map((i) => i.file);
-      const result = await uploadDocumentsBatch(files, (pct) => setBatchProgress(pct));
+      const result = await uploadDocumentsBatch(files, (pct) => setBatchProgress(pct), { autoSplit });
 
       setBatchResult(result);
 
@@ -311,6 +311,28 @@ export function Upload() {
               <Zap size={12} />
               <span>Concurrently Processed via Mistral AI</span>
             </div>
+
+            {/* Auto-split toggle — a PDF holding several documents is detected and
+                separated before any of them is classified or extracted. */}
+            <button
+              onClick={(e) => { e.stopPropagation(); setAutoSplit((v) => !v); }}
+              disabled={uploading}
+              title="Detect files that contain several documents and process each one separately"
+              style={{
+                all: 'unset', cursor: uploading ? 'default' : 'pointer',
+                display: 'inline-flex', alignItems: 'center', gap: 8,
+                marginTop: 10, padding: '7px 12px', borderRadius: 8,
+                border: `1px solid ${autoSplit ? 'var(--accent)' : 'var(--border)'}`,
+                background: autoSplit ? 'var(--accent-dim)' : 'transparent',
+                color: autoSplit ? 'var(--accent)' : 'var(--muted)',
+                fontSize: 11.5, fontWeight: 600,
+                opacity: uploading ? 0.5 : 1,
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <Scissors size={12} />
+              {autoSplit ? 'Auto-split multi-document files: on' : 'Auto-split multi-document files: off'}
+            </button>
 
             <input
               ref={fileInputRef}

@@ -547,3 +547,30 @@ async def delete_claim(claim_id: str) -> bool:
         logger.info(f"Deleted claim {claim_id} and its document links.")
         return True
 
+
+
+async def get_claim_links_for_document(document_id: str) -> list[ClaimDocumentLink]:
+    """Every claim link pointing at this document (usually zero or one)."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(ClaimDocumentLink).where(ClaimDocumentLink.document_id == document_id)
+        )
+        return list(result.scalars().all())
+
+
+async def remove_claim_links_for_document(document_id: str) -> int:
+    """
+    Drop this document's claim links.
+
+    Used when a packet is split: the claim wants the documents found inside it,
+    not the packet row, so the parent's link is replaced by one link per child.
+    """
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(ClaimDocumentLink).where(ClaimDocumentLink.document_id == document_id)
+        )
+        links = list(result.scalars().all())
+        for link in links:
+            await session.delete(link)
+        await session.commit()
+        return len(links)

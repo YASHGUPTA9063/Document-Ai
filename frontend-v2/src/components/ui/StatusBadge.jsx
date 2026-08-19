@@ -1,5 +1,5 @@
 import {
-  Upload, Bot, FileSearch, CheckCircle, AlertTriangle, Check, X, AlertCircle, Shield, Wand2
+  Upload, Bot, FileSearch, CheckCircle, AlertTriangle, Check, X, AlertCircle, Shield, Wand2, Scissors
 } from 'lucide-react';
 
 const STATUS_MAP = {
@@ -7,6 +7,9 @@ const STATUS_MAP = {
   pre_validating:   { label: 'Quality Check',    cls: 'badge-cyan',   icon: Shield },
   preprocessing:    { label: 'Pre Processing',   cls: 'badge-purple', icon: Wand2 },
   processing:       { label: 'Ingestion',        cls: 'badge-blue',   icon: Upload },
+  splitting:        { label: 'Splitting',        cls: 'badge-blue',   icon: Scissors },
+  split:            { label: 'Split Packet',     cls: 'badge-purple', icon: Scissors },
+  awaiting_split_review: { label: 'Confirm Split', cls: 'badge-yellow', icon: AlertTriangle },
   classifying:      { label: 'Classification',   cls: 'badge-blue',   icon: Bot },
   fraud_checking:   { label: 'Fraud Checking',   cls: 'badge-blue',   icon: Shield },
   extracting:       { label: 'Extraction',       cls: 'badge-blue',   icon: FileSearch },
