@@ -157,8 +157,32 @@ export function getDocumentFileUrl(documentId) {
 }
 
 /**
+ * Get the URL for one page of a document rendered as a PNG.
+ * The browser's PDF embed cannot be drawn on, so citation highlighting shows
+ * the page as an image and overlays the OCR boxes on that instead.
+ * @param {string} documentId
+ * @param {number} pageIndex 0-based
+ * @returns {string}
+ */
+export function getDocumentPageUrl(documentId, pageIndex) {
+  return `${BASE}/documents/${documentId}/page/${pageIndex}`;
+}
+
+/**
+ * Number of pages the document can be rendered as images. Non-PDFs report 1.
+ * @param {string} documentId
+ * @returns {Promise<{ page_count: number, renderable: boolean }>}
+ */
+export async function getDocumentPageCount(documentId) {
+  const { data } = await api.get(`/documents/${documentId}/page-count`);
+  return data;
+}
+
+/**
  * Get OCR bounding box blocks for field citation highlighting.
- * Only available for image documents (PNG/JPEG/WEBP) processed after this feature was added.
+ * Available for any document OCR produced spatial blocks for — images and
+ * PDFs alike. DOCX and documents processed before the feature existed report
+ * available: false.
  * @param {string} documentId
  * @returns {Promise<{ blocks: Array, available: boolean }>}
  */

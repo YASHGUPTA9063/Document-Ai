@@ -22,7 +22,7 @@ import asyncio
 from typing import List
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import delete, desc as _desc
 from sqlalchemy.future import select
@@ -44,6 +44,27 @@ from api.deps import ALLOWED_TYPES, get_mistral_client
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Documents"])
+
+# Rendering DPI for /documents/{id}/page/{n}. High enough to stay legible when
+# the viewer is zoomed in, low enough to keep the PNG small — alignment of the
+# citation boxes does not depend on it either way.
+PAGE_RENDER_DPI = 150
+
+_RENDERABLE_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
+
+
+async def _get_document_or_404(document_id: str) -> Document:
+    """Load a document row, or raise 404 if it is missing or has no file."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Document).where(Document.id == document_id)
+        )
+        doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if not doc.file_path or not os.path.exists(doc.file_path):
+        raise HTTPException(status_code=404, detail="Document file not found on disk")
+    return doc
 
 
 # ─── Upload ──────────────────────────────────────────────────────────────────
@@ -370,41 +391,34 @@ async def update_extracted_data(document_id: str, payload: UpdateExtractedDataRe
 
 @router.get("/documents/{document_id}/file")
 async def get_document_file(document_id: str):
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Document).where(Document.id == document_id)
-        )
-        doc = result.scalar_one_or_none()
-        if not doc:
-            raise HTTPException(status_code=404, detail="Document not found")
+    doc = await _get_document_or_404(document_id)
 
-        if not doc.file_path or not os.path.exists(doc.file_path):
-            raise HTTPException(status_code=404, detail="Document file not found on disk")
+    mime_type, _ = mimetypes.guess_type(doc.file_path)
+    if not mime_type:
+        mime_type = "application/octet-stream"
 
-        mime_type, _ = mimetypes.guess_type(doc.file_path)
-        if not mime_type:
-            mime_type = "application/octet-stream"
-
-        # Use inline disposition so the browser renders PDFs/images directly
-        # instead of triggering a file download.
-        # Sanitize filename for HTTP headers: replace non-ASCII chars (e.g. em
-        # dash \u2014) with underscores — HTTP headers are restricted to Latin-1.
-        safe_filename = doc.filename.encode('ascii', 'replace').decode('ascii').replace('?', '_')
-        return FileResponse(
-            doc.file_path,
-            media_type=mime_type,
-            filename=safe_filename,
-            content_disposition_type="inline",
-            headers={"Cache-Control": "no-cache"},
-        )
+    # Use inline disposition so the browser renders PDFs/images directly
+    # instead of triggering a file download.
+    # Sanitize filename for HTTP headers: replace non-ASCII chars (e.g. em
+    # dash \u2014) with underscores — HTTP headers are restricted to Latin-1.
+    safe_filename = doc.filename.encode('ascii', 'replace').decode('ascii').replace('?', '_')
+    return FileResponse(
+        doc.file_path,
+        media_type=mime_type,
+        filename=safe_filename,
+        content_disposition_type="inline",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 @router.get("/documents/{document_id}/ocr-blocks")
 async def get_ocr_blocks(document_id: str):
     """
     Return saved OCR bounding box blocks for field citation highlighting.
-    Only available for image documents (PNG/JPEG/WEBP) processed after this feature was added.
-    Returns { blocks: [...], available: false } gracefully for PDFs, DOCX, or older documents.
+    Available for any document OCR produced spatial blocks for (images and
+    PDFs alike); DOCX has no layout, and documents processed before the
+    feature existed have no sidecar file.
+    Returns { blocks: [...], available: false } gracefully in those cases.
     """
     blocks_path = os.path.join(
         settings.STORAGE_DIR, "ocr_blocks", f"{document_id}_blocks.json"
@@ -418,6 +432,75 @@ async def get_ocr_blocks(document_id: str):
     except Exception as e:
         logger.warning(f"Failed to read OCR blocks for document {document_id}: {e}")
         return {"blocks": [], "available": False}
+
+
+@router.get("/documents/{document_id}/page-count")
+async def get_document_page_count(document_id: str):
+    """
+    Number of pages the document can be rendered as images (see /page/{n}).
+    PDFs report their real page count; anything else reports 1 so callers can
+    treat every document the same way.
+    """
+    doc = await _get_document_or_404(document_id)
+    _, ext = os.path.splitext((doc.file_path or "").lower())
+    if ext != ".pdf":
+        return {"page_count": 1, "renderable": ext in _RENDERABLE_IMAGE_EXTS}
+    try:
+        import fitz  # PyMuPDF
+
+        with fitz.open(doc.file_path) as pdf:
+            return {"page_count": pdf.page_count, "renderable": True}
+    except Exception as e:
+        logger.warning(f"Failed to read page count for document {document_id}: {e}")
+        return {"page_count": 1, "renderable": False}
+
+
+@router.get("/documents/{document_id}/page/{page_index}")
+async def get_document_page_image(
+    document_id: str,
+    page_index: int,
+    dpi: int = Query(PAGE_RENDER_DPI, ge=72, le=300),
+):
+    """
+    Render one page of a PDF to a PNG.
+
+    Citation highlighting draws OCR bounding boxes over the page, which the
+    browser's built-in PDF embed gives no way to do — so the viewer asks for
+    the page as an image and overlays the boxes on that instead. Boxes are
+    scaled by the page dimensions stored alongside them, so the render DPI
+    here only affects sharpness, never alignment.
+    """
+    doc = await _get_document_or_404(document_id)
+    _, ext = os.path.splitext((doc.file_path or "").lower())
+    if ext != ".pdf":
+        raise HTTPException(status_code=400, detail="Page rendering is only supported for PDFs")
+
+    try:
+        import fitz  # PyMuPDF
+    except ImportError:
+        raise HTTPException(status_code=501, detail="PDF rendering requires PyMuPDF")
+
+    def _render() -> bytes:
+        with fitz.open(doc.file_path) as pdf:
+            if page_index < 0 or page_index >= pdf.page_count:
+                raise IndexError(page_index)
+            return pdf[page_index].get_pixmap(dpi=dpi).tobytes("png")
+
+    try:
+        png_bytes = await asyncio.to_thread(_render)
+    except IndexError:
+        raise HTTPException(status_code=404, detail="Page out of range")
+    except Exception as e:
+        logger.error(f"Failed to render page {page_index} of document {document_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to render page")
+
+    return Response(
+        content=png_bytes,
+        media_type="image/png",
+        # The rendered page is a pure function of the file and the DPI, and the
+        # file never changes once uploaded.
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @router.get("/documents/{document_id}/crops/{filename}")

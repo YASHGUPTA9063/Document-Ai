@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Copy, Download, ChevronDown, ChevronRight, Maximize2, ExternalLink, FileText, FileSearch, CheckCircle2, AlertTriangle, Edit2, Check, X, Trash2, Plus, ShieldCheck, UserCircle2, PenTool, ZoomIn, ZoomOut, Maximize, Upload, RotateCcw, Shield, Eye, Fingerprint, Users, Bot } from 'lucide-react';
-import { getExtractedData, getDocumentFileUrl, updateExtractedData, getTemplates, verifySignature, getOcrBlocks } from '../api/client';
+import { Copy, Download, ChevronDown, ChevronRight, ChevronLeft, Maximize2, ExternalLink, FileText, FileSearch, CheckCircle2, AlertTriangle, Edit2, Check, X, Trash2, Plus, ShieldCheck, UserCircle2, PenTool, ZoomIn, ZoomOut, Maximize, Upload, RotateCcw, Shield, Eye, Fingerprint, Users, Bot } from 'lucide-react';
+import { getExtractedData, getDocumentFileUrl, getDocumentPageUrl, getDocumentPageCount, updateExtractedData, getTemplates, verifySignature, getOcrBlocks } from '../api/client';
 import { useApp } from '../store/AppStore';
 import { useDocumentList } from '../hooks/useDocumentList';
+import { findCitationAcrossPages } from '../utils/citationMatch';
 
 function isNullOrEmpty(v) {
   if (v === null || v === undefined) return true;
@@ -1520,8 +1521,20 @@ function KycImageCard({ label, icon: Icon, base64Data, detected, accentColor, ve
   );
 }
 
+const EMPTY_CITATION = { blocks: [], matchType: null };
+
+// Highlight styling per match confidence — an approximate or label-only hit
+// must not look as authoritative as a literal value match, or a guess reads
+// as a verified citation.
+const HIGHLIGHT_STYLES = {
+  exact:       { fill: 'rgba(99, 179, 237, 0.25)',  stroke: 'rgba(66, 153, 225, 0.90)', dashed: false, note: null },
+  partial:     { fill: 'rgba(99, 179, 237, 0.18)',  stroke: 'rgba(66, 153, 225, 0.70)', dashed: false, note: 'Partial match' },
+  approximate: { fill: 'rgba(246, 173, 85, 0.18)',  stroke: 'rgba(237, 137, 54, 0.75)', dashed: true,  note: 'Approximate match' },
+  label:       { fill: 'rgba(160, 174, 192, 0.15)', stroke: 'rgba(160, 174, 192, 0.70)', dashed: true, note: 'Field label — value not found in text' },
+};
+
 /** Inline document viewer — PDF / image / fallback */
-function DocumentViewer({ fileUrl, filename, ext, ocrBlocks = [], highlightFieldKey = null, extractedData = null, rawFields = null }) {
+function DocumentViewer({ fileUrl, filename, ext, documentId = null, pageCount = 1, ocrBlocks = [], highlightFieldKey = null, extractedData = null, rawFields = null }) {
   // ── All hooks must be at the top — no exceptions (Rules of Hooks) ──
   const imgRef    = useRef(null);
   const canvasRef = useRef(null);
@@ -1534,14 +1547,19 @@ function DocumentViewer({ fileUrl, filename, ext, ocrBlocks = [], highlightField
   const panStart = useRef({ x: 0, y: 0 });
   const panOrigin = useRef({ x: 0, y: 0 });
 
+  // Page the user navigated to. The page actually shown may differ while a
+  // citation is on screen — see displayPage below.
+  const [manualPage, setManualPage] = useState(0);
+
   const MIN_ZOOM = 0.25;
   const MAX_ZOOM = 5;
   const ZOOM_STEP = 0.15;
 
-  // Reset zoom/pan when the file changes
+  // Reset zoom/pan/page when the file changes
   useEffect(() => {
     setZoom(1);
     setPan({ x: 0, y: 0 });
+    setManualPage(0);
   }, [fileUrl]);
 
   // ── Zoom helpers ──
@@ -1626,124 +1644,105 @@ function DocumentViewer({ fileUrl, filename, ext, ocrBlocks = [], highlightField
     return () => el.removeEventListener('wheel', handleWheel);
   }, [handleWheel]);
 
-  // Strip markdown formatting from block content before substring matching
-  const stripMarkdown = (text) =>
-    (text || '').replace(/\*\*/g, '').replace(/[_*#\[\]()!`]/g, '').toLowerCase().trim();
+  // A PDF's own embed cannot be drawn on, so whenever a PDF has OCR blocks the
+  // viewer swaps to server-rendered page images and overlays the boxes there.
+  const pdfCitationMode = ext === 'pdf' && !!documentId && ocrBlocks.length > 0;
 
-  // Helper to extract primitive match strings (needles) for any value type (string, number, boolean, array, table)
-  const getValueNeedles = (val, rawVal, key) => {
-    const needles = new Set();
-    const addPrimitive = (v) => {
-      if (v === null || v === undefined || v === '') return;
-      if (typeof v === 'boolean') {
-        // Boolean fields won't literally say "true" or "false" on document. Match keyword instead.
-        const kLower = key.toLowerCase();
-        if (kLower.includes('signature') || kLower.includes('sign')) {
-          needles.add('signature');
-          needles.add('sign');
-        } else if (kLower.includes('photo') || kLower.includes('picture')) {
-          needles.add('photo');
-          needles.add('photograph');
-        }
-        return;
-      }
-      const str = String(v).trim();
-      if (str.length >= 2) {
-        needles.add(str.toLowerCase());
-        // Handle common date formatting variations: YYYY-MM-DD -> DD/MM/YYYY
-        const dateMatch = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-        if (dateMatch) {
-          const [_, y, m, d] = dateMatch;
-          needles.add(`${d}/${m}/${y}`);
-          needles.add(`${d}-${m}-${y}`);
-          needles.add(`${d}.${m}.${y}`);
-        }
-      }
-    };
+  // Resolve the hovered field to the OCR blocks it came from.
+  // Matching lives in utils/citationMatch.js — the OCR text is literal
+  // ("A M I T", "12,50,000") while the extracted value is normalized, so this
+  // is a good deal more than a substring test. Guards inside handle the
+  // fileUrl/data-not-ready cases — safe to run unconditionally.
+  const citation = useMemo(() => {
+    if (!fileUrl || !highlightFieldKey || !ocrBlocks.length) return EMPTY_CITATION;
+    return findCitationAcrossPages({
+      blocks: ocrBlocks,
+      fieldKey: highlightFieldKey,
+      value: extractedData?.[highlightFieldKey],
+      rawValue: rawFields?.[highlightFieldKey],
+      preferredPage: manualPage,
+    });
+  }, [fileUrl, highlightFieldKey, extractedData, rawFields, ocrBlocks, manualPage]);
 
-    const processValue = (value) => {
-      if (Array.isArray(value)) {
-        value.forEach(item => {
-          if (item && typeof item === 'object') {
-            Object.values(item).forEach(addPrimitive);
-          } else {
-            addPrimitive(item);
-          }
-        });
-      } else if (value && typeof value === 'object') {
-        Object.values(value).forEach(addPrimitive);
-      } else {
-        addPrimitive(value);
-      }
-    };
+  const matchingBlocks = citation.blocks;
 
-    // 1. Process rawVal first (matches OCR blocks exactly)
-    if (rawVal !== undefined && rawVal !== null) {
-      processValue(rawVal);
-    }
-    // 2. Fallback / add normalized value primitives
-    if (val !== undefined && val !== null) {
-      processValue(val);
-    }
+  // Hovering a field peeks at the page its value is on; letting go returns to
+  // the page the user had open. Derived rather than stored, so the two can
+  // never drift out of sync.
+  const displayPage = matchingBlocks.length && citation.page != null ? citation.page : manualPage;
 
-    return Array.from(needles);
-  };
+  const imageSrc = pdfCitationMode ? getDocumentPageUrl(documentId, displayPage) : fileUrl;
 
-  // Find blocks whose stripped content contains any of the value needles.
-  // Guards inside handle the fileUrl/data-not-ready cases — safe to run unconditionally.
-  const matchingBlocks = useMemo(() => {
-    if (!fileUrl || !highlightFieldKey || !ocrBlocks.length) return [];
-    const val = extractedData?.[highlightFieldKey];
-    const rawVal = rawFields?.[highlightFieldKey];
-    const needles = getValueNeedles(val, rawVal, highlightFieldKey);
-    if (!needles.length) return [];
-    return ocrBlocks.filter(b => b.type !== 'image' && needles.some(needle => stripMarkdown(b.content).includes(needle)));
-  }, [fileUrl, highlightFieldKey, extractedData, rawFields, ocrBlocks]);
+  // The canvas has to track the rendered <img>, which resizes whenever the
+  // panel does — syncing on load alone leaves highlights drifting after any
+  // layout change.
+  const [imgSize, setImgSize] = useState({ w: 0, h: 0 });
 
-  // Sync canvas dimensions to match the rendered <img>
-  const syncCanvas = () => {
-    const img    = imgRef.current;
-    const canvas = canvasRef.current;
-    if (!img || !canvas) return;
-    canvas.width  = img.clientWidth;
-    canvas.height = img.clientHeight;
-  };
+  const syncCanvas = useCallback(() => {
+    const img = imgRef.current;
+    if (!img) return;
+    setImgSize(prev => (
+      prev.w === img.clientWidth && prev.h === img.clientHeight
+        ? prev
+        : { w: img.clientWidth, h: img.clientHeight }
+    ));
+  }, []);
 
-  // Draw highlight rectangles whenever matching blocks change.
+  useEffect(() => {
+    const img = imgRef.current;
+    if (!img || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(syncCanvas);
+    observer.observe(img);
+    return () => observer.disconnect();
+  }, [syncCanvas, fileUrl]);
+
+  // Draw highlight rectangles whenever the matches or the rendered size change.
   // Guards inside handle the refs-not-ready / no-matches cases safely.
   useEffect(() => {
     const canvas = canvasRef.current;
-    const img    = imgRef.current;
-    if (!canvas || !img) return;
+    if (!canvas) return;
+    // Resizing the canvas clears it, so size first and draw after.
+    canvas.width  = imgSize.w;
+    canvas.height = imgSize.h;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (!matchingBlocks.length) return;
+    if (!matchingBlocks.length || !imgSize.w || !imgSize.h) return;
 
-    // Scale: OCR pixel space → rendered img size
-    const pageW  = matchingBlocks[0]?.page_width  || img.naturalWidth  || img.clientWidth  || 1;
-    const pageH  = matchingBlocks[0]?.page_height || img.naturalHeight || img.clientHeight || 1;
-    const scaleX = img.clientWidth  / pageW;
-    const scaleY = img.clientHeight / pageH;
+    const style = HIGHLIGHT_STYLES[citation.matchType] || HIGHLIGHT_STYLES.exact;
+    const img = imgRef.current;
 
     matchingBlocks.forEach(block => {
-      const x = block.top_left_x     * scaleX;
-      const y = block.top_left_y     * scaleY;
+      // Each block carries the dimensions of its own page — reusing the first
+      // block's dimensions skews every box on documents with mixed page sizes.
+      const pageW = block.page_width  || img?.naturalWidth  || imgSize.w;
+      const pageH = block.page_height || img?.naturalHeight || imgSize.h;
+      if (!pageW || !pageH) return;
+      const scaleX = imgSize.w / pageW;
+      const scaleY = imgSize.h / pageH;
+
+      const x = block.top_left_x * scaleX;
+      const y = block.top_left_y * scaleY;
       const w = (block.bottom_right_x - block.top_left_x) * scaleX;
       const h = (block.bottom_right_y - block.top_left_y) * scaleY;
-      // Filled highlight
-      ctx.fillStyle = 'rgba(99, 179, 237, 0.25)';
+
+      ctx.fillStyle = style.fill;
       ctx.fillRect(x, y, w, h);
-      // Crisp border
-      ctx.strokeStyle = 'rgba(66, 153, 225, 0.9)';
+      ctx.strokeStyle = style.stroke;
       ctx.lineWidth = 2;
+      ctx.setLineDash(style.dashed ? [6, 4] : []);
       ctx.strokeRect(x, y, w, h);
     });
-  }, [matchingBlocks]);
+    ctx.setLineDash([]);
+  }, [matchingBlocks, citation.matchType, imgSize]);
+
+  const citationNote = matchingBlocks.length
+    ? HIGHLIGHT_STYLES[citation.matchType]?.note
+    : null;
 
   // ── Early return AFTER all hooks ──
   if (!fileUrl) return null;
 
-  if (ext === 'pdf') {
+  if (ext === 'pdf' && !pdfCitationMode) {
     return (
       <object
         data={`${fileUrl}#toolbar=1&navpanes=0&view=FitH`}
@@ -1811,7 +1810,7 @@ function DocumentViewer({ fileUrl, filename, ext, ocrBlocks = [], highlightField
     e.currentTarget.style.color = 'rgba(255,255,255,0.75)';
   };
 
-  if (['png', 'jpg', 'jpeg', 'webp'].includes(ext)) {
+  if (pdfCitationMode || ['png', 'jpg', 'jpeg', 'webp'].includes(ext)) {
     return (
       <div
         ref={containerRef}
@@ -1844,8 +1843,8 @@ function DocumentViewer({ fileUrl, filename, ext, ocrBlocks = [], highlightField
         }}>
           <img
             ref={imgRef}
-            src={fileUrl}
-            alt={filename}
+            src={imageSrc}
+            alt={pdfCitationMode ? `${filename} — page ${displayPage + 1}` : filename}
             onLoad={syncCanvas}
             draggable={false}
             style={{
@@ -1869,8 +1868,69 @@ function DocumentViewer({ fileUrl, filename, ext, ocrBlocks = [], highlightField
           />
         </div>
 
+        {/* Confidence caption — shown only when the highlight is not a
+            literal value match, so a guess is never read as a verified one */}
+        {citationNote && (
+          <div style={{
+            position: 'absolute',
+            top: 12,
+            left: 12,
+            zIndex: 10,
+            padding: '4px 9px',
+            borderRadius: 6,
+            fontSize: 11,
+            fontWeight: 600,
+            color: 'rgba(255,255,255,0.9)',
+            background: 'rgba(15, 18, 28, 0.82)',
+            border: '1px solid rgba(255,255,255,0.10)',
+            backdropFilter: 'blur(12px)',
+            pointerEvents: 'none',
+          }}>
+            {citationNote}
+          </div>
+        )}
+
         {/* ── Floating zoom control bar ── */}
         <div style={zoomBarStyle}>
+          {/* Page navigation — rendered PDF pages only */}
+          {pdfCitationMode && pageCount > 1 && (
+            <>
+              <button
+                onClick={() => setManualPage(p => Math.max(0, p - 1))}
+                disabled={displayPage <= 0}
+                style={{ ...zoomBtnStyle, opacity: displayPage <= 0 ? 0.35 : 1 }}
+                onMouseEnter={zoomBtnHover}
+                onMouseLeave={zoomBtnLeave}
+                title="Previous page"
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <div style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: 'rgba(255,255,255,0.85)',
+                minWidth: 52,
+                textAlign: 'center',
+                fontVariantNumeric: 'tabular-nums',
+                letterSpacing: '0.02em',
+                userSelect: 'none',
+              }}>
+                {displayPage + 1} / {pageCount}
+              </div>
+              <button
+                onClick={() => setManualPage(p => Math.min(pageCount - 1, p + 1))}
+                disabled={displayPage >= pageCount - 1}
+                style={{ ...zoomBtnStyle, opacity: displayPage >= pageCount - 1 ? 0.35 : 1 }}
+                onMouseEnter={zoomBtnHover}
+                onMouseLeave={zoomBtnLeave}
+                title="Next page"
+              >
+                <ChevronRight size={14} />
+              </button>
+              <div style={{ width: 1, height: 18, background: 'rgba(255,255,255,0.14)', margin: '0 4px' }} />
+            </>
+          )}
+
           <button
             onClick={zoomOut}
             style={zoomBtnStyle}
@@ -1990,6 +2050,7 @@ export function Extraction() {
   const [photoResult, setPhotoResult] = useState(null);
   // Field citation highlighting state
   const [ocrBlocks, setOcrBlocks] = useState([]);
+  const [pageCount, setPageCount] = useState(1);
   const [hoveredField, setHoveredField] = useState(null);
   const { toast } = useApp();
   const navigate = useNavigate();
@@ -2074,7 +2135,7 @@ export function Extraction() {
   useEffect(() => {
     if (!activeId) return;
     setLoadingEx(true); setError(null); setExtracted(null); setIsEditing(false); setEditedData({});
-    setOcrBlocks([]); setHoveredField(null); // reset citation state on doc switch
+    setOcrBlocks([]); setPageCount(1); setHoveredField(null); // reset citation state on doc switch
     getExtractedData(activeId)
       .then((data) => {
         setExtracted(data);
@@ -2094,6 +2155,10 @@ export function Extraction() {
     getOcrBlocks(activeId)
       .then(d => setOcrBlocks(d.available ? d.blocks : []))
       .catch(() => setOcrBlocks([]));
+    // Page count drives the pager when a PDF is shown as rendered pages
+    getDocumentPageCount(activeId)
+      .then(d => setPageCount(d.page_count || 1))
+      .catch(() => setPageCount(1));
   }, [activeId]);
 
   const copyJSON = () => {
@@ -2369,6 +2434,8 @@ export function Extraction() {
               fileUrl={fileUrl}
               filename={activeDoc?.filename ?? ''}
               ext={ext}
+              documentId={activeId}
+              pageCount={pageCount}
               ocrBlocks={ocrBlocks}
               highlightFieldKey={hoveredField}
               extractedData={extracted?.validated_data}
@@ -2434,6 +2501,8 @@ export function Extraction() {
               fileUrl={fileUrl}
               filename={activeDoc?.filename ?? ''}
               ext={ext}
+              documentId={activeId}
+              pageCount={pageCount}
               ocrBlocks={ocrBlocks}
               highlightFieldKey={hoveredField}
               extractedData={extracted?.validated_data}
