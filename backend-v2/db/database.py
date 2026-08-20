@@ -48,6 +48,9 @@ async def init_db():
             # Upload batches + the Step 3.2 checklist
             "ALTER TABLE documents ADD COLUMN batch_id VARCHAR",
             "CREATE INDEX IF NOT EXISTS ix_documents_batch_id ON documents (batch_id)",
+            "ALTER TABLE batch_checklists ADD COLUMN gate_opened BOOLEAN DEFAULT 0",
+            "ALTER TABLE batch_checklists ADD COLUMN released BOOLEAN DEFAULT 0",
+            "ALTER TABLE batch_checklists ADD COLUMN release_mode VARCHAR",
         ]:
             try:
                 await conn.execute(text(col))

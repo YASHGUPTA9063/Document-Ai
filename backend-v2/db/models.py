@@ -108,10 +108,21 @@ class BatchChecklist(Base):
     summary = Column(Text, nullable=True)          # agent's one-paragraph verdict
     source = Column(String, nullable=True)         # "agent" | "deterministic"
 
-    # The document whose workflow is parked at the checklist gate. Resuming the
-    # batch means submitting an input to *that* run.
+    # The document whose workflow holds the human-facing gate. Every other
+    # document in the batch is parked behind it and released with it.
     gate_document_id = Column(String, nullable=True)
     decision_note = Column(Text, nullable=True)
+
+    # Has a human-facing gate ever been opened for this batch? Once it has, only
+    # a reviewer releases the batch — a later auto-evaluation that happens to come
+    # out complete must not yank the decision away while they are looking at it.
+    gate_opened = Column(Boolean, nullable=False, default=False)
+
+    # Release is sticky and batch-wide: every document waits for it, and a
+    # document that joins the batch afterwards passes straight through rather
+    # than re-gating a batch that has already moved on.
+    released = Column(Boolean, nullable=False, default=False)
+    release_mode = Column(String, nullable=True)   # "auto" | "human"
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

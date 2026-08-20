@@ -21,6 +21,9 @@ from sqlalchemy.orm.attributes import flag_modified
 from db.database import AsyncSessionLocal
 from db.models import BatchChecklist, Document
 
+# Documents parked behind the batch checklist. Both are released together.
+GATE_STATUSES = ("checklist_hold", "awaiting_checklist_review")
+
 logger = logging.getLogger(__name__)
 
 # Once a batch reaches one of these the verdict is settled for that signature.
@@ -133,6 +136,77 @@ async def record_decision(batch_id: str, proceed: bool, note: str | None) -> Non
         await session.commit()
 
 
+async def get_gate_documents(batch_id: str) -> list[Document]:
+    """Every document in the batch currently parked behind the checklist."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Document)
+            .where(Document.batch_id == batch_id)
+            .where(Document.status.in_(GATE_STATUSES))
+            .order_by(Document.created_at)
+        )
+        return list(result.scalars().all())
+
+
+async def is_released(batch_id: str) -> bool:
+    """Has this batch already been let through the gate?"""
+    row = await get_checklist(batch_id)
+    return bool(row and row.released)
+
+
+async def mark_gate_opened(batch_id: str) -> None:
+    """Record that a human gate is now open, so auto-release stops applying."""
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            update(BatchChecklist)
+            .where(BatchChecklist.batch_id == batch_id)
+            .values(gate_opened=True)
+        )
+        await session.commit()
+
+
+async def mark_released(batch_id: str, mode: str, note: str | None = None) -> bool:
+    """
+    Flip the batch to released, exactly once.
+
+    Guarded on `released == False` so two callers racing to release the same
+    batch — an auto-release and a reviewer pressing Continue — cannot both fan
+    out. Returns True to the caller that actually made the transition.
+    """
+    async with AsyncSessionLocal() as session:
+        values = {"released": True, "release_mode": mode}
+        if note is not None:
+            values["decision_note"] = note
+        result = await session.execute(
+            update(BatchChecklist)
+            .where(BatchChecklist.batch_id == batch_id)
+            .where(BatchChecklist.released.is_(False))
+            .values(**values)
+        )
+        await session.commit()
+        return result.rowcount > 0
+
+
+async def ensure_row(batch_id: str, gate_document_id: str | None = None) -> None:
+    """Create the checklist row if the batch has never been evaluated.
+
+    A reviewer can release a batch that never got a verdict — every document
+    failed before classifying, say — and the release has to be recorded
+    somewhere for the documents behind the gate to observe.
+    """
+    if await get_checklist(batch_id):
+        return
+    async with AsyncSessionLocal() as session:
+        session.add(BatchChecklist(
+            batch_id=batch_id, signature="", status="evaluating",
+            gate_document_id=gate_document_id,
+        ))
+        try:
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+
+
 def serialize(row: BatchChecklist | None) -> dict | None:
     """Shape the checklist row for the API/UI."""
     if not row:
@@ -150,5 +224,8 @@ def serialize(row: BatchChecklist | None) -> dict | None:
         "source": row.source,
         "gate_document_id": row.gate_document_id,
         "decision_note": row.decision_note,
+        "gate_opened": bool(row.gate_opened),
+        "released": bool(row.released),
+        "release_mode": row.release_mode,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }

@@ -331,17 +331,30 @@ export async function getBatchChecklist(batchId) {
 }
 
 /**
- * Answer a batch paused at the checklist gate.
- * @param {string} documentId  the document holding the gate (checklist.gate_document_id)
- * @param {boolean} proceed    true continues despite the missing types
- * @param {string} [note]      reviewer's reason, stored on the checklist
+ * Answer for a whole batch held at the checklist gate. Every document in the
+ * batch is parked behind the one gate, so the decision releases all of them.
+ * Idempotent: re-calling on a released batch is a no-op.
+ * @param {string} batchId
+ * @param {boolean} proceed  true continues despite the missing types
+ * @param {string} [note]    reviewer's reason, stored on the checklist
  */
-export async function submitChecklistDecision(documentId, proceed, note = null) {
-  const { data } = await api.post(`/documents/${documentId}/checklist-decision`, {
+export async function submitChecklistDecision(batchId, proceed, note = null) {
+  const { data } = await api.post(`/batches/${batchId}/checklist-decision`, {
     proceed,
     note,
     rejection_reason: proceed ? null : note,
   });
+  return data;
+}
+
+/**
+ * Re-run the checklist for a batch. Releases every document behind the gate if
+ * the batch now holds everything, so this is how newly uploaded documents
+ * actually unblock the batch rather than just refreshing the display.
+ * @param {string} batchId
+ */
+export async function evaluateBatchChecklist(batchId) {
+  const { data } = await api.post(`/batches/${batchId}/checklist/evaluate`);
   return data;
 }
 

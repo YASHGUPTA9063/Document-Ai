@@ -726,53 +726,83 @@ def _batch_document_rows(documents) -> list[dict]:
     ]
 
 
-@router.post("/documents/{document_id}/checklist-decision")
-async def submit_checklist_decision(document_id: str, decision: ChecklistDecisionRequest):
+@router.post("/batches/{batch_id}/checklist/evaluate")
+async def evaluate_batch_checklist(batch_id: str):
     """
-    Resume a batch paused at the checklist gate.
+    Re-run the checklist for a batch and act on the result.
 
-    proceed=true continues the pipeline with the batch as it stands — the normal
-    answer once the reviewer has uploaded the missing documents into the same
-    batch, or established that they do not apply. proceed=false rejects the
-    document holding the gate. Uses the same two-step Temporal update protocol as
-    the duplicate, review and split resumes — see api/routers/v1/workflow.py.
+    This is what the reviewer's "Re-check" does. It is not cosmetic: if the batch
+    now holds everything, it releases every document waiting behind the gate. It
+    is also the recovery path for a batch whose last document died before ever
+    reaching Step 3.2 — without it those siblings would sit on their 24h timeout.
     """
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(select(Document).where(Document.id == document_id))
-        doc = result.scalar_one_or_none()
-        if not doc:
-            raise HTTPException(status_code=404, detail="Document not found")
-        if doc.status != "awaiting_checklist_review":
-            raise HTTPException(
-                status_code=409,
-                detail=f"Document is not awaiting checklist review (status: {doc.status})."
-            )
-        run_id = doc.workflow_run_id
+    from activities.checklist import evaluate_batch
 
-    if not run_id or run_id == "unknown_run_id":
-        raise HTTPException(status_code=409, detail="No workflow run to resume for this document.")
+    documents = await checklist_db.get_batch_documents(batch_id)
+    if not documents:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    if await checklist_db.is_released(batch_id):
+        return {"batch_id": batch_id, "action": "already_released"}
+
+    verdict = await evaluate_batch(batch_id)
+    return {
+        "batch_id": batch_id,
+        "action": verdict["action"],
+        "complete": verdict.get("complete", False),
+        "missing": [entry["doc_type"] for entry in verdict.get("missing", [])],
+        "pending": verdict.get("pending", 0),
+    }
+
+
+@router.post("/batches/{batch_id}/checklist-decision")
+async def submit_checklist_decision(batch_id: str, decision: ChecklistDecisionRequest):
+    """
+    Answer for a whole batch held at the checklist gate, and resume all of it.
+
+    The decision is batch-scoped by design: every document in the upload is
+    parked behind this one gate, so releasing one and not the others would leave
+    the batch half-processed against a decision that was meant to cover it.
+    Idempotent — a second call on a released batch is a no-op, which also makes
+    it the manual backstop if a document missed the first fan-out.
+    """
+    from activities.checklist import release_batch
+
+    documents = await checklist_db.get_batch_documents(batch_id)
+    if not documents:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    held = await checklist_db.get_gate_documents(batch_id)
+    if not held and not await checklist_db.get_checklist(batch_id):
+        raise HTTPException(
+            status_code=409,
+            detail="This batch is not waiting at the checklist gate.",
+        )
 
     try:
-        client = get_mistral_client()
-        query_result = await client.workflows.executions.query_workflow_execution_async(
-            execution_id=run_id,
-            name="__get_pending_inputs",
+        result = await release_batch(
+            batch_id,
+            proceed=decision.proceed,
+            note=decision.note or decision.rejection_reason or "",
+            mode="human",
         )
-        pending_inputs = (query_result.result or {}).get("pending_inputs", [])
-        if not pending_inputs:
-            raise HTTPException(status_code=409, detail="No pending inputs found. Workflow may not be paused yet.")
-
-        await client.workflows.executions.update_workflow_execution_async(
-            execution_id=run_id,
-            name="__submit_input",
-            input={"task_id": pending_inputs[0]["task_id"], "input": decision.model_dump()},
-        )
-        return {"message": "Checklist decision submitted"}
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Error submitting checklist decision for {document_id}: {e}")
+        logger.error(f"Error releasing batch {batch_id} from the checklist gate: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+    if result.get("already_released"):
+        return {"message": "Batch was already released", "resumed": 0, "batch_id": batch_id}
+
+    return {
+        "message": (
+            f"Batch released — {result['resumed']} document(s) resumed."
+            if decision.proceed
+            else f"Batch rejected — {result['resumed']} document(s) stopped."
+        ),
+        "resumed": result["resumed"],
+        "missed": result.get("missed", []),
+        "batch_id": batch_id,
+    }
 
 
 # ─── Deletion ────────────────────────────────────────────────────────────────

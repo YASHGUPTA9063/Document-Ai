@@ -1,26 +1,32 @@
 """
 Step 3.2 — Batch Checklist
 ==========================
-Runs straight after classification. Reconciles the document types seen across
-the whole upload batch against the configured classification types, and tells
-the workflow whether the batch is missing anything.
+Runs straight after classification, and is a **batch-wide barrier**: every
+document in an upload stops here, and they all continue together or not at all.
 
-Two things make this step unusual in an otherwise per-document pipeline:
+Why a barrier rather than a per-document check. "Did we upload all the types?"
+can only be answered across the whole upload, and the answer is not knowable
+until every file in it has classified. Letting documents that classified early
+run ahead to extraction would mean the batch is half-extracted by the time
+anyone is told a document is missing — and the reviewer's decision would apply
+to whatever had not overtaken it yet.
 
-  * It is *set-scoped*. Every file of one upload shares a `batch_id`, and the
-    question "did we upload all the types?" can only be answered across that
-    set — never from the single document the workflow is holding.
+The shape of one document's pass through this step:
 
-  * It is *barriered*. A document that reaches Step 3.2 while its siblings are
-    still queued behind it would see a half-classified batch and report types as
-    missing that are moments away from arriving. So the step no-ops for every
-    document except the last one to classify, which then evaluates on behalf of
-    the batch and holds the review gate for it.
+  1. If the batch has already been released, walk straight through. Release is
+     sticky, so a document that joins late never re-gates a batch that moved on.
+  2. If any sibling has yet to classify, park at `checklist_hold`.
+  3. Otherwise this is the last document to classify, so evaluate the batch:
+     reconcile what was uploaded against the configured classification types.
+       - Nothing missing → release the whole batch automatically and continue.
+         Nobody is asked anything; the hold was only ever about waiting for the
+         batch to be knowable.
+       - Something missing → open the human gate at `awaiting_checklist_review`
+         and park here too. Every document is now waiting on one decision.
 
-The verdict is a set difference computed in `tools/checklist.py`, not something
-the model decides. The Checklist Agent only writes the reviewer-facing summary;
-if it is unconfigured or fails, a deterministic summary is used and the pipeline
-carries on with the same verdict.
+The verdict itself is a set difference computed in `tools/checklist.py`. The
+Checklist Agent only writes the reviewer-facing summary; if it is unconfigured
+or fails, a deterministic summary is used and the verdict is unchanged.
 """
 
 import json
@@ -38,6 +44,7 @@ from tools.checklist import (
     pending_documents,
     reconcile,
 )
+from utils.workflow_resume import submit_input_with_retry
 import db.checklist_operations as checklist_db
 import db.operations as db
 
@@ -62,9 +69,15 @@ def _extract_text(content) -> str:
     return str(content) if content is not None else ""
 
 
-def _skip(reason: str, **extra) -> dict:
-    """A no-op verdict — the workflow continues without opening a gate."""
-    return {"evaluated": False, "reason": reason, "complete": True, **extra}
+def _go(reason: str, **extra) -> dict:
+    """Walk through the gate."""
+    return {"wait": False, "gate_holder": False, "reason": reason, "message": "", **extra}
+
+
+def _hold(reason: str, message: str, gate_holder: bool = False, **extra) -> dict:
+    """Park behind the gate."""
+    return {"wait": True, "gate_holder": gate_holder, "reason": reason,
+            "message": message, **extra}
 
 
 async def _summarise(batch_id: str, result: dict, documents: list) -> tuple[str, str]:
@@ -88,86 +101,180 @@ async def _summarise(batch_id: str, result: dict, documents: list) -> tuple[str,
         return fallback_summary(result), "deterministic"
 
 
-@workflows.activity()
-async def checklist_activity(document_id: str) -> dict:
+async def release_batch(batch_id: str, proceed: bool, note: str = "", mode: str = "auto") -> dict:
     """
-    Decide whether this upload batch holds every configured document type.
+    Let the whole batch through the gate and resume every document behind it.
 
-    Returns either:
-      {"evaluated": False, "reason": "batch_incomplete" | "no_batch" | ..., "complete": True}
-      {"evaluated": True, "complete": bool, "batch_id": str, "required": [...],
-       "present": [...], "missing": [...], "extra": [...], "unclassified": [...],
-       "summary": str, "source": "agent" | "deterministic"}
-
-    Only an `evaluated` result with `complete` false should open a review gate.
+    `mark_released` is the mutex: two callers racing — an auto-release and a
+    reviewer pressing Continue — cannot both fan out. The loser returns the
+    already-released result rather than double-submitting inputs.
     """
-    if not settings.ENABLE_DOC_CHECKLIST:
-        return _skip("disabled")
+    await checklist_db.ensure_row(batch_id)
 
-    document = await db.get_document(document_id)
-    batch_id = getattr(document, "batch_id", None) if document else None
-    if not batch_id:
-        # Documents uploaded before batches existed, or through a path that does
-        # not assign one, have no set to be reconciled against.
-        logger.info(f"[Document {document_id}] No batch_id — skipping the checklist.")
-        return _skip("no_batch")
+    if not await checklist_db.mark_released(batch_id, mode, note or None):
+        logger.info(f"[Batch {batch_id}] Already released — skipping the fan-out.")
+        return {"batch_id": batch_id, "released": False, "resumed": 0, "already_released": True}
 
+    held = await checklist_db.get_gate_documents(batch_id)
+    payload = {"proceed": proceed, "note": note or None,
+               "rejection_reason": None if proceed else (note or None)}
+
+    resumed, missed = 0, []
+    for doc in held:
+        if await submit_input_with_retry(doc.workflow_run_id, payload):
+            resumed += 1
+        else:
+            missed.append(doc.id)
+
+    logger.info(
+        f"[Batch {batch_id}] Released ({mode}, proceed={proceed}) — resumed {resumed}/{len(held)} document(s)"
+        + (f"; could not resume {missed}" if missed else "")
+    )
+    return {"batch_id": batch_id, "released": True, "resumed": resumed,
+            "missed": missed, "already_released": False}
+
+
+async def evaluate_batch(batch_id: str, gate_document_id: str | None = None) -> dict:
+    """
+    Reconcile a batch and decide what happens to it.
+
+    Shared by the pipeline (the last document to classify calls it) and by the
+    API's re-check, which is how a reviewer un-sticks a batch whose last
+    document failed before ever reaching this step.
+
+    Returns the verdict plus `action`: "released" | "gate" | "waiting" | "skipped".
+    """
     documents = await checklist_db.get_batch_documents(batch_id)
     if not documents:
-        return _skip("empty_batch", batch_id=batch_id)
+        return {"action": "skipped", "reason": "empty_batch", "batch_id": batch_id}
 
-    # ── Barrier: let the batch finish classifying before judging it ──
-    # The caller's own type was persisted by the workflow immediately before this
-    # step, so it is already settled and drops out of `pending` on its own. It is
-    # deliberately not special-cased: if its type somehow did not land, deferring
-    # is the safe answer — a batch that never opens a gate beats one that opens a
-    # gate over documents whose types simply had not been written yet.
     still_pending = pending_documents(documents)
     if still_pending:
-        logger.info(
-            f"[Document {document_id}] Batch {batch_id} still has {len(still_pending)} "
-            f"document(s) to classify — deferring the checklist to the last one."
-        )
-        return _skip("batch_incomplete", batch_id=batch_id)
+        return {"action": "waiting", "reason": "batch_incomplete", "batch_id": batch_id,
+                "pending": len(still_pending)}
 
     required = build_required_types()
     if not required:
-        logger.warning(f"[Batch {batch_id}] No classification types configured — nothing to check.")
-        return _skip("no_required_types", batch_id=batch_id)
+        logger.warning(f"[Batch {batch_id}] No classification types configured — releasing.")
+        await release_batch(batch_id, True, "No document types configured.", "auto")
+        return {"action": "released", "reason": "no_required_types", "batch_id": batch_id,
+                "complete": True}
 
     signature = batch_signature(documents, required)
-    if not await checklist_db.claim_evaluation(batch_id, signature, document_id):
-        logger.info(f"[Document {document_id}] Batch {batch_id} already evaluated for this content.")
-        return _skip("already_evaluated", batch_id=batch_id)
+    result = reconcile(documents, required)
 
-    try:
-        result = reconcile(documents, required)
-        summary, source = await _summarise(batch_id, result, documents)
-        await checklist_db.save_evaluation(batch_id, result, summary, source)
-    except Exception as e:
-        # Give the claim back so a retry — or a sibling document — can try again,
-        # rather than leaving the batch permanently marked "evaluating".
-        logger.error(f"[Batch {batch_id}] Checklist evaluation failed: {e}")
-        await checklist_db.release_claim(batch_id)
-        raise
+    # Only the caller that wins the claim pays for the agent call and the write.
+    # Everyone else reads the verdict it stored.
+    if await checklist_db.claim_evaluation(batch_id, signature, gate_document_id):
+        try:
+            summary, source = await _summarise(batch_id, result, documents)
+            await checklist_db.save_evaluation(batch_id, result, summary, source)
+        except Exception as e:
+            # Give the claim back so a retry can try again, rather than leaving
+            # the batch pinned at "evaluating" with every document behind it.
+            logger.error(f"[Batch {batch_id}] Checklist evaluation failed: {e}")
+            await checklist_db.release_claim(batch_id)
+            raise
+    else:
+        stored = await checklist_db.get_checklist(batch_id)
+        summary = (stored.summary if stored else None) or fallback_summary(result)
 
     logger.info(
         f"[Batch {batch_id}] Checklist: {len(result['present'])}/{len(required)} types present"
         + (f" — missing {[m['doc_type'] for m in result['missing']]}" if result["missing"] else " — complete")
     )
 
-    return {
-        "evaluated": True,
-        "reason": "",
-        "batch_id": batch_id,
-        "summary": summary,
-        "source": source,
-        **result,
-    }
+    row = await checklist_db.get_checklist(batch_id)
+    gate_already_open = bool(row and row.gate_opened)
+
+    # Nothing missing, and no reviewer is mid-decision: let the batch go.
+    if result["complete"] and not gate_already_open:
+        await release_batch(batch_id, True, "", "auto")
+        return {"action": "released", "batch_id": batch_id, "summary": summary,
+                "complete": True, **result}
+
+    # Something is missing — or a reviewer already holds this batch, in which
+    # case the decision stays theirs even though the gap has since been filled.
+    await checklist_db.mark_gate_opened(batch_id)
+    return {"action": "gate", "batch_id": batch_id, "summary": summary, **result}
 
 
 @workflows.activity()
-async def record_checklist_decision_activity(batch_id: str, proceed: bool, note: str = "") -> dict:
-    """Persist the reviewer's answer so the UI stops showing an open gate."""
-    await checklist_db.record_decision(batch_id, proceed, note or None)
-    return {"batch_id": batch_id, "proceed": proceed}
+async def checklist_activity(document_id: str) -> dict:
+    """
+    Decide whether this document walks through the batch checklist or parks.
+
+    Returns:
+      {"wait": False, ...}                       — continue the pipeline
+      {"wait": True, "gate_holder": False, ...}  — park, batch not yet knowable
+      {"wait": True, "gate_holder": True, ...}   — park and hold the human gate
+    """
+    if not settings.ENABLE_DOC_CHECKLIST:
+        return _go("disabled")
+
+    document = await db.get_document(document_id)
+    batch_id = getattr(document, "batch_id", None) if document else None
+    if not batch_id:
+        # Documents ingested before batches existed have no set to reconcile.
+        logger.info(f"[Document {document_id}] No batch_id — skipping the checklist.")
+        return _go("no_batch")
+
+    # Sticky release: a batch that has already been let through never re-gates,
+    # so documents uploaded into it afterwards are not stranded behind a
+    # decision that was made without them.
+    if await checklist_db.is_released(batch_id):
+        return _go("already_released", batch_id=batch_id)
+
+    verdict = await evaluate_batch(batch_id, gate_document_id=document_id)
+    action = verdict["action"]
+
+    if action == "released":
+        # This document performed the release, so it is not in the fan-out.
+        return _go("batch_complete", batch_id=batch_id, complete=True,
+                   summary=verdict.get("summary", ""))
+
+    if action == "waiting":
+        return _hold(
+            "waiting_for_batch",
+            f"Waiting for the rest of this upload to be classified "
+            f"({verdict.get('pending', 0)} still in progress).",
+            batch_id=batch_id,
+        )
+
+    if action == "skipped":
+        return _go(verdict.get("reason", "skipped"), batch_id=batch_id)
+
+    # action == "gate" — this document opens (or joins) the human gate.
+    missing = verdict.get("missing", [])
+    missing_labels = ", ".join(entry["label"] for entry in missing)
+
+    if not settings.CHECKLIST_REQUIRE_REVIEW:
+        logger.warning(
+            f"[Batch {batch_id}] Missing {missing_labels} — CHECKLIST_REQUIRE_REVIEW "
+            f"is off, releasing anyway."
+        )
+        await release_batch(batch_id, True, "Review disabled by configuration.", "auto")
+        return _go("review_disabled", batch_id=batch_id, missing=missing)
+
+    row = await checklist_db.get_checklist(batch_id)
+    holder = row.gate_document_id if row else document_id
+
+    logger.info(
+        f"[Document {document_id}] Batch {batch_id} held at the checklist gate — "
+        f"missing {[entry['doc_type'] for entry in missing]}"
+    )
+    return _hold(
+        "incomplete",
+        f"{len(missing)} document type(s) missing from this upload: {missing_labels}.",
+        gate_holder=(holder == document_id),
+        batch_id=batch_id,
+        missing=missing,
+        summary=verdict.get("summary", ""),
+    )
+
+
+@workflows.activity()
+async def release_batch_activity(batch_id: str, proceed: bool, note: str = "",
+                                 mode: str = "human") -> dict:
+    """Release a batch from inside a workflow (used on the reviewer's answer)."""
+    return await release_batch(batch_id, proceed, note, mode)

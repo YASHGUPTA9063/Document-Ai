@@ -234,23 +234,22 @@ async def _step_classify(context: dict) -> dict:
 
 
 async def _step_checklist(context: dict) -> dict:
-    """Step 3.2: Reconcile the upload batch against the configured doc types."""
+    """Step 3.2: batch-wide barrier on the configured document types."""
     from activities.checklist import checklist_activity
 
-    result = await checklist_activity(context["document_id"])
+    gate = await checklist_activity(context["document_id"])
 
     # On resume the paused step re-runs, so the reviewer's answer has to be
-    # honoured here or the pipeline just pauses again forever.
-    override = context.get("checklist_override")
-
-    if result.get("evaluated") and not result.get("complete") and not override:
-        missing = ", ".join(entry["label"] for entry in result.get("missing", []))
+    # honoured here or the pipeline just pauses again forever. The activity's
+    # sticky release covers the normal case; this override covers a resume that
+    # bypassed it.
+    if gate.get("wait") and not context.get("checklist_override"):
         raise HumanInputRequired(
-            reason=f"Documents missing from this upload: {missing}.",
-            data={"checklist": result},
+            reason=gate.get("message") or "Waiting on the batch document checklist.",
+            data={"checklist": gate},
         )
 
-    return {"checklist_result": result}
+    return {"checklist_result": gate}
 
 
 async def _step_fraud_check(context: dict) -> dict:

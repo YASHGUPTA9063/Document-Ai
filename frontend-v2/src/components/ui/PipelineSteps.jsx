@@ -27,6 +27,7 @@ function getStepState(status, idx) {
     preprocessing: 3,
     classifying: 4,
     checklist: 5,                    // batch checklist (Step 3.2)
+    checklist_hold: 5,               // parked behind the batch barrier
     awaiting_checklist_review: 5,    // parked at the checklist gate
     fraud_checking: 5,      // runs after classification, alongside the checklist
     extracting: 6,

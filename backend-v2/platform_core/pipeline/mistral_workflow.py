@@ -332,14 +332,13 @@ class DocumentProcessingWorkflow:
             # extraction is — the API resumes it by re-running with the override.
             if not input.skip_checklist_gate:
                 await activity_set_status(document_id, "checklist")
-                checklist_result = await activity_checklist(document_id)
-                if checklist_result.get("evaluated") and not checklist_result.get("complete"):
-                    missing = ", ".join(
-                        entry["label"] for entry in checklist_result.get("missing", [])
-                    )
-                    reason = f"Documents missing from this upload: {missing}."
+                gate = await activity_checklist(document_id)
+                if gate.get("wait"):
+                    reason = gate.get("message") or "Waiting on the batch document checklist."
                     await activity_set_terminal_status(
-                        document_id, "awaiting_checklist_review", reason
+                        document_id,
+                        "awaiting_checklist_review" if gate.get("gate_holder") else "checklist_hold",
+                        reason,
                     )
                     return DocumentOutput(
                         document_id=document_id,

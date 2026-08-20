@@ -18,6 +18,7 @@ export const ACTIVE_STATUSES = [
   'preprocessing',
   'classifying',
   'checklist',
+  'checklist_hold',
   'awaiting_checklist_review',
   'fraud_checking',
   'extracting',
@@ -31,6 +32,10 @@ export const REVIEW_STATUSES = ['awaiting_review', 'duplicate'];
 
 export const SPLIT_REVIEW_STATUS = 'awaiting_split_review';
 
-// The Step 3.2 batch checklist gate. Only ever set on one document per batch —
-// the last one to classify — which holds the gate for all of its siblings.
+// The Step 3.2 batch checklist barrier. Every document in an upload parks here
+// and they are released together. `awaiting_checklist_review` marks the one
+// document a reviewer acts on; `checklist_hold` is the rest of the batch waiting
+// behind it. Both are answered by the same batch-scoped decision.
 export const CHECKLIST_REVIEW_STATUS = 'awaiting_checklist_review';
+export const CHECKLIST_HOLD_STATUS = 'checklist_hold';
+export const CHECKLIST_GATE_STATUSES = [CHECKLIST_REVIEW_STATUS, CHECKLIST_HOLD_STATUS];
