@@ -5,6 +5,7 @@ with workflows.workflow.unsafe.imports_passed_through():
     from activities.intake import intake_activity
     from activities.preprocessor import preprocessor_activity
     from activities.classifier import classifier_activity
+    from activities.checklist import checklist_activity, record_checklist_decision_activity
     from activities.splitter import splitter_activity
     from activities.split_fanout import split_fanout_activity
     from activities.extractor import extractor_activity
@@ -15,7 +16,10 @@ with workflows.workflow.unsafe.imports_passed_through():
     from activities.fraud_checker import fraud_check_activity
     from activities.auto_verifier import auto_verify_activity
     import db.operations as db
-    from schemas.documents import DuplicateDecisionRequest, ReviewerDecisionRequest, SplitDecisionRequest
+    from schemas.documents import (
+        DuplicateDecisionRequest, ReviewerDecisionRequest, SplitDecisionRequest,
+        ChecklistDecisionRequest,
+    )
     from config import settings
 
 
@@ -207,6 +211,60 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
             classifier_result = await classifier_activity(document_id, clean_file_path)
             doc_type = classifier_result["doc_type"]
         await _update_doc_type(document_id, doc_type)
+
+        # Step 3.2 — Batch Checklist
+        # Classification tells us what this document *is*; the checklist tells us
+        # what the upload as a whole is still missing. It is scoped to the batch,
+        # so it no-ops for every document except the last one in the batch to
+        # classify — that one evaluates on behalf of all of them and holds the
+        # gate. See activities/checklist.py for why the barrier is necessary.
+        if settings.ENABLE_DOC_CHECKLIST:
+            await _update_status(document_id, "checklist")
+            try:
+                checklist_result = await checklist_activity(document_id)
+            except Exception as e:
+                # A checklist failure must never cost us a document we already
+                # classified — degrade to "nothing to report" and keep going.
+                logger.warning(
+                    f"[Document {document_id}] Checklist failed, continuing without it: {e}"
+                )
+                checklist_result = {"evaluated": False, "reason": "checklist_error", "complete": True}
+
+            if checklist_result.get("evaluated") and not checklist_result.get("complete"):
+                batch_id = checklist_result["batch_id"]
+                missing = checklist_result.get("missing", [])
+                missing_labels = ", ".join(entry["label"] for entry in missing)
+
+                if settings.CHECKLIST_REQUIRE_REVIEW:
+                    logger.info(
+                        f"[Document {document_id}] Pausing batch {batch_id} at the checklist gate — "
+                        f"missing {[entry['doc_type'] for entry in missing]}"
+                    )
+                    await _update_status_and_message(
+                        document_id, "awaiting_checklist_review",
+                        f"{len(missing)} document type(s) missing from this upload: {missing_labels}.",
+                    )
+                    checklist_decision = await self.wait_for_input(
+                        ChecklistDecisionRequest, timeout=timedelta(hours=24)
+                    )
+                    await record_checklist_decision_activity(
+                        batch_id, checklist_decision.proceed, checklist_decision.note or ""
+                    )
+
+                    if not checklist_decision.proceed:
+                        reason = (
+                            checklist_decision.rejection_reason
+                            or f"Batch incomplete — missing {missing_labels}."
+                        )
+                        await _update_status_and_message(document_id, "rejected", reason)
+                        return {"status": "rejected", "reason": reason, "checklist": checklist_result}
+
+                    await _update_status_and_message(document_id, "processing", "")
+                else:
+                    logger.warning(
+                        f"[Document {document_id}] Batch {batch_id} is missing {missing_labels} — "
+                        f"CHECKLIST_REQUIRE_REVIEW is off, continuing."
+                    )
 
         # Step 3.5 — Fraud Check (if KYC Document)
         fraud_check_result = None

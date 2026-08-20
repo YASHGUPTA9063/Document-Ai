@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { RefreshCw, Cpu, CheckCircle, ListTodo, FileText, AlertCircle, ChevronDown, ChevronUp, Scissors } from 'lucide-react';
+import { RefreshCw, Cpu, CheckCircle, ListTodo, FileText, AlertCircle, ChevronDown, ChevronUp, Scissors, ListChecks } from 'lucide-react';
 import { useApp } from '../store/AppStore';
-import { ACTIVE_STATUSES, REVIEW_STATUSES, SPLIT_REVIEW_STATUS } from '../store/documentStatus';
+import { ACTIVE_STATUSES, REVIEW_STATUSES, SPLIT_REVIEW_STATUS, CHECKLIST_REVIEW_STATUS } from '../store/documentStatus';
 import { useDocumentList } from '../hooks/useDocumentList';
 import { useDocumentPoller } from '../hooks/useDocumentPoller';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { PipelineSteps } from '../components/ui/PipelineSteps';
 import { SplitReviewModal } from '../components/ui/SplitReviewModal';
+import { ChecklistReviewModal } from '../components/ui/ChecklistReviewModal';
 
 // While anything is in flight the list is re-fetched on this cadence. A packet
 // split creates its child documents server-side, and they only become visible
@@ -68,6 +69,8 @@ export function Processing() {
   const { refresh, loading } = useDocumentList();
   const navigate = useNavigate();
   const [reviewingSplit, setReviewingSplit] = useState(null);
+  // { batchId, gateDocumentId } for the batch parked at the checklist gate.
+  const [reviewingChecklist, setReviewingChecklist] = useState(null);
 
   useEffect(() => { refresh(); }, []);
 
@@ -118,7 +121,10 @@ export function Processing() {
 
   // Most recently active doc for the live pipeline display. A packet waiting on
   // a split decision is the one thing worth looking at, so it wins the slot.
-  const featured = pendingDocs.find((d) => d.status === SPLIT_REVIEW_STATUS) || pendingDocs[0];
+  const featured =
+    pendingDocs.find((d) => d.status === SPLIT_REVIEW_STATUS) ||
+    pendingDocs.find((d) => d.status === CHECKLIST_REVIEW_STATUS) ||
+    pendingDocs[0];
 
   return (
     <div className="page">
@@ -131,6 +137,17 @@ export function Processing() {
           open
           toast={toast}
           onClose={() => setReviewingSplit(null)}
+          onDecided={() => refresh()}
+        />
+      )}
+
+      {reviewingChecklist && (
+        <ChecklistReviewModal
+          batchId={reviewingChecklist.batchId}
+          gateDocumentId={reviewingChecklist.gateDocumentId}
+          open
+          toast={toast}
+          onClose={() => setReviewingChecklist(null)}
           onDecided={() => refresh()}
         />
       )}
@@ -219,6 +236,20 @@ export function Processing() {
                             onClick={() => setReviewingSplit(doc.id)}
                           >
                             <Scissors size={11} /> Review split
+                          </button>
+                        )}
+                        {doc.status === CHECKLIST_REVIEW_STATUS && (
+                          <button
+                            className="btn btn-primary btn-sm"
+                            style={{ padding: '3px 8px', fontSize: 11 }}
+                            onClick={() => setReviewingChecklist({
+                              batchId: doc.batch_id,
+                              gateDocumentId: doc.id,
+                            })}
+                            disabled={!doc.batch_id}
+                            title={doc.batch_id ? 'Review the missing documents' : 'This document has no upload batch'}
+                          >
+                            <ListChecks size={11} /> Review checklist
                           </button>
                         )}
                       </div>

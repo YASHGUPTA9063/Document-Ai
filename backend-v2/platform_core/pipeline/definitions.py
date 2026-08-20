@@ -84,6 +84,18 @@ def build_document_pipeline(config: dict) -> PipelineDefinition:
             timeout_seconds=step_timeout,
         ),
 
+        # Step 3.2 — Batch Checklist
+        # Maps: workflow.py Step 3.2. Set-scoped, so it no-ops for every document
+        # but the last one in the batch to classify.
+        StepDefinition(
+            name="checklist",
+            handler=_step_checklist,
+            status_label="checklist",
+            required=False,  # a checklist failure must not cost us the document
+            condition=lambda ctx: pipeline_config.get("enable_checklist", True),
+            timeout_seconds=step_timeout,
+        ),
+
         # Step 3.5 — Fraud Check (KYC documents only)
         # Maps: workflow.py:121-135
         StepDefinition(
@@ -219,6 +231,26 @@ async def _step_classify(context: dict) -> dict:
         "classifier_result": result,
         "doc_type": result["doc_type"],
     }
+
+
+async def _step_checklist(context: dict) -> dict:
+    """Step 3.2: Reconcile the upload batch against the configured doc types."""
+    from activities.checklist import checklist_activity
+
+    result = await checklist_activity(context["document_id"])
+
+    # On resume the paused step re-runs, so the reviewer's answer has to be
+    # honoured here or the pipeline just pauses again forever.
+    override = context.get("checklist_override")
+
+    if result.get("evaluated") and not result.get("complete") and not override:
+        missing = ", ".join(entry["label"] for entry in result.get("missing", []))
+        raise HumanInputRequired(
+            reason=f"Documents missing from this upload: {missing}.",
+            data={"checklist": result},
+        )
+
+    return {"checklist_result": result}
 
 
 async def _step_fraud_check(context: dict) -> dict:

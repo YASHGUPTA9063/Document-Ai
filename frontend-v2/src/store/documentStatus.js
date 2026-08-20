@@ -17,13 +17,20 @@ export const ACTIVE_STATUSES = [
   'pre_validating',
   'preprocessing',
   'classifying',
+  'checklist',
+  'awaiting_checklist_review',
   'fraud_checking',
   'extracting',
   'validating',
 ];
 
-// Human review of extracted data. Deliberately excludes `awaiting_split_review`,
-// which is reviewed in the split modal, not on the Validation page.
+// Human review of extracted data. Deliberately excludes `awaiting_split_review`
+// and `awaiting_checklist_review`, which are answered in their own modals on the
+// Processing page rather than on the Validation page.
 export const REVIEW_STATUSES = ['awaiting_review', 'duplicate'];
 
 export const SPLIT_REVIEW_STATUS = 'awaiting_split_review';
+
+// The Step 3.2 batch checklist gate. Only ever set on one document per batch —
+// the last one to classify — which holds the gate for all of its siblings.
+export const CHECKLIST_REVIEW_STATUS = 'awaiting_checklist_review';

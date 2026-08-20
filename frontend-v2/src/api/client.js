@@ -25,14 +25,16 @@ api.interceptors.response.use(
  * Upload a document.
  * @param {File} file
  * @param {(pct: number) => void} onProgress
- * @param {{autoSplit?: boolean}} options - autoSplit: detect multi-document packets and split them
- * @returns {Promise<{document_id, filename, status, message, workflow_run_id}>}
+ * @param {{autoSplit?: boolean, batchId?: string}} options - autoSplit: detect multi-document
+ *   packets and split them. batchId: join an existing upload batch instead of starting a new
+ *   one — how the documents a checklist reported missing get added to the batch waiting on them.
+ * @returns {Promise<{document_id, filename, status, message, workflow_run_id, batch_id}>}
  */
-export async function uploadDocument(file, onProgress, { autoSplit = true } = {}) {
+export async function uploadDocument(file, onProgress, { autoSplit = true, batchId = null } = {}) {
   const form = new FormData();
   form.append('file', file);
   const { data } = await api.post('/upload', form, {
-    params: { auto_split: autoSplit },
+    params: { auto_split: autoSplit, ...(batchId ? { batch_id: batchId } : {}) },
     headers: { 'Content-Type': 'multipart/form-data' },
     onUploadProgress: (e) => {
       if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100));
@@ -46,13 +48,14 @@ export async function uploadDocument(file, onProgress, { autoSplit = true } = {}
  * Server processes them concurrently and returns per-file results.
  * @param {File[]} files
  * @param {(pct: number) => void} onProgress  — overall upload progress 0-100
- * @returns {Promise<{ total, succeeded, failed, results: Array }>}
+ * @param {{autoSplit?: boolean, batchId?: string}} options
+ * @returns {Promise<{ total, succeeded, failed, batch_id, results: Array }>}
  */
-export async function uploadDocumentsBatch(files, onProgress, { autoSplit = true } = {}) {
+export async function uploadDocumentsBatch(files, onProgress, { autoSplit = true, batchId = null } = {}) {
   const form = new FormData();
   files.forEach((f) => form.append('files', f));
   const { data } = await api.post('/upload/batch', form, {
-    params: { auto_split: autoSplit },
+    params: { auto_split: autoSplit, ...(batchId ? { batch_id: batchId } : {}) },
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: 300_000, // 5 min — large batches can take a while
     onUploadProgress: (e) => {
@@ -311,6 +314,34 @@ export async function getClassificationConfig() {
  */
 export async function saveClassificationConfig(docTypes) {
   const { data } = await api.put('/settings/classification', docTypes);
+  return data;
+}
+
+// ─── Batch checklist (Step 3.2) ──────────────────────
+
+/**
+ * The checklist for one upload batch: which of the configured classification
+ * types are present, which are missing, and which document supplied each.
+ * Computed live when the workflow has not evaluated the batch yet.
+ * @param {string} batchId
+ */
+export async function getBatchChecklist(batchId) {
+  const { data } = await api.get(`/batches/${batchId}/checklist`);
+  return data;
+}
+
+/**
+ * Answer a batch paused at the checklist gate.
+ * @param {string} documentId  the document holding the gate (checklist.gate_document_id)
+ * @param {boolean} proceed    true continues despite the missing types
+ * @param {string} [note]      reviewer's reason, stored on the checklist
+ */
+export async function submitChecklistDecision(documentId, proceed, note = null) {
+  const { data } = await api.post(`/documents/${documentId}/checklist-decision`, {
+    proceed,
+    note,
+    rejection_reason: proceed ? null : note,
+  });
   return data;
 }
 

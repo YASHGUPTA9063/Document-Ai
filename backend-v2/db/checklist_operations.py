@@ -1,0 +1,154 @@
+"""
+Batch Checklist DB Operations
+=============================
+Reads for the Step 3.2 checklist and the write path that decides *which* of a
+batch's concurrently-running document workflows performs the evaluation.
+
+Every document in an upload batch reaches the checklist step independently, so
+without a mutex a five-file batch would fire five identical LLM calls and open
+five review gates for one verdict. `claim_evaluation` is that mutex: it is won
+by exactly one caller per (batch_id, signature), via the unique index on
+`batch_checklists.batch_id` plus a signature-guarded conditional UPDATE.
+"""
+
+import logging
+
+from sqlalchemy import update
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.future import select
+from sqlalchemy.orm.attributes import flag_modified
+
+from db.database import AsyncSessionLocal
+from db.models import BatchChecklist, Document
+
+logger = logging.getLogger(__name__)
+
+# Once a batch reaches one of these the verdict is settled for that signature.
+_SETTLED_STATUSES = {"complete", "incomplete", "overridden", "abandoned"}
+
+
+async def get_batch_documents(batch_id: str) -> list[Document]:
+    """Every document uploaded under this batch, split children included."""
+    if not batch_id:
+        return []
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Document)
+            .where(Document.batch_id == batch_id)
+            .where(Document.status != "deleted")
+            .order_by(Document.created_at)
+        )
+        return list(result.scalars().all())
+
+
+async def get_checklist(batch_id: str) -> BatchChecklist | None:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(BatchChecklist).where(BatchChecklist.batch_id == batch_id)
+        )
+        return result.scalar_one_or_none()
+
+
+async def claim_evaluation(batch_id: str, signature: str, gate_document_id: str) -> bool:
+    """
+    Try to become the workflow that evaluates this batch.
+
+    Returns True to exactly one caller per (batch_id, signature). A batch whose
+    contents changed since the last verdict carries a new signature and is
+    re-opened — that is what lets a reviewer upload the missing documents and
+    have the checklist judged again rather than replayed.
+    """
+    async with AsyncSessionLocal() as session:
+        row = BatchChecklist(
+            batch_id=batch_id,
+            signature=signature,
+            status="evaluating",
+            gate_document_id=gate_document_id,
+        )
+        session.add(row)
+        try:
+            await session.commit()
+            return True
+        except IntegrityError:
+            await session.rollback()
+
+    # A row already exists. Take it over only if it was judged under a different
+    # set of documents — a matching signature means the verdict already stands.
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            update(BatchChecklist)
+            .where(BatchChecklist.batch_id == batch_id)
+            .where(BatchChecklist.signature != signature)
+            .where(BatchChecklist.status.in_(_SETTLED_STATUSES))
+            .values(signature=signature, status="evaluating", gate_document_id=gate_document_id)
+        )
+        await session.commit()
+        return result.rowcount > 0
+
+
+async def save_evaluation(batch_id: str, result: dict, summary: str, source: str) -> None:
+    """Persist the verdict produced by the workflow that won the claim."""
+    async with AsyncSessionLocal() as session:
+        row = (await session.execute(
+            select(BatchChecklist).where(BatchChecklist.batch_id == batch_id)
+        )).scalar_one_or_none()
+        if not row:
+            logger.warning(f"[Batch {batch_id}] No checklist row to save the evaluation into")
+            return
+
+        row.status = "complete" if result["complete"] else "incomplete"
+        row.required_types = result["required"]
+        row.present_types = result["present"]
+        row.missing_types = result["missing"]
+        row.extra_types = result["extra"]
+        row.unclassified = result["unclassified"]
+        row.summary = summary
+        row.source = source
+        for field in ("required_types", "present_types", "missing_types", "extra_types", "unclassified"):
+            flag_modified(row, field)
+        await session.commit()
+
+
+async def release_claim(batch_id: str) -> None:
+    """Hand the claim back when the evaluation itself blew up, so a later
+    document in the batch can retry instead of the gate silently vanishing."""
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            update(BatchChecklist)
+            .where(BatchChecklist.batch_id == batch_id)
+            .where(BatchChecklist.status == "evaluating")
+            .values(status="abandoned", signature="")
+        )
+        await session.commit()
+
+
+async def record_decision(batch_id: str, proceed: bool, note: str | None) -> None:
+    """Close the review gate with the reviewer's answer."""
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            update(BatchChecklist)
+            .where(BatchChecklist.batch_id == batch_id)
+            .values(status="overridden" if proceed else "abandoned", decision_note=note)
+        )
+        await session.commit()
+
+
+def serialize(row: BatchChecklist | None) -> dict | None:
+    """Shape the checklist row for the API/UI."""
+    if not row:
+        return None
+    return {
+        "batch_id": row.batch_id,
+        "status": row.status,
+        "complete": row.status in ("complete", "overridden"),
+        "required": row.required_types or [],
+        "present": row.present_types or [],
+        "missing": row.missing_types or [],
+        "extra": row.extra_types or [],
+        "unclassified": row.unclassified or [],
+        "summary": row.summary,
+        "source": row.source,
+        "gate_document_id": row.gate_document_id,
+        "decision_note": row.decision_note,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }

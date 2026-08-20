@@ -78,7 +78,8 @@ async def get_or_create_split_child(parent_id: str, filename: str, file_path: st
                                     file_hash: str, page_range: str,
                                     doc_type_hint: str | None,
                                     split_confidence: float | None,
-                                    customer_id: str | None) -> tuple[str, bool]:
+                                    customer_id: str | None,
+                                    batch_id: str | None = None) -> tuple[str, bool]:
     """
     Create the Document row for one split segment.
 
@@ -106,6 +107,9 @@ async def get_or_create_split_child(parent_id: str, filename: str, file_path: st
             page_range=page_range,
             split_doc_type_hint=doc_type_hint,
             split_confidence=split_confidence,
+            # Children stand in for the packet on the batch checklist — the parent
+            # is excluded from it, so without this a split upload would look empty.
+            batch_id=batch_id,
         )
         session.add(child)
         await session.commit()

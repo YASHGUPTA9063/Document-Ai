@@ -57,6 +57,14 @@ class Settings(BaseSettings):
     SPLIT_REQUIRE_REVIEW: bool = Field(default=True, description="Pause for human confirmation of boundaries when any page falls below the confidence threshold")
     SPLIT_MERGE_ORPHANS: bool = Field(default=True, description="Merge a low-confidence single-page outlier back into the surrounding document")
 
+    # Document Checklist (Step 3.2)
+    # After each document classifies, reconciles the doc types seen across the
+    # whole upload batch against the configured classification types and pauses
+    # the batch for a human when a required type was never uploaded.
+    ENABLE_DOC_CHECKLIST: bool = Field(default=True, description="Reconcile an upload batch against the configured classification types (Step 3.2)")
+    CHECKLIST_AGENT_ID: str = Field(default="", description="Document Checklist Agent ID from Mistral Studio — falls back to a deterministic set-difference when unset")
+    CHECKLIST_REQUIRE_REVIEW: bool = Field(default=True, description="Pause the batch for human confirmation when required document types are missing")
+
     # Signature Verification Agent IDs
     SIGNATURE_VISION_AGENT_ID: str = Field(..., description="Signature Vision Agent ID from Mistral Studio")
     SIGNATURE_JUDGE_AGENT_ID: str = Field(..., description="Signature Judge Agent ID from Mistral Studio")

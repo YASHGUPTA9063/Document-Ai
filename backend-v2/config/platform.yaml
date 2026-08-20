@@ -138,6 +138,10 @@ pipelines:
     enable_pre_validation: true
     enable_preprocessing: false
     enable_fraud_check: true
+    # Step 3.2 — reconcile the upload batch against the configured classification
+    # types and pause it for a human when a type was never uploaded. The env var
+    # ENABLE_DOC_CHECKLIST is the equivalent switch for the Mistral engine.
+    enable_checklist: true
     # Second-pass re-extraction of required fields that came back missing or
     # low-confidence, via the `vllm_fallback` provider. Defaults to false to
     # match branch-vm3's shipped behaviour, where this step was commented out

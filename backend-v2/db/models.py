@@ -37,6 +37,12 @@ class Document(Base):
 
     customer_id = Column(String, ForeignKey("customer_references.customer_id"), nullable=True)
 
+    # ── Upload batch (Step 3.2 checklist) ──
+    # Every file of one upload shares a batch_id, and a packet's split children
+    # inherit their parent's. It is what gives the per-document workflow a set to
+    # reconcile against the configured classification types.
+    batch_id = Column(String, index=True, nullable=True)
+
     # ── Multi-document packet splitting (Step 1.5) ──
     # A packet upload stays here as the immutable parent (status "split"); each
     # document found inside it becomes a child row with its own file and workflow.
@@ -71,6 +77,44 @@ class ExtractedData(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     document = relationship("Document", back_populates="extracted_data")
+
+
+class BatchChecklist(Base):
+    """
+    One row per upload batch: which of the configured classification types were
+    actually uploaded, and which are still missing.
+
+    `batch_id` is unique — the row doubles as the mutex that decides which of the
+    concurrently-running document workflows gets to perform the (LLM-backed)
+    evaluation. `signature` is a fingerprint of the doc types observed at
+    evaluation time, so a batch that later gains the missing documents produces a
+    different signature and is re-evaluated rather than serving a stale verdict.
+    """
+    __tablename__ = "batch_checklists"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    batch_id = Column(String, index=True, unique=True, nullable=False)
+    signature = Column(String, nullable=False, default="")
+
+    # evaluating | complete | incomplete | overridden | abandoned
+    status = Column(String, nullable=False, default="evaluating")
+
+    required_types = Column(JSON, nullable=False, default=list)   # [{doc_type, label}]
+    present_types = Column(JSON, nullable=False, default=list)    # [{doc_type, document_ids}]
+    missing_types = Column(JSON, nullable=False, default=list)     # [{doc_type, label}]
+    extra_types = Column(JSON, nullable=False, default=list)       # types seen but not configured
+    unclassified = Column(JSON, nullable=False, default=list)      # document_ids with no usable type
+
+    summary = Column(Text, nullable=True)          # agent's one-paragraph verdict
+    source = Column(String, nullable=True)         # "agent" | "deterministic"
+
+    # The document whose workflow is parked at the checklist gate. Resuming the
+    # batch means submitting an input to *that* run.
+    gate_document_id = Column(String, nullable=True)
+    decision_note = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 # ─── CLAIM PROCESSING MODELS ───────────────────────────────────────────────────

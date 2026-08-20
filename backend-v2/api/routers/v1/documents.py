@@ -15,6 +15,7 @@ mounts it twice (at the root and under /api/v1).
 import os
 import json
 import re as _re
+import uuid
 import logging
 import mimetypes
 import tempfile
@@ -37,8 +38,10 @@ from schemas.documents import (
     WorkflowStatusResponse,
     UpdateExtractedDataRequest,
     SplitDecisionRequest,
+    ChecklistDecisionRequest,
 )
 import db.claim_operations as claim_db
+import db.checklist_operations as checklist_db
 from api.deps import ALLOWED_TYPES, get_mistral_client
 
 logger = logging.getLogger(__name__)
@@ -76,11 +79,17 @@ async def upload_document(
     claim_id: str = Query(None, description="Optional claim ID — links this document to a claim and triggers field sync after OCR"),
     doc_type: str = Query(None, description="Document type label for claim (e.g. medical_report, claim_form)"),
     auto_split: bool = Query(True, description="Detect multi-document packets and split them into one document per contained file"),
+    batch_id: str = Query(None, description="Group this upload with others under one batch — the scope the Step 3.2 checklist is evaluated over. Minted per-upload when omitted."),
 ):
     if file.content_type not in ALLOWED_TYPES:
         raise HTTPException(status_code=400, detail="Unsupported file type")
 
     file_path, file_hash = await save_file(file, settings.STORAGE_DIR)
+
+    # A lone upload is a batch of one unless the caller says it belongs with
+    # others — passing the same batch_id is how a reviewer adds the documents
+    # the checklist reported missing to the batch that is waiting on them.
+    batch_id = batch_id or f"batch-{uuid.uuid4().hex[:12]}"
 
     async with AsyncSessionLocal() as session:
         # Create Document record
@@ -89,7 +98,8 @@ async def upload_document(
             file_path=file_path,
             file_hash=file_hash,
             status="pending",
-            customer_id=customer_id
+            customer_id=customer_id,
+            batch_id=batch_id
         )
         session.add(doc)
         await session.commit()
@@ -131,7 +141,8 @@ async def upload_document(
             filename=doc.filename,
             status=doc.status,
             message="Upload successful, workflow started.",
-            workflow_run_id=run_id
+            workflow_run_id=run_id,
+            batch_id=batch_id
         )
 
 
@@ -139,7 +150,8 @@ async def upload_document(
 async def upload_documents_batch(
     files: List[UploadFile] = File(...),
     customer_id: str = Query(None, description="Optional customer ID to associate with all documents in batch"),
-    auto_split: bool = Query(True, description="Detect multi-document packets and split them into one document per contained file")
+    auto_split: bool = Query(True, description="Detect multi-document packets and split them into one document per contained file"),
+    batch_id: str = Query(None, description="Reuse an existing batch instead of starting a new one — used when uploading the documents a checklist reported missing.")
 ):
     """
     Batch upload endpoint — accepts multiple files in a single multipart request.
@@ -156,6 +168,11 @@ async def upload_documents_batch(
             status_code=400,
             detail=f"Batch too large. Maximum {MAX_BATCH_SIZE} files per request, got {len(files)}."
         )
+
+    # One batch id for the whole request. It is the set the Step 3.2 checklist
+    # reconciles against the configured classification types, so "uploaded
+    # together" is what "did we upload everything?" means.
+    batch_id = batch_id or f"batch-{uuid.uuid4().hex[:12]}"
 
     # Validate all file types upfront — fail fast before any IO
     for file in files:
@@ -176,7 +193,8 @@ async def upload_documents_batch(
                     file_path=file_path,
                     file_hash=file_hash,
                     status="pending",
-                    customer_id=customer_id
+                    customer_id=customer_id,
+                    batch_id=batch_id
                 )
                 session.add(doc)
                 await session.commit()
@@ -205,6 +223,7 @@ async def upload_documents_batch(
                     "filename":    file.filename,
                     "status":      doc.status,
                     "workflow_run_id": run_id,
+                    "batch_id":    batch_id,
                     "success":     True,
                     "error":       None,
                 }
@@ -235,6 +254,7 @@ async def upload_documents_batch(
         "total":     len(files),
         "succeeded": succeeded,
         "failed":    failed,
+        "batch_id":  batch_id,
         "results":   results,
     }
 
@@ -273,6 +293,7 @@ async def get_status(document_id: str):
             is_split_parent=bool(doc.is_split_parent),
             page_range=doc.page_range,
             child_count=child_count,
+            batch_id=doc.batch_id,
         )
 
 
@@ -319,6 +340,7 @@ async def list_documents(
                 "is_split_parent": bool(d.is_split_parent),
                 "page_range": d.page_range,
                 "child_count": child_counts.get(d.id, 0),
+                "batch_id": d.batch_id,
             }
             for d in docs
         ]
@@ -619,6 +641,137 @@ async def submit_split_decision(document_id: str, decision: SplitDecisionRequest
         raise
     except Exception as e:
         logger.error(f"Error submitting split decision for {document_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Batch checklist (Step 3.2) ──────────────────────────────────────────────
+
+@router.get("/batches/{batch_id}/checklist")
+async def get_batch_checklist(batch_id: str):
+    """
+    The checklist for one upload batch: which configured document types are
+    present, which are missing, and which document supplied each.
+
+    The lines are always reconciled **live**, against the classification types as
+    they are configured right now. The stored row only supplies the things that
+    cannot be recomputed — the agent's summary, the gate holder, the reviewer's
+    decision. That is deliberate: an admin can add or remove a type in Settings
+    while a batch sits at the gate, and replaying the snapshot taken at
+    evaluation time would show the reviewer a requirement list that no longer
+    exists. `stale` marks the case where the live verdict has drifted from the
+    stored one, so the UI can say the batch needs re-evaluating.
+    """
+    from tools.checklist import build_required_types, pending_documents, reconcile
+
+    documents = await checklist_db.get_batch_documents(batch_id)
+    if not documents:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    live = reconcile(documents, build_required_types())
+    pending = pending_documents(documents)
+    row = await checklist_db.get_checklist(batch_id)
+    stored = checklist_db.serialize(row)
+
+    if stored:
+        status = stored["status"]
+        # The stored summary describes the verdict as it stood at evaluation
+        # time. Once the live verdict disagrees, that prose is actively
+        # misleading, so it is dropped rather than shown next to fresh numbers.
+        stale = stored["complete"] != live["complete"] or _types_of(stored["missing"]) != _types_of(live["missing"])
+        summary = None if stale else stored["summary"]
+        source = "live" if stale else stored["source"]
+    else:
+        status = "pending" if pending else "unevaluated"
+        stale = False
+        summary = None
+        source = "live"
+
+    return {
+        "batch_id": batch_id,
+        "status": status,
+        "complete": live["complete"],
+        "overridden": bool(stored and stored["status"] == "overridden"),
+        "stale": stale,
+        "required": live["required"],
+        "present": live["present"],
+        "missing": live["missing"],
+        "extra": live["extra"],
+        "unclassified": live["unclassified"],
+        "summary": summary,
+        "source": source,
+        "gate_document_id": stored["gate_document_id"] if stored else None,
+        "decision_note": stored["decision_note"] if stored else None,
+        "updated_at": stored["updated_at"] if stored else None,
+        "documents": _batch_document_rows(documents),
+        "pending_count": len(pending),
+    }
+
+
+def _types_of(entries) -> set:
+    """The doc_type keys of a required/missing list, for comparing two verdicts."""
+    return {entry.get("doc_type") for entry in (entries or [])}
+
+
+def _batch_document_rows(documents) -> list[dict]:
+    """The batch's contents, as the checklist UI needs to list them."""
+    return [
+        {
+            "document_id": d.id,
+            "filename": d.filename,
+            "status": d.status,
+            "doc_type": d.doc_type or d.split_doc_type_hint,
+            "is_split_parent": bool(d.is_split_parent),
+        }
+        for d in documents
+    ]
+
+
+@router.post("/documents/{document_id}/checklist-decision")
+async def submit_checklist_decision(document_id: str, decision: ChecklistDecisionRequest):
+    """
+    Resume a batch paused at the checklist gate.
+
+    proceed=true continues the pipeline with the batch as it stands — the normal
+    answer once the reviewer has uploaded the missing documents into the same
+    batch, or established that they do not apply. proceed=false rejects the
+    document holding the gate. Uses the same two-step Temporal update protocol as
+    the duplicate, review and split resumes — see api/routers/v1/workflow.py.
+    """
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Document).where(Document.id == document_id))
+        doc = result.scalar_one_or_none()
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+        if doc.status != "awaiting_checklist_review":
+            raise HTTPException(
+                status_code=409,
+                detail=f"Document is not awaiting checklist review (status: {doc.status})."
+            )
+        run_id = doc.workflow_run_id
+
+    if not run_id or run_id == "unknown_run_id":
+        raise HTTPException(status_code=409, detail="No workflow run to resume for this document.")
+
+    try:
+        client = get_mistral_client()
+        query_result = await client.workflows.executions.query_workflow_execution_async(
+            execution_id=run_id,
+            name="__get_pending_inputs",
+        )
+        pending_inputs = (query_result.result or {}).get("pending_inputs", [])
+        if not pending_inputs:
+            raise HTTPException(status_code=409, detail="No pending inputs found. Workflow may not be paused yet.")
+
+        await client.workflows.executions.update_workflow_execution_async(
+            execution_id=run_id,
+            name="__submit_input",
+            input={"task_id": pending_inputs[0]["task_id"], "input": decision.model_dump()},
+        )
+        return {"message": "Checklist decision submitted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error submitting checklist decision for {document_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

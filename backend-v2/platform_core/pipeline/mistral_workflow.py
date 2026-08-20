@@ -40,6 +40,8 @@ class DocumentInput(BaseModel):
     # Set when a reviewer overrides a duplicate: the workflow already ended at
     # the intake gate, so overriding means re-running with the gate disabled.
     skip_duplicate_check: bool = False
+    # Same idea for the Step 3.2 checklist gate.
+    skip_checklist_gate: bool = False
 
 
 class DocumentOutput(BaseModel):
@@ -141,6 +143,17 @@ async def activity_classify(document_id: str, file_path: str) -> dict:
     from activities.classifier import classifier_activity
     logger.info(f"[MistralWorkflow] Running classification for {document_id}")
     return await classifier_activity(document_id, file_path)
+
+
+@workflows.activity(
+    start_to_close_timeout=timedelta(minutes=3),
+    retry_policy_max_attempts=2,
+)
+async def activity_checklist(document_id: str) -> dict:
+    """Step 3.2: Reconcile the upload batch against the configured doc types."""
+    from activities.checklist import checklist_activity
+    logger.info(f"[MistralWorkflow] Running batch checklist for {document_id}")
+    return await checklist_activity(document_id)
 
 
 @workflows.activity(
@@ -312,6 +325,28 @@ class DocumentProcessingWorkflow:
             classify_result = await activity_classify(document_id, clean_file_path)
             doc_type = classify_result.get("doc_type", "others")
             await activity_set_doc_type(document_id, doc_type)
+
+            # ── Step 3.2: Batch Checklist ─────────────────────────────────
+            # This workflow has no wait_for_input primitive, so an incomplete
+            # batch is parked in the review queue the same way an under-confident
+            # extraction is — the API resumes it by re-running with the override.
+            if not input.skip_checklist_gate:
+                await activity_set_status(document_id, "checklist")
+                checklist_result = await activity_checklist(document_id)
+                if checklist_result.get("evaluated") and not checklist_result.get("complete"):
+                    missing = ", ".join(
+                        entry["label"] for entry in checklist_result.get("missing", [])
+                    )
+                    reason = f"Documents missing from this upload: {missing}."
+                    await activity_set_terminal_status(
+                        document_id, "awaiting_checklist_review", reason
+                    )
+                    return DocumentOutput(
+                        document_id=document_id,
+                        status="paused",
+                        doc_type=doc_type,
+                        paused_reason=reason,
+                    )
 
             # ── Step 3.5: Fraud Check (KYC only) ─────────────────────────
             fraud_check_result = None

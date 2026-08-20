@@ -1,5 +1,5 @@
 import { createContext, useContext, useReducer, useCallback } from 'react';
-import { ACTIVE_STATUSES, REVIEW_STATUSES, SPLIT_REVIEW_STATUS } from './documentStatus';
+import { ACTIVE_STATUSES, REVIEW_STATUSES, SPLIT_REVIEW_STATUS, CHECKLIST_REVIEW_STATUS } from './documentStatus';
 
 // ─── Initial State ───────────────────────────────
 function lsGet(key, fallback) {
@@ -132,6 +132,9 @@ export function AppProvider({ children }) {
   const reviewDocs  = state.documents.filter((d) => REVIEW_STATUSES.includes(d.status));
   const splitReviewDocs = state.documents.filter((d) => d.status === SPLIT_REVIEW_STATUS);
 
+  // One per incomplete batch: the document holding the Step 3.2 checklist gate.
+  const checklistReviewDocs = state.documents.filter((d) => d.status === CHECKLIST_REVIEW_STATUS);
+
   const completedDocs = state.documents.filter((d) => d.status === 'completed');
 
   // Includes completed docs + split parent packets so the Extraction page can
@@ -146,6 +149,7 @@ export function AppProvider({ children }) {
       pendingDocs,
       reviewDocs,
       splitReviewDocs,
+      checklistReviewDocs,
       completedDocs,
       extractionDocs,
       setDocuments,

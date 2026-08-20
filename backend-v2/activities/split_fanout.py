@@ -77,6 +77,7 @@ async def split_fanout_activity(document_id: str, filename: str, file_path: str,
 
     parent = await db.get_document(document_id)
     customer_id = parent.customer_id if parent else None
+    batch_id = getattr(parent, "batch_id", None) if parent else None
 
     out_dir = os.path.join(settings.STORAGE_DIR, "splits", document_id)
 
@@ -105,6 +106,7 @@ async def split_fanout_activity(document_id: str, filename: str, file_path: str,
             doc_type_hint=segment.doc_type,
             split_confidence=segment.min_confidence,
             customer_id=customer_id,
+            batch_id=batch_id,
         )
         segment.child_document_id = child_id
 

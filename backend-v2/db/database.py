@@ -45,6 +45,9 @@ async def init_db():
             "ALTER TABLE documents ADD COLUMN is_split_parent BOOLEAN DEFAULT 0",
             "ALTER TABLE documents ADD COLUMN split_manifest JSON",
             "CREATE INDEX IF NOT EXISTS ix_documents_parent_document_id ON documents (parent_document_id)",
+            # Upload batches + the Step 3.2 checklist
+            "ALTER TABLE documents ADD COLUMN batch_id VARCHAR",
+            "CREATE INDEX IF NOT EXISTS ix_documents_batch_id ON documents (batch_id)",
         ]:
             try:
                 await conn.execute(text(col))

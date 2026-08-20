@@ -36,6 +36,7 @@ export function useDocumentPoller(documentId) {
           if (data.status === 'completed') toast(`Document processed successfully!`, 'success');
           if (data.status === 'awaiting_review') toast(`Document needs human review.`, 'warn');
           if (data.status === 'awaiting_split_review') toast(`Multiple documents detected — confirm the split.`, 'warn');
+          if (data.status === 'awaiting_checklist_review') toast(`This upload is missing some document types.`, 'warn');
           if (data.status === 'split') toast(`Packet split into ${data.child_count || 0} documents.`, 'success');
           if (data.status === 'rejected') toast(`Document rejected: ${data.message || 'See document for reason.'}`, 'error');
           if (data.status === 'error') toast(`Processing error: ${data.message}`, 'error');

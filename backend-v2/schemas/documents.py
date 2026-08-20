@@ -7,6 +7,8 @@ class DocumentUploadResponse(BaseModel):
     status: str
     message: str
     workflow_run_id: str
+    # Upload batch this file joined — the scope of the Step 3.2 checklist.
+    batch_id: Optional[str] = None
 
 class WorkflowStatusResponse(BaseModel):
     document_id: str
@@ -22,6 +24,9 @@ class WorkflowStatusResponse(BaseModel):
     is_split_parent: bool = False
     page_range: Optional[str] = None
     child_count: int = 0
+    # Upload batch the document belongs to — the scope the Step 3.2 checklist
+    # is evaluated over. Null for documents uploaded before batches existed.
+    batch_id: Optional[str] = None
 
 class DuplicateDecisionRequest(BaseModel):
     override: bool
@@ -52,3 +57,16 @@ class SplitDecisionRequest(BaseModel):
     approved: bool
     segments: Optional[List[SegmentOverride]] = None
 
+
+
+class ChecklistDecisionRequest(BaseModel):
+    """
+    Reviewer's answer to a batch paused at the Step 3.2 checklist gate.
+
+    proceed=True continues the pipeline even though document types are missing —
+    the usual case once the reviewer has either uploaded them or established that
+    they do not apply. proceed=False rejects the document holding the gate.
+    """
+    proceed: bool
+    note: Optional[str] = None
+    rejection_reason: Optional[str] = None
