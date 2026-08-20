@@ -53,6 +53,21 @@ async def rebuild_segments_activity(overrides: list, total_pages: int) -> list:
 
 
 @workflows.activity()
+async def splitting_enabled_activity() -> bool:
+    """
+    The effective Step 1.5 switch, read as an activity because it touches disk.
+
+    ENABLE_DOC_SPLITTING is the deploy-level kill switch and the runtime toggle
+    lives in storage/splitting_config.json. Resolving both here — rather than
+    letting the splitter activity no-op — keeps the document from ever passing
+    through the "splitting" status when the step is switched off, so the UI's
+    pipeline matches what actually runs.
+    """
+    from utils.split_config import load_split_config
+    return bool(load_split_config().get("enabled"))
+
+
+@workflows.activity()
 async def get_template_metadata_activity(doc_type: str) -> dict:
     from tools.extractor import get_template_metadata
     return get_template_metadata(doc_type)
@@ -68,6 +83,10 @@ async def _update_status_and_message(document_id: str, status: str, message: str
 async def _update_doc_type(document_id: str, doc_type: str) -> str:
     with workflows.run_activities_locally():
         return await update_doc_type_activity(document_id, doc_type)
+
+async def _splitting_enabled() -> bool:
+    with workflows.run_activities_locally():
+        return await splitting_enabled_activity()
 
 @workflows.workflow.define(name="document_processing_workflow")
 class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
@@ -108,9 +127,11 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
         # Runs ahead of pre-validation so each document found inside the packet gets
         # its own quality gate instead of one verdict for the whole stack. A failure
         # here degrades to "process the packet whole" rather than failing the upload.
-        # ENABLE_DOC_SPLITTING is the deploy-level kill switch; the runtime toggle
-        # in Settings (storage/splitting_config.json) is checked inside the activity.
-        if auto_split and settings.ENABLE_DOC_SPLITTING:
+        # Switched off entirely — by ENABLE_DOC_SPLITTING (deploy-level kill switch)
+        # or by the runtime toggle in Settings — the document never enters the
+        # "splitting" status, so the step is absent from the pipeline rather than
+        # flashing past as a no-op.
+        if auto_split and settings.ENABLE_DOC_SPLITTING and await _splitting_enabled():
             await _update_status(document_id, "splitting")
             try:
                 split_result = await splitter_activity(document_id, file_path)

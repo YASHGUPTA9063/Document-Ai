@@ -133,7 +133,7 @@ export function Upload() {
 
   const fileInputRef = useRef(null);
   const itemIdRef    = useRef(0);
-  const { addDocument, toast } = useApp();
+  const { addDocument, toast, features } = useApp();
   const navigate = useNavigate();
 
   // ── File queue management ──────────────────────────────────────────────────
@@ -204,7 +204,11 @@ export function Upload() {
 
     try {
       const files  = ready.map((i) => i.file);
-      const result = await uploadDocumentsBatch(files, (pct) => setBatchProgress(pct), { autoSplit });
+      // With splitting switched off deployment-wide the toggle is not shown, so
+      // send the flag the backend will actually honour rather than a stale `true`.
+      const result = await uploadDocumentsBatch(files, (pct) => setBatchProgress(pct), {
+        autoSplit: features.doc_splitting && autoSplit,
+      });
 
       setBatchResult(result);
 
@@ -313,7 +317,10 @@ export function Upload() {
             </div>
 
             {/* Auto-split toggle — a PDF holding several documents is detected and
-                separated before any of them is classified or extracted. */}
+                separated before any of them is classified or extracted. Hidden
+                outright when the deployment has splitting switched off: there is
+                nothing for the toggle to control. */}
+            {features.doc_splitting && (
             <button
               onClick={(e) => { e.stopPropagation(); setAutoSplit((v) => !v); }}
               disabled={uploading}
@@ -333,6 +340,7 @@ export function Upload() {
               <Scissors size={12} />
               {autoSplit ? 'Auto-split multi-document files: on' : 'Auto-split multi-document files: off'}
             </button>
+            )}
 
             <input
               ref={fileInputRef}

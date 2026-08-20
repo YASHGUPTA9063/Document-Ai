@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   RefreshCw, ExternalLink, Cpu, Zap, AlertTriangle,
-  Upload, Bot, FileSearch, CheckCircle, FileText, UserCheck, GitBranch, Shield
+  Upload, Bot, FileSearch, CheckCircle, FileText, UserCheck, GitBranch, Shield,
+  Scissors, ListChecks
 } from 'lucide-react';
 import { getAgents } from '../api/client';
 
@@ -9,7 +10,9 @@ const AGENT_ICON_MAP = {
   intake: Upload,
   pre_validator: Shield,
   preprocessing: Cpu,
+  splitter: Scissors,
   classifier: Bot,
+  checklist: ListChecks,
   extractor: FileSearch,
   invoice_extractor: FileSearch,
   contract_extractor: FileSearch,
@@ -202,7 +205,12 @@ function PipelineGraph({ agents }) {
   const intakeAgent = agents.find(a => a.key === 'intake');
   const preValidatorAgent = agents.find(a => a.key === 'pre_validator');
   const preprocessingAgent = agents.find(a => a.key === 'preprocessing');
+  // Optional stages. The backend leaves these out of /agents when the deployment
+  // has them switched off, and the `!!s.agent` filter below drops the node — so
+  // a stage that never runs never shows up in the flow.
+  const splitterAgent = agents.find(a => a.key === 'splitter');
   const classifierAgent = agents.find(a => a.key === 'classifier');
+  const checklistAgent = agents.find(a => a.key === 'checklist');
   const fraudCheckerAgent = agents.find(a => a.key === 'fraud_checker');
   const validatorAgent = agents.find(a => a.key === 'validator');
   const autoVerifierAgent = agents.find(a => a.key === 'auto_verifier');
@@ -213,9 +221,11 @@ function PipelineGraph({ agents }) {
   // Ordered pipeline: 10 steps sequentially mapping the backend-v4 architecture.
   const steps = [
     { type: 'node', agent: intakeAgent, step: 1 },
+    { type: 'node', agent: splitterAgent, step: 1.5, conditional: true, label: "Multi-doc packets" },
     { type: 'node', agent: preValidatorAgent, step: 2 },
     { type: 'node', agent: preprocessingAgent, step: 2.5, conditional: true, label: "Enabled in config" },
     { type: 'node', agent: classifierAgent, step: 3 },
+    { type: 'node', agent: checklistAgent, step: 3.2, conditional: true, label: "Per upload batch" },
     { type: 'node', agent: fraudCheckerAgent, step: 3.5, conditional: true, label: "KYC Only" },
     { type: 'extractors',                     step: 4 },
     { type: 'node', agent: validatorAgent, step: 5 },

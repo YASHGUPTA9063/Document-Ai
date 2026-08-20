@@ -1383,8 +1383,18 @@ export function Settings() {
     autoApproveThreshold,    setAutoApproveThreshold,
     confHighThreshold,       setConfHighThreshold,
     confMedThreshold,        setConfMedThreshold,
-    toast,
+    toast, features,
   } = useApp();
+
+  // ENABLE_DOC_SPLITTING is a deploy-level kill switch: with it off the runtime
+  // toggles below cannot turn splitting back on, so the whole section is hidden
+  // rather than shown as controls that do nothing.
+  const nav = NAV.filter((n) => n.id !== 'splitting' || features.doc_splitting_env);
+
+  // Derived rather than stored: the flags arrive after the first render, so a
+  // section can vanish while it is the one being viewed. Falling back here shows
+  // the first available section without a second render pass.
+  const activeSection = nav.some((n) => n.id === activeNav) ? activeNav : nav[0].id;
 
   const DEFAULTS = {
     confidenceMode: 'word',
@@ -1459,8 +1469,8 @@ export function Settings() {
               Preferences
             </span>
           </div>
-          {NAV.map(({ id, label, icon: Icon, desc }) => {
-            const active = activeNav === id;
+          {nav.map(({ id, label, icon: Icon, desc }) => {
+            const active = activeSection === id;
             return (
               <button
                 key={id}
@@ -1506,14 +1516,14 @@ export function Settings() {
           borderRadius: 12, padding: 28, boxShadow: 'var(--shadow-card)',
           minHeight: 420,
         }}>
-          {activeNav === 'confidence' && (
+          {activeSection === 'confidence' && (
             <ConfidenceSection
               confidenceMode={confidenceMode}
               setConfidenceMode={setConfidenceMode}
               toast={toast}
             />
           )}
-          {activeNav === 'thresholds' && (
+          {activeSection === 'thresholds' && (
             <ThresholdsSection
               fieldHighlightThreshold={fieldHighlightThreshold}
               setFieldHighlightThreshold={setFieldHighlightThreshold}
@@ -1526,21 +1536,21 @@ export function Settings() {
               toast={toast}
             />
           )}
-          {activeNav === 'normalization' && (
+          {activeSection === 'normalization' && (
             <NormalizationSection
               toast={toast}
             />
           )}
-          {activeNav === 'splitting' && (
+          {activeSection === 'splitting' && (
             <SplittingSection toast={toast} />
           )}
 
-          {activeNav === 'classification' && (
+          {activeSection === 'classification' && (
             <ClassificationSection
               toast={toast}
             />
           )}
-          {/* {activeNav === 'vllm' && (
+          {/* {activeSection === 'vllm' && (
             <VllmSection
               toast={toast}
             />

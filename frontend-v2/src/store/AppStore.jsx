@@ -1,12 +1,25 @@
-import { createContext, useContext, useReducer, useCallback } from 'react';
+import { createContext, useContext, useReducer, useCallback, useEffect } from 'react';
 import { ACTIVE_STATUSES, REVIEW_STATUSES, SPLIT_REVIEW_STATUS, CHECKLIST_REVIEW_STATUS } from './documentStatus';
+import { getFeatureFlags } from '../api/client';
 
 // ─── Initial State ───────────────────────────────
 function lsGet(key, fallback) {
   try { const v = localStorage.getItem(key); return v !== null ? JSON.parse(v) : fallback; } catch { return fallback; }
 }
 
+// Which optional stages the backend has switched on. Seeded with the same
+// defaults config.py uses so the first render matches an un-configured
+// deployment, then replaced by the real answer from /settings/features.
+// A stage that is off is not drawn anywhere: no pipeline step, no agent card,
+// no settings section.
+const DEFAULT_FEATURES = {
+  doc_splitting: false,
+  doc_splitting_env: false,
+  doc_checklist: true,
+};
+
 const initialState = {
+  features: DEFAULT_FEATURES,
   documents: [],        // [{id, filename, status, doc_type, workflow_run_id}]
   activeDocId: null,    // currently viewed document id
   pollingIds: new Set(),
@@ -29,6 +42,9 @@ const initialState = {
 // ─── Reducer ─────────────────────────────────────
 function reducer(state, action) {
   switch (action.type) {
+    case 'SET_FEATURES':
+      return { ...state, features: { ...DEFAULT_FEATURES, ...action.payload } };
+
     case 'SET_DOCUMENTS':
       return { ...state, documents: action.payload };
 
@@ -105,6 +121,17 @@ let toastId = 0;
 
 export function AppProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initialState);
+
+  // Fetched once per session — these are deploy-level flags, not something a
+  // page can change. A failed fetch keeps the defaults rather than blanking the
+  // pipeline, so a backend hiccup never hides steps that do run.
+  useEffect(() => {
+    let active = true;
+    getFeatureFlags()
+      .then((flags) => { if (active) dispatch({ type: 'SET_FEATURES', payload: flags }); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   const setDocuments = useCallback((docs) => dispatch({ type: 'SET_DOCUMENTS', payload: docs }), []);
   const addDocument  = useCallback((doc)  => dispatch({ type: 'ADD_DOCUMENT',  payload: doc }),  []);

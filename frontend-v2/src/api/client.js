@@ -280,6 +280,17 @@ export async function verifySignature(documentId, referenceFile, verificationTyp
 }
 
 /**
+ * Which optional pipeline stages this deployment has switched on.
+ * Resolved server-side, so the UI never has to reason about the env kill
+ * switch vs. the runtime toggle.
+ * @returns {Promise<{doc_splitting: boolean, doc_splitting_env: boolean, doc_checklist: boolean}>}
+ */
+export async function getFeatureFlags() {
+  const { data } = await api.get('/settings/features');
+  return data;
+}
+
+/**
  * Get normalization settings.
  * @returns {Promise<object>}
  */

@@ -77,6 +77,33 @@ async def update_splitting_settings(config: dict):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.get("/settings/features")
+async def get_feature_flags():
+    """
+    Which optional pipeline stages are switched on for this deployment.
+
+    The UI reads this to decide what to draw: a stage the workflow will never
+    run must not show up as a step in the live pipeline, as an agent card, or
+    as a settings page. Everything here is resolved server-side so the frontend
+    never has to know about the two-level env/runtime switch.
+
+    * `doc_splitting` — effective: the ENABLE_DOC_SPLITTING kill switch AND the
+      runtime toggle in `storage/splitting_config.json`. This is "will Step 1.5
+      actually run".
+    * `doc_splitting_env` — the kill switch alone. With it off the runtime
+      toggle cannot turn splitting back on, so the Settings section is pointless
+      and is hidden.
+    * `doc_checklist` — ENABLE_DOC_CHECKLIST. The checklist has no runtime
+      toggle, so there is only one level to report.
+    """
+    env_splitting = bool(settings.ENABLE_DOC_SPLITTING)
+    return {
+        "doc_splitting": env_splitting and bool(load_split_config().get("enabled")),
+        "doc_splitting_env": env_splitting,
+        "doc_checklist": bool(settings.ENABLE_DOC_CHECKLIST),
+    }
+
+
 @router.get("/settings/vllm")
 async def get_vllm_settings():
     from utils.vllm_settings import load_vllm_settings
@@ -325,6 +352,14 @@ AGENT_PIPELINE_META = {
         "border": "#7c3aed",
         "pipeline_tools": ["get_document_text", "get_supported_document_types"],
     },
+    "checklist": {
+        "step": 3.2,
+        "role": "Batch document checklist reconciliation",
+        "emoji": "📋",
+        "color": "rgba(13,148,136,0.15)",
+        "border": "#0d9488",
+        "pipeline_tools": ["build_required_types", "reconcile_batch"],
+    },
     "fraud_checker": {
         "step": 3.5,
         "role": "KYC  fraud check",
@@ -437,12 +472,20 @@ async def list_agents():
     all 6 type-specific extractors, validator, auto-verifier, sub-verifiers, reviewer, and output agents.
     Each agent is fetched from the Mistral API to get its real name, description, and model.
     """
+    # Optional stages only appear when they are actually switched on — an agent
+    # the workflow will never call has no place in the pipeline listing. A blank
+    # ID is skipped below, so gating is just "report no ID when disabled".
+    splitting_on = settings.ENABLE_DOC_SPLITTING and bool(load_split_config().get("enabled"))
+    splitter_id = settings.SPLITTER_AGENT_ID if splitting_on else ""
+    checklist_id = settings.CHECKLIST_AGENT_ID if settings.ENABLE_DOC_CHECKLIST else ""
+
     agent_configs = [
         ("intake",                 settings.INTAKE_AGENT_ID),
         ("pre_validator",          settings.PRE_VALIDATOR_AGENT_ID),
         ("preprocessing",          settings.PREPROCESSING_AGENT_ID),
-        ("splitter",               settings.SPLITTER_AGENT_ID),
+        ("splitter",               splitter_id),
         ("classifier",             settings.CLASSIFIER_AGENT_ID),
+        ("checklist",              checklist_id),
         ("fraud_checker",          settings.FRAUD_AGENT_ID),
         ("others_extractor",       settings.GENERAL_EXTRACTOR_AGENT_ID),
         ("validator",              settings.VALIDATOR_AGENT_ID),
@@ -463,6 +506,7 @@ async def list_agents():
         "preprocessing": "Pre Processing Agent",
         "splitter": "Document Splitter Agent",
         "classifier": "Classification Agent",
+        "checklist": "Document Checklist Agent",
         "others_extractor": "Extraction Agent",
         "validator": "Validation Agent",
         "reviewer": "Human Review Agent",
