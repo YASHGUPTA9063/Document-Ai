@@ -1015,8 +1015,11 @@ function SplitNumberField({ config, setConfig, field, label, hint, min, max, ste
 
 
 function SplittingSection({ toast }) {
+  // No `enabled` key: splitting is switched on and off by ENABLE_DOC_SPLITTING
+  // in the environment, the same as the Step 3.2 checklist. This section only
+  // exists when the stage is already on, so everything here is a tuning knob.
   const [config, setConfig] = useState({
-    enabled: false, confidence_threshold: 0.75, page_batch_size: 8,
+    confidence_threshold: 0.75, page_batch_size: 8,
     max_pages: 50, require_review: true, merge_orphans: true,
   });
   const [loading, setLoading] = useState(true);
@@ -1027,7 +1030,13 @@ function SplittingSection({ toast }) {
     (async () => {
       try {
         const data = await getSplitSettings();
-        if (active) { setConfig(data); setLoading(false); }
+        // `enabled` comes back for reference and is read-only — drop it so it
+        // is not round-tripped on save.
+        if (active) {
+          const { enabled: _envFlag, ...tunables } = data;
+          setConfig(tunables);
+          setLoading(false);
+        }
       } catch (err) {
         if (active) { toast(err.message || 'Failed to load splitting settings', 'error'); setLoading(false); }
       }
@@ -1038,8 +1047,8 @@ function SplittingSection({ toast }) {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const saved = await saveSplitSettings(config);
-      setConfig(saved);
+      const { enabled: _envFlag, ...tunables } = await saveSplitSettings(config);
+      setConfig(tunables);
       toast('Document splitting settings saved ✓', 'success');
     } catch (err) {
       toast(err.message || 'Failed to save splitting settings', 'error');
@@ -1071,17 +1080,14 @@ function SplittingSection({ toast }) {
         them is quality-checked or extracted. Each piece then runs the full pipeline on
         its own, <strong>reusing the classification the split already produced</strong>,
         so no document is classified twice. Files that hold one document are untouched.
+        <br /><br />
+        The stage itself is switched on and off by <strong>ENABLE_DOC_SPLITTING</strong> in
+        the backend environment — with it off, splitting never runs and this section, the
+        pipeline step and the splitter agent all disappear. The settings below tune how it
+        behaves while it is on.
       </InfoCallout>
 
-      <SplitToggle
-        config={config} setConfig={setConfig}
-        field="enabled"
-        title={config.enabled ? 'Splitting Enabled' : 'Splitting Disabled'}
-        on="Multi-document uploads are split into one document per contained file"
-        off="Every upload is processed as a single document"
-      />
-
-      <div style={{ opacity: config.enabled ? 1 : 0.45, pointerEvents: config.enabled ? 'auto' : 'none', transition: 'opacity 0.2s ease' }}>
+      <div>
         <SplitToggle
           config={config} setConfig={setConfig}
           field="require_review"
@@ -1389,7 +1395,7 @@ export function Settings() {
   // ENABLE_DOC_SPLITTING is a deploy-level kill switch: with it off the runtime
   // toggles below cannot turn splitting back on, so the whole section is hidden
   // rather than shown as controls that do nothing.
-  const nav = NAV.filter((n) => n.id !== 'splitting' || features.doc_splitting_env);
+  const nav = NAV.filter((n) => n.id !== 'splitting' || features.doc_splitting);
 
   // Derived rather than stored: the flags arrive after the first render, so a
   // section can vanish while it is the one being viewed. Falling back here shows

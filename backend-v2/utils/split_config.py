@@ -1,7 +1,7 @@
 """
 Document Splitting Runtime Config
 =================================
-Load/save helpers for `storage/splitting_config.json`, the runtime overrides
+Load/save helpers for `storage/splitting_config.json`, the runtime tuning knobs
 for the Step 1.5 packet splitter.
 
 Precedence matches the other settings files in this package (see
@@ -9,6 +9,13 @@ Precedence matches the other settings files in this package (see
 defaults, and any key present in the JSON file overrides them at read time. A
 missing or malformed file falls back to the env defaults, never to an error —
 the splitter must not be able to take the pipeline down.
+
+The one exception is `enabled`, which is read-only here and comes from
+ENABLE_DOC_SPLITTING alone. Splitting is switched on and off from the
+environment only — the same way ENABLE_DOC_CHECKLIST governs Step 3.2 — so
+there is exactly one place to look when asking whether the stage runs. It is
+still reported by `load_split_config()` so callers have one source for "is
+splitting on", and any `enabled` key sent to `save_split_config()` is ignored.
 """
 
 import os
@@ -21,9 +28,9 @@ logger = logging.getLogger(__name__)
 
 SPLIT_CONFIG_FILE = os.path.join(settings.STORAGE_DIR, "splitting_config.json")
 
-# key -> (settings attribute, coercion callable)
+# Runtime-overridable key -> (settings attribute, coercion callable).
+# `enabled` is deliberately absent: see the module docstring.
 _FIELDS = {
-    "enabled":              ("ENABLE_DOC_SPLITTING", bool),
     "confidence_threshold": ("SPLIT_CONFIDENCE_THRESHOLD", float),
     "page_batch_size":      ("SPLIT_PAGE_BATCH_SIZE", int),
     "max_pages":            ("SPLIT_MAX_PAGES", int),
@@ -37,8 +44,12 @@ def _defaults() -> dict:
 
 
 def load_split_config() -> dict:
-    """Env defaults, overlaid with whatever `splitting_config.json` overrides."""
+    """Env defaults, overlaid with whatever `splitting_config.json` overrides.
+
+    `enabled` is always the env flag and is never read from the file.
+    """
     config = _defaults()
+    config["enabled"] = bool(settings.ENABLE_DOC_SPLITTING)
     if not os.path.exists(SPLIT_CONFIG_FILE):
         return config
 
@@ -66,7 +77,11 @@ def load_split_config() -> dict:
 
 
 def save_split_config(config: dict) -> dict:
-    """Persist only the recognised keys; returns the resulting effective config."""
+    """Persist only the recognised keys; returns the resulting effective config.
+
+    `enabled` is not one of them — a client that sends it is quietly ignored
+    rather than rejected, so the switch stays purely an env concern.
+    """
     cleaned = {}
     for key, (_, coerce) in _FIELDS.items():
         if key in config and config[key] is not None:

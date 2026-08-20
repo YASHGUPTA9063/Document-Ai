@@ -7,14 +7,14 @@ function lsGet(key, fallback) {
   try { const v = localStorage.getItem(key); return v !== null ? JSON.parse(v) : fallback; } catch { return fallback; }
 }
 
-// Which optional stages the backend has switched on. Seeded with the same
-// defaults config.py uses so the first render matches an un-configured
-// deployment, then replaced by the real answer from /settings/features.
-// A stage that is off is not drawn anywhere: no pipeline step, no agent card,
-// no settings section.
+// Which optional stages the backend has switched on. Both are environment-only
+// flags (ENABLE_DOC_SPLITTING / ENABLE_DOC_CHECKLIST) with no runtime override,
+// so this is fetched once and never changes during a session. Seeded with the
+// same defaults config.py uses, then replaced by the real answer from
+// /settings/features. A stage that is off is not drawn anywhere: no pipeline
+// step, no agent card, no settings section.
 const DEFAULT_FEATURES = {
   doc_splitting: false,
-  doc_splitting_env: false,
   doc_checklist: true,
 };
 

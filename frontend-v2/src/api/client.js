@@ -280,10 +280,10 @@ export async function verifySignature(documentId, referenceFile, verificationTyp
 }
 
 /**
- * Which optional pipeline stages this deployment has switched on.
- * Resolved server-side, so the UI never has to reason about the env kill
- * switch vs. the runtime toggle.
- * @returns {Promise<{doc_splitting: boolean, doc_splitting_env: boolean, doc_checklist: boolean}>}
+ * Which optional pipeline stages this deployment has switched on. Both come
+ * from the backend environment (ENABLE_DOC_SPLITTING / ENABLE_DOC_CHECKLIST)
+ * and have no runtime override, so the answer is fixed for the session.
+ * @returns {Promise<{doc_splitting: boolean, doc_checklist: boolean}>}
  */
 export async function getFeatureFlags() {
   const { data } = await api.get('/settings/features');
@@ -397,7 +397,8 @@ export async function submitSplitDecision(documentId, approved, segments = null)
 }
 
 /**
- * Get document splitting settings.
+ * Get document splitting settings. `enabled` is reported for reference only —
+ * it mirrors ENABLE_DOC_SPLITTING and cannot be changed through the API.
  * @returns {Promise<{enabled, confidence_threshold, page_batch_size, max_pages, require_review, merge_orphans}>}
  */
 export async function getSplitSettings() {
@@ -406,7 +407,8 @@ export async function getSplitSettings() {
 }
 
 /**
- * Save document splitting settings.
+ * Save document splitting settings. Only the tuning knobs are persisted; an
+ * `enabled` key is ignored by the backend.
  * @param {object} config
  */
 export async function saveSplitSettings(config) {

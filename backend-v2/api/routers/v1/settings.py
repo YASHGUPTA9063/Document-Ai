@@ -59,12 +59,11 @@ async def update_classification_settings(doc_types: list[str]):
 @router.get("/settings/splitting")
 async def get_splitting_settings():
     """
-    Runtime config for the Step 1.5 packet splitter.
+    Runtime tuning for the Step 1.5 packet splitter.
 
-    Note the two-level switch: ENABLE_DOC_SPLITTING in the environment is the
-    deploy-level kill switch checked by the workflow, while `enabled` here is the
-    runtime toggle checked inside the splitter activity. With the env flag off,
-    turning this on has no effect.
+    `enabled` is reported for reference but is read-only: splitting is switched
+    on and off by ENABLE_DOC_SPLITTING alone, so a value sent back to the PUT is
+    ignored. Everything else here is a live knob.
     """
     return load_split_config()
 
@@ -83,23 +82,16 @@ async def get_feature_flags():
     Which optional pipeline stages are switched on for this deployment.
 
     The UI reads this to decide what to draw: a stage the workflow will never
-    run must not show up as a step in the live pipeline, as an agent card, or
-    as a settings page. Everything here is resolved server-side so the frontend
-    never has to know about the two-level env/runtime switch.
+    run must not show up as a step in the live pipeline, as an agent card, or as
+    a settings section.
 
-    * `doc_splitting` — effective: the ENABLE_DOC_SPLITTING kill switch AND the
-      runtime toggle in `storage/splitting_config.json`. This is "will Step 1.5
-      actually run".
-    * `doc_splitting_env` — the kill switch alone. With it off the runtime
-      toggle cannot turn splitting back on, so the Settings section is pointless
-      and is hidden.
-    * `doc_checklist` — ENABLE_DOC_CHECKLIST. The checklist has no runtime
-      toggle, so there is only one level to report.
+    Both flags are environment-only — `ENABLE_DOC_SPLITTING` for Step 1.5 and
+    `ENABLE_DOC_CHECKLIST` for Step 3.2. Neither has a runtime override, so a
+    deploy is the only way to turn a stage on or off and this endpoint is the
+    single answer to "does it run here".
     """
-    env_splitting = bool(settings.ENABLE_DOC_SPLITTING)
     return {
-        "doc_splitting": env_splitting and bool(load_split_config().get("enabled")),
-        "doc_splitting_env": env_splitting,
+        "doc_splitting": bool(settings.ENABLE_DOC_SPLITTING),
         "doc_checklist": bool(settings.ENABLE_DOC_CHECKLIST),
     }
 
@@ -475,8 +467,7 @@ async def list_agents():
     # Optional stages only appear when they are actually switched on — an agent
     # the workflow will never call has no place in the pipeline listing. A blank
     # ID is skipped below, so gating is just "report no ID when disabled".
-    splitting_on = settings.ENABLE_DOC_SPLITTING and bool(load_split_config().get("enabled"))
-    splitter_id = settings.SPLITTER_AGENT_ID if splitting_on else ""
+    splitter_id = settings.SPLITTER_AGENT_ID if settings.ENABLE_DOC_SPLITTING else ""
     checklist_id = settings.CHECKLIST_AGENT_ID if settings.ENABLE_DOC_CHECKLIST else ""
 
     agent_configs = [
