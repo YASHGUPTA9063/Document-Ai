@@ -55,7 +55,7 @@ function ExpandableReason({ reason }) {
 
 
 export function Documents() {
-  const { documents, setDocuments, removeDocument, toast } = useApp();
+  const { documents, setDocuments, removeDocumentTree, toast } = useApp();
   const [page, setPage] = useState(1);
   const [filter, setFilter] = useState('all');
   const [loading, setLoading] = useState(false);
@@ -112,9 +112,15 @@ export function Documents() {
     if (!confirm(warning)) return;
     setDeleting(doc.id);
     try {
-      await deleteDocument(doc.id);
-      removeDocument(doc.id);
-      toast(`"${doc.filename}" deleted.`, 'info');
+      const res = await deleteDocument(doc.id);
+      removeDocumentTree(doc.id);
+      const alsoGone = res?.deleted_children || 0;
+      toast(
+        alsoGone
+          ? `"${doc.filename}" and ${alsoGone} document(s) split out of it deleted.`
+          : `"${doc.filename}" deleted.`,
+        'info',
+      );
     } catch (err) {
       toast('Delete failed: ' + err.message, 'error');
     } finally {

@@ -277,7 +277,9 @@ async def get_status(document_id: str):
         child_count = 0
         if doc.is_split_parent:
             count_result = await session.execute(
-                select(Document).where(Document.parent_document_id == doc.id)
+                select(Document)
+                .where(Document.parent_document_id == doc.id)
+                .where(Document.status != "deleted")
             )
             child_count = len(count_result.scalars().all())
 
@@ -837,12 +839,22 @@ async def delete_document(document_id: str):
 
         # Deleting a packet takes the documents found inside it with it — they have
         # no meaning on their own. Deleting one child leaves the packet alone.
-        child_result = await session.execute(
-            select(Document)
-            .where(Document.parent_document_id == document_id)
-            .where(Document.status != "deleted")
-        )
-        children = list(child_result.scalars().all())
+        # Walked level by level, so a child that was itself split goes down too.
+        children: list[Document] = []
+        frontier = [document_id]
+        seen = {document_id}
+        while frontier:
+            level_result = await session.execute(
+                select(Document)
+                .where(Document.parent_document_id.in_(frontier))
+                .where(Document.status != "deleted")
+            )
+            level = [d for d in level_result.scalars().all() if d.id not in seen]
+            if not level:
+                break
+            seen.update(d.id for d in level)
+            children.extend(level)
+            frontier = [d.id for d in level]
 
         for child in children:
             await _teardown_document(session, child)
@@ -851,12 +863,17 @@ async def delete_document(document_id: str):
         await session.commit()
 
         if children:
-            split_dir = os.path.join(settings.STORAGE_DIR, "splits", document_id)
-            if os.path.isdir(split_dir):
-                import shutil
-                shutil.rmtree(split_dir, ignore_errors=True)
+            import shutil
+            for packet_id in seen:
+                split_dir = os.path.join(settings.STORAGE_DIR, "splits", packet_id)
+                if os.path.isdir(split_dir):
+                    shutil.rmtree(split_dir, ignore_errors=True)
 
-        return {"success": True, "deleted_children": len(children)}
+        return {
+            "success": True,
+            "deleted_children": len(children),
+            "deleted_ids": [c.id for c in children],
+        }
 
 
 # ─── Signature / photo verification ──────────────────────────────────────────

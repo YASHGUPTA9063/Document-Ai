@@ -68,6 +68,23 @@ function reducer(state, action) {
     case 'REMOVE_DOCUMENT':
       return { ...state, documents: state.documents.filter((d) => d.id !== action.payload) };
 
+    // Deleting a packet deletes the documents split out of it on the server, so the
+    // list must drop the whole subtree — otherwise its children linger as orphan rows.
+    case 'REMOVE_DOCUMENT_TREE': {
+      const doomed = new Set([action.payload]);
+      let grew = true;
+      while (grew) {
+        grew = false;
+        state.documents.forEach((d) => {
+          if (d.parent_document_id && doomed.has(d.parent_document_id) && !doomed.has(d.id)) {
+            doomed.add(d.id);
+            grew = true;
+          }
+        });
+      }
+      return { ...state, documents: state.documents.filter((d) => !doomed.has(d.id)) };
+    }
+
     case 'SET_ACTIVE_DOC':
       return { ...state, activeDocId: action.payload };
 
@@ -137,6 +154,7 @@ export function AppProvider({ children }) {
   const addDocument  = useCallback((doc)  => dispatch({ type: 'ADD_DOCUMENT',  payload: doc }),  []);
   const updateDocument = useCallback((doc) => dispatch({ type: 'UPDATE_DOCUMENT', payload: doc }), []);
   const removeDocument = useCallback((id)  => dispatch({ type: 'REMOVE_DOCUMENT', payload: id }),  []);
+  const removeDocumentTree = useCallback((id) => dispatch({ type: 'REMOVE_DOCUMENT_TREE', payload: id }), []);
   const setActiveDoc = useCallback((id)   => dispatch({ type: 'SET_ACTIVE_DOC', payload: id }),   []);
   const addPolling   = useCallback((id)   => dispatch({ type: 'ADD_POLLING',   payload: id }),    []);
   const removePolling= useCallback((id)   => dispatch({ type: 'REMOVE_POLLING',payload: id }),    []);
@@ -183,6 +201,7 @@ export function AppProvider({ children }) {
       addDocument,
       updateDocument,
       removeDocument,
+      removeDocumentTree,
       setActiveDoc,
       addPolling,
       removePolling,
