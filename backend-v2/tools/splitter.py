@@ -34,6 +34,11 @@ OTHERS_KEY = "others"
 # 40-field template cannot crowd out the page text in the prompt.
 MAX_CUES_PER_TYPE = 8
 
+# Blank-page detection thresholds.  A page that passes all checks is blank.
+BLANK_TEXT_CHAR_THRESHOLD = 20       # fewer stripped chars in OCR markdown → blank
+BLANK_IMAGE_COUNT_THRESHOLD = 0      # no embedded images
+BLANK_DRAWING_COUNT_THRESHOLD = 0    # no vector drawings (lines, shapes)
+
 
 # ─── Models ──────────────────────────────────────────────────────────────────
 
@@ -45,6 +50,7 @@ class PageClassification(BaseModel):
     is_first_page: bool = False
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     reasoning: str = ""
+    is_blank: bool = False               # deterministic blank detection, set pre-LLM
 
 
 class Segment(BaseModel):
@@ -338,6 +344,156 @@ def merge_orphans(segments: list[Segment], threshold: float) -> list[Segment]:
             merged.append(segment)
             i += 1
 
+    return merged
+
+
+def detect_blank_pages(
+    pages_md: dict[int, str],
+    file_path: str | None = None,
+) -> set[int]:
+    """
+    Identify blank pages by combining OCR evidence and (optionally) PyMuPDF.
+
+    Two layers:
+    1. OCR markdown length — a true blank page produces "" or a few noise chars.
+       This is always available because the splitter already ran OCR.
+    2. PyMuPDF scan (if fitz is importable) — checks text, images, and drawings
+       for pages that passed layer 1, to catch image-only blank pages the OCR
+       might have returned a short spurious string for.
+
+    Returns a set of 0-based page indexes that are blank.
+    """
+    candidates: set[int] = set()
+
+    # Layer 1: OCR markdown is too short to carry any real content.
+    for index, markdown in pages_md.items():
+        stripped = (markdown or "").strip()
+        if len(stripped) <= BLANK_TEXT_CHAR_THRESHOLD:
+            candidates.add(index)
+
+    if not candidates or not file_path:
+        return candidates
+
+    # Layer 2: Confirm with PyMuPDF's structural scan.
+    confirmed: set[int] = set()
+    try:
+        import fitz  # PyMuPDF
+        doc = fitz.open(file_path)
+        for index in candidates:
+            if index >= len(doc):
+                confirmed.add(index)     # out of range → treat as blank
+                continue
+            page = doc[index]
+            text = page.get_text().strip()
+            images = page.get_images()
+            
+            # Ignore tiny scanner artifacts (e.g., 1x1 pixels often used to anchor blank pages)
+            real_images = [img for img in images if img[2] > 10 or img[3] > 10]
+            
+            drawings = page.get_drawings()
+            if (
+                not text
+                and len(real_images) <= BLANK_IMAGE_COUNT_THRESHOLD
+                and len(drawings) <= BLANK_DRAWING_COUNT_THRESHOLD
+            ):
+                confirmed.add(index)
+        doc.close()
+    except ImportError:
+        # No PyMuPDF — trust the OCR layer alone.
+        logger.warning("PyMuPDF (fitz) not available — blank detection uses OCR length only.")
+        confirmed = candidates
+
+    return confirmed
+
+
+def stamp_blank_pages(
+    classifications: list[PageClassification],
+    blank_pages: set[int],
+) -> list[PageClassification]:
+    """
+    Override the agent's verdict for pages that are deterministically blank.
+
+    Confidence is set to 1.0 (certainty, not uncertainty) so blank pages never
+    drag down min_confidence and trigger the review gate.
+    """
+    for pc in classifications:
+        if pc.page_index in blank_pages:
+            pc.is_blank = True
+            pc.doc_type = OTHERS_KEY
+            pc.is_first_page = False
+            pc.confidence = 1.0
+            pc.reasoning = "Blank page — no text, images, or drawings detected."
+    return classifications
+
+
+def merge_blanks(
+    segments: list[Segment],
+    classifications: list[PageClassification],
+) -> list[Segment]:
+    """
+    Strip blank pages from every segment and drop blank-only segments.
+
+    Rules:
+    1. Blank pages are removed from every segment's page list — they are never
+       included in child PDFs.  A blank page between Aadhaar front and back, for
+       example, is physically stripped from the child document.
+    2. A segment that becomes empty after stripping (was entirely blank) is
+       dropped — no child document is created for it.
+    3. ``start`` and ``end`` are updated to reflect the remaining pages.
+    4. Adjacent segments of the same doc_type that were separated only by blank
+       pages are re-merged into a single segment (e.g. Aadhaar front [0] and
+       Aadhaar back [2] become one segment [0, 2] after blank page 1 is dropped).
+
+    Runs BEFORE merge_orphans so orphan merging sees clean segments.
+    """
+    blank_set = {pc.page_index for pc in classifications if pc.is_blank}
+    if not blank_set:
+        return segments
+
+    # Pass 1: strip blank pages from every segment, drop empty segments.
+    stripped: list[Segment] = []
+    for segment in segments:
+        cleaned_pages = [p for p in segment.pages if p not in blank_set]
+        stripped_count = len(segment.pages) - len(cleaned_pages)
+
+        if not cleaned_pages:
+            # Entirely blank segment — drop it, no child document.
+            logger.info(
+                f"Dropping blank-only segment at pages {segment.pages} "
+                f"(doc_type={segment.doc_type})"
+            )
+            continue
+
+        if stripped_count > 0:
+            logger.info(
+                f"Stripping {stripped_count} blank page(s) "
+                f"{[p for p in segment.pages if p in blank_set]} from "
+                f"{segment.doc_type} segment (keeping pages {cleaned_pages})"
+            )
+            segment.pages = cleaned_pages
+            segment.start = cleaned_pages[0]
+            segment.end = cleaned_pages[-1]
+
+        stripped.append(segment)
+
+    # Pass 2: re-merge adjacent segments of the same type that were separated
+    # only by now-dropped blank pages (e.g. Aadhaar front + blank + Aadhaar back).
+    if len(stripped) < 2:
+        return stripped
+
+    merged: list[Segment] = [stripped[0]]
+    for segment in stripped[1:]:
+        prev = merged[-1]
+        if prev.doc_type == segment.doc_type:
+            logger.info(
+                f"Re-merging adjacent {prev.doc_type} segments "
+                f"{prev.pages} + {segment.pages} (were separated by blank pages)"
+            )
+            prev.pages.extend(segment.pages)
+            prev.end = segment.pages[-1]
+            prev.min_confidence = min(prev.min_confidence, segment.min_confidence)
+        else:
+            merged.append(segment)
     return merged
 
 

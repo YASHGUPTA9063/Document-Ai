@@ -17,12 +17,15 @@ from tools.splitter import (
     PageClassification,
     Segment,
     build_segments_from_overrides,
+    detect_blank_pages,
     is_splittable,
+    merge_blanks,
     merge_orphans,
     normalize_doc_type,
     parse_page_classifications,
     segment_pages,
     split_pdf,
+    stamp_blank_pages,
     verify_segments,
 )
 
@@ -316,3 +319,147 @@ def test_split_pdf_rejects_a_page_outside_the_source():
 def test_page_range_label_is_one_based():
     assert Segment(doc_type="invoice", start=0, end=0, pages=[0]).page_range_label == "1"
     assert Segment(doc_type="invoice", start=2, end=4, pages=[2, 3, 4]).page_range_label == "3-5"
+
+
+# ─── Blank page detection ────────────────────────────────────────────────────
+
+def test_blank_detection_by_ocr_length():
+    """Pages with very short OCR markdown are detected as blank."""
+    pages_md = {0: "Invoice #12345 Acme Corp", 1: "", 2: "  .  ", 3: "A" * 25}
+    blanks = detect_blank_pages(pages_md)  # no file_path → OCR-only
+    assert 1 in blanks       # empty string
+    assert 2 in blanks       # 3 chars stripped
+    assert 0 not in blanks   # real content
+    assert 3 not in blanks   # 25 chars > threshold
+
+
+def test_blank_detection_not_triggered_on_content_pages():
+    """Pages with meaningful content are never flagged as blank."""
+    pages_md = {0: "This is a full page of text with many words.", 1: "Another page with enough content to pass."}
+    assert detect_blank_pages(pages_md) == set()
+
+
+def test_stamp_blank_pages_overrides_agent_verdict():
+    """stamp_blank_pages sets is_blank, confidence 1.0, doc_type others, and clears is_first_page."""
+    classifications = [
+        pc(0, "bank_statement", True, 0.9),
+        pc(1, "invoice", True, 0.8),      # agent guessed a type for the blank page
+        pc(2, "bank_statement", False, 0.9),
+    ]
+    stamp_blank_pages(classifications, blank_pages={1})
+    assert classifications[1].is_blank is True
+    assert classifications[1].doc_type == OTHERS_KEY
+    assert classifications[1].is_first_page is False
+    assert classifications[1].confidence == 1.0
+    # Non-blank pages are untouched
+    assert classifications[0].is_blank is False
+    assert classifications[0].doc_type == "bank_statement"
+
+
+def test_merge_blanks_absorbs_into_same_type_neighbours():
+    """Two same-type segments separated by a blank are re-merged into one."""
+    classifications = [
+        pc(0, "bank_statement", True),
+        PageClassification(page_index=1, doc_type=OTHERS_KEY, is_first_page=False, confidence=1.0, is_blank=True),
+        pc(2, "bank_statement", True),
+    ]
+    segments = segment_pages(classifications)
+    # segment_pages sees: bank_statement, others(blank), bank_statement → 3 segments
+    assert len(segments) == 3
+    result = merge_blanks(segments, classifications)
+    # merge_blanks drops the blank, then re-merges the two same-type fragments
+    assert len(result) == 1
+    assert result[0].doc_type == "bank_statement"
+    assert result[0].pages == [0, 2]  # blank page removed, fragments reunited
+    assert 1 not in result[0].pages
+
+
+def test_merge_blanks_drops_between_different_types():
+    """A blank-only segment between different types is dropped entirely."""
+    classifications = [
+        pc(0, "bank_statement", True),
+        PageClassification(page_index=1, doc_type=OTHERS_KEY, is_first_page=False, confidence=1.0, is_blank=True),
+        pc(2, "invoice", True),
+    ]
+    segments = segment_pages(classifications)
+    result = merge_blanks(segments, classifications)
+    assert len(result) == 2
+    assert result[0].doc_type == "bank_statement"
+    assert result[1].doc_type == "invoice"
+    assert 1 not in result[0].pages
+    assert 1 not in result[1].pages
+
+
+def test_merge_blanks_drops_leading_and_trailing():
+    """Blank-only segments at the edges of the packet are dropped."""
+    classifications = [
+        PageClassification(page_index=0, doc_type=OTHERS_KEY, is_first_page=False, confidence=1.0, is_blank=True),
+        pc(1, "invoice", True),
+        pc(2, "invoice", False),
+        PageClassification(page_index=3, doc_type=OTHERS_KEY, is_first_page=False, confidence=1.0, is_blank=True),
+    ]
+    segments = segment_pages(classifications)
+    result = merge_blanks(segments, classifications)
+    assert len(result) == 1
+    assert result[0].doc_type == "invoice"
+    assert result[0].pages == [1, 2]
+
+
+def test_merge_blanks_strips_blanks_from_mixed_segments():
+    """A segment with both blank and non-blank pages has its blank pages stripped."""
+    classifications = [
+        pc(0, "bank_statement", True),
+        PageClassification(page_index=1, doc_type="bank_statement", is_first_page=False, confidence=0.9, is_blank=True),
+        pc(2, "bank_statement", False),
+    ]
+    segments = segment_pages(classifications)
+    # All pages are bank_statement → one segment with a blank page inside
+    assert len(segments) == 1
+    result = merge_blanks(segments, classifications)
+    assert len(result) == 1
+    assert 1 not in result[0].pages  # blank page physically removed
+    assert result[0].pages == [0, 2]
+    assert result[0].start == 0
+    assert result[0].end == 2
+
+
+def test_merge_blanks_aadhaar_front_blank_back():
+    """Aadhaar front → blank page → Aadhaar back: blank is stripped from the child PDF."""
+    classifications = [
+        pc(0, "aadhaar_card", True),                # front
+        PageClassification(page_index=1, doc_type="aadhaar_card", is_first_page=False, confidence=0.9, is_blank=True),  # blank
+        pc(2, "aadhaar_card", False),                # back
+    ]
+    segments = segment_pages(classifications)
+    assert len(segments) == 1
+    result = merge_blanks(segments, classifications)
+    assert len(result) == 1
+    assert result[0].doc_type == "aadhaar_card"
+    assert result[0].pages == [0, 2]  # only front and back, blank removed
+    assert 1 not in result[0].pages
+
+
+def test_all_blank_packet_yields_no_segments():
+    """A packet where every page is blank produces zero segments after merging."""
+    classifications = [
+        PageClassification(page_index=0, doc_type=OTHERS_KEY, is_first_page=False, confidence=1.0, is_blank=True),
+        PageClassification(page_index=1, doc_type=OTHERS_KEY, is_first_page=False, confidence=1.0, is_blank=True),
+    ]
+    segments = segment_pages(classifications)
+    result = merge_blanks(segments, classifications)
+    assert len(result) == 0
+
+
+def test_blank_page_confidence_is_1_not_0():
+    """Blank pages must not trip the review gate by dragging min_confidence down."""
+    classifications = [
+        pc(0, "bank_statement", True, 0.9),
+        PageClassification(page_index=1, doc_type=OTHERS_KEY, is_first_page=False, confidence=1.0, is_blank=True),
+        pc(2, "invoice", True, 0.9),
+    ]
+    # After stamping, blank pages have confidence 1.0
+    low_confidence = [
+        p.page_index for p in classifications
+        if p.confidence < 0.75 and not p.is_blank
+    ]
+    assert low_confidence == []  # no pages below threshold

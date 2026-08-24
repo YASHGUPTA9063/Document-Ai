@@ -36,6 +36,7 @@ _FIELDS = {
     "max_pages":            ("SPLIT_MAX_PAGES", int),
     "require_review":       ("SPLIT_REQUIRE_REVIEW", bool),
     "merge_orphans":        ("SPLIT_MERGE_ORPHANS", bool),
+    "strip_blank_pages":    ("SPLIT_STRIP_BLANK_PAGES", bool),
 }
 
 

@@ -25,11 +25,14 @@ from utils.split_config import load_split_config
 from tools.classifier import get_supported_doc_types
 from tools.splitter import (
     build_type_catalogue,
+    detect_blank_pages,
     format_type_catalogue,
     is_splittable,
+    merge_blanks,
     merge_orphans,
     parse_page_classifications,
     segment_pages,
+    stamp_blank_pages,
     verify_segments,
 )
 
@@ -73,8 +76,10 @@ def _build_batches(page_indexes: list[int], batch_size: int) -> list[list[int]]:
 
 def _build_batch_prompt(batch: list[int], pages_md: dict[int, str],
                         catalogue_text: str, total_pages: int,
-                        lookback: int | None) -> str:
+                        lookback: int | None,
+                        blank_pages: set[int] | None = None) -> str:
     """One user message: the type catalogue, optional context page, then the batch."""
+    _blank = blank_pages or set()
     sections = [
         "SUPPORTED DOCUMENT TYPES:",
         catalogue_text,
@@ -93,6 +98,16 @@ def _build_batch_prompt(batch: list[int], pages_md: dict[int, str],
 
     sections += ["", f"Classify these {len(batch)} page(s):"]
     for index in batch:
+        if index in _blank:
+            # Tell the agent the page is blank so it doesn't waste tokens
+            # reasoning about empty content — its verdict will be overridden
+            # by stamp_blank_pages() anyway.
+            sections += [
+                "",
+                f"--- PAGE {index} IS BLANK (no content) — classify as "
+                f"'others', is_first_page=false, confidence=1.0 ---",
+            ]
+            continue
         sections += [
             "",
             f"--- BEGIN PAGE {index} ---",
@@ -109,9 +124,12 @@ def _build_batch_prompt(batch: list[int], pages_md: dict[int, str],
 
 async def _classify_batch(document_id: str, batch: list[int], pages_md: dict[int, str],
                           catalogue_text: str, total_pages: int,
-                          lookback: int | None, allowed_types: dict) -> list:
+                          lookback: int | None, allowed_types: dict,
+                          blank_pages: set[int] | None = None) -> list:
     """Classify one batch of pages; a failed batch degrades instead of raising."""
-    prompt = _build_batch_prompt(batch, pages_md, catalogue_text, total_pages, lookback)
+    prompt = _build_batch_prompt(
+        batch, pages_md, catalogue_text, total_pages, lookback, blank_pages
+    )
     try:
         response = await client.agents.complete_async(
             agent_id=settings.SPLITTER_AGENT_ID,
@@ -182,6 +200,15 @@ async def splitter_activity(document_id: str, file_path: str) -> dict:
 
         page_indexes = sorted(pages_md.keys())
 
+        # ── Blank page detection (deterministic, pre-LLM) ──
+        blank_pages: set[int] = set()
+        if config.get("strip_blank_pages", True):
+            blank_pages = await asyncio.to_thread(detect_blank_pages, pages_md, file_path)
+            if blank_pages:
+                logger.info(
+                    f"[Document {document_id}] Blank pages detected: {sorted(blank_pages)}"
+                )
+
         # ── Per-page classification, batched and concurrent ──
         allowed_types = get_supported_doc_types()
         catalogue_text = format_type_catalogue(build_type_catalogue())
@@ -194,20 +221,28 @@ async def splitter_activity(document_id: str, file_path: str) -> dict:
                 # so the agent can tell "continuation" from "new document".
                 batches[position - 1][-1] if position > 0 else None,
                 allowed_types,
+                blank_pages,
             )
             for position, batch in enumerate(batches)
         ])
         classifications = [pc for batch_result in results for pc in batch_result]
         classifications.sort(key=lambda pc: pc.page_index)
 
+        # Stamp deterministic blank verdicts over whatever the agent said.
+        if blank_pages:
+            stamp_blank_pages(classifications, blank_pages)
+
         for pc in classifications:
             logger.info(
                 f"[Document {document_id}]   page {pc.page_index:>3}: {pc.doc_type:<22} "
                 f"first={str(pc.is_first_page):<5} conf={pc.confidence:.2f}"
+                f"{' BLANK' if pc.is_blank else ''}"
             )
 
         # ── Boundaries ──
         segments = segment_pages(classifications)
+        if blank_pages:
+            segments = merge_blanks(segments, classifications)
         if config["merge_orphans"]:
             segments = merge_orphans(segments, threshold)
         segments = await asyncio.to_thread(verify_segments, segments, pages_md)
@@ -216,7 +251,12 @@ async def splitter_activity(document_id: str, file_path: str) -> dict:
             logger.info(f"[Document {document_id}] Single document detected — no split.")
             return {"split": False, "reason": "single_document", "page_count": page_count}
 
-        low_confidence = [pc.page_index for pc in classifications if pc.confidence < threshold]
+        # Blank pages are confident (1.0), so exclude them from the low-confidence
+        # review gate — they are a certainty, not an uncertainty.
+        low_confidence = [
+            pc.page_index for pc in classifications
+            if pc.confidence < threshold and not pc.is_blank
+        ]
         failed_markers = [s.page_range_label for s in segments if s.verified is False]
         needs_review = bool(config["require_review"] and (low_confidence or failed_markers))
 
@@ -225,6 +265,7 @@ async def splitter_activity(document_id: str, file_path: str) -> dict:
             + ", ".join(f"{s.doc_type} p{s.page_range_label}" for s in segments)
             + (f" — review needed (low-confidence pages {low_confidence}, "
                f"failed markers {failed_markers})" if needs_review else "")
+            + (f" — {len(blank_pages)} blank page(s) stripped" if blank_pages else "")
         )
 
         return {
@@ -235,6 +276,7 @@ async def splitter_activity(document_id: str, file_path: str) -> dict:
             "pages": [pc.model_dump() for pc in classifications],
             "needs_review": needs_review,
             "low_confidence_pages": low_confidence,
+            "blank_pages": sorted(blank_pages),
         }
 
     except Exception as e:

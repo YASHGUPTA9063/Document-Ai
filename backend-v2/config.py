@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     SPLIT_MAX_PAGES: int = Field(default=50, gt=0, description="Packets longer than this are processed whole instead of split")
     SPLIT_REQUIRE_REVIEW: bool = Field(default=True, description="Pause for human confirmation of boundaries when any page falls below the confidence threshold")
     SPLIT_MERGE_ORPHANS: bool = Field(default=True, description="Merge a low-confidence single-page outlier back into the surrounding document")
+    SPLIT_STRIP_BLANK_PAGES: bool = Field(default=True, description="Detect and strip blank separator pages during packet splitting")
 
     # Document Checklist (Step 3.2)
     # After each document classifies, reconciles the doc types seen across the
