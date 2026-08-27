@@ -21,6 +21,13 @@ class Settings(BaseSettings):
     LLM_TEMPERATURE: float = Field(0.1, ge=0.0, le=1.0, description="Sampling temperature applied to every Mistral agent and chat completion call")
     LLM_MAX_TOKENS: int = Field(20480, gt=0, description="Max output tokens applied to every Mistral agent and chat completion call")
 
+    # Extraction Pipeline Mode
+    EXTRACTION_MODE: str = Field(
+        default="two_step",
+        description="'two_step' = OCR then separate mistral-large-latest call for structured field extraction (default, higher accuracy). "
+                    "'ocr_only' = single OCR call with built-in document annotation (faster, lower cost, single API call)"
+    )
+
     # Agent IDs
     CLASSIFIER_AGENT_ID: str = Field(..., description="Classifier Agent ID from Mistral Studio")
     GENERAL_EXTRACTOR_AGENT_ID: str = Field(default="", description="General Extractor Agent ID from Mistral Studio")

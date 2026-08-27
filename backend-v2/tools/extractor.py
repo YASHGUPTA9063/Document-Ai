@@ -332,9 +332,27 @@ def _save_ocr_blocks(document_id: str, blocks: list):
 # ─── TOOL FUNCTIONS ───
 def extract_text_from_document(file_path: str, doc_type: str, document_id: str = None) -> dict:
     fields_list = get_template_fields(doc_type)
+    use_ocr_only = settings.EXTRACTION_MODE == "ocr_only"
 
-    # Step 1: Pure OCR — fast, cheap, deterministic Markdown extraction
-    ocr_result = extract_with_ocr(file_path=file_path, doc_type=doc_type)
+    # ── OCR ──────────────────────────────────────────────────────────────
+    if use_ocr_only:
+        # Single-step: pass the JSON schema + prompt into the OCR call so
+        # mistral-ocr returns structured annotation alongside raw text.
+        annotation_schema = build_json_schema_from_fields(fields_list)
+        annotation_prompt = (
+            f"Document type: {doc_type}\n\n"
+            f"{build_ocr_prompt_from_fields(fields_list)}"
+        )
+        logger.info(f"[EXTRACTION_MODE=ocr_only] Calling OCR with built-in annotation for doc_type='{doc_type}'")
+        ocr_result = extract_with_ocr(
+            file_path=file_path,
+            doc_type=doc_type,
+            document_annotation_format=annotation_schema,
+            document_annotation_prompt=annotation_prompt,
+        )
+    else:
+        # Two-step (default): pure OCR first, structured extraction separately
+        ocr_result = extract_with_ocr(file_path=file_path, doc_type=doc_type)
 
     raw_text = ocr_result.get("raw_text", "")
     ocr_confidence = ocr_result.get("confidence", 0.0)
@@ -345,15 +363,36 @@ def extract_text_from_document(file_path: str, doc_type: str, document_id: str =
     if document_id and blocks:
         _save_ocr_blocks(document_id, blocks)
 
-    # Step 2: Structured extraction at the configured LLM_TEMPERATURE
-    # Uses mistral-large-latest with json_schema response_format — full control over output
+    # ── Structured field extraction ──────────────────────────────────────
     doc_annotation = {}
-    if raw_text:
-        try:
-            doc_annotation = _chat_extract_fields(raw_text, fields_list, doc_type)
-            logger.info(f"Chat extraction returned {len(doc_annotation)} fields for doc_type='{doc_type}'")
-        except Exception as e:
-            logger.error(f"Chat extraction failed for doc_type='{doc_type}': {e}")
+    if use_ocr_only:
+        # Use the annotation returned by the OCR call directly
+        doc_annotation = ocr_result.get("document_annotation") or {}
+        if doc_annotation:
+            logger.info(
+                f"[EXTRACTION_MODE=ocr_only] OCR annotation returned "
+                f"{len(doc_annotation)} fields for doc_type='{doc_type}'"
+            )
+        elif raw_text:
+            # Fallback: OCR annotation was empty (e.g. DOCX files bypass
+            # the Mistral OCR API entirely). Use chat extraction instead.
+            logger.warning(
+                f"[EXTRACTION_MODE=ocr_only] OCR annotation was empty for "
+                f"doc_type='{doc_type}', falling back to chat extraction"
+            )
+            try:
+                doc_annotation = _chat_extract_fields(raw_text, fields_list, doc_type)
+                logger.info(f"Fallback chat extraction returned {len(doc_annotation)} fields")
+            except Exception as e:
+                logger.error(f"Fallback chat extraction failed for doc_type='{doc_type}': {e}")
+    else:
+        # Two-step: separate mistral-large-latest call for structured extraction
+        if raw_text:
+            try:
+                doc_annotation = _chat_extract_fields(raw_text, fields_list, doc_type)
+                logger.info(f"Chat extraction returned {len(doc_annotation)} fields for doc_type='{doc_type}'")
+            except Exception as e:
+                logger.error(f"Chat extraction failed for doc_type='{doc_type}': {e}")
 
     # VLM verification for visual fields (checkboxes, tick marks) if configured in template
     template_meta = get_template_metadata(doc_type)
