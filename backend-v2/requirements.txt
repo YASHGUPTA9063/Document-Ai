@@ -108,17 +108,17 @@ wrapt==1.17.3
 zipp==4.1.0
 
 # ─── Platform core additions (adopted from the `development` architecture) ───
-# Alembic drives migrations/ (the SQLAlchemy models still self-create on
-# startup via init_db(), so this is only needed for versioned schema changes).
+# Alembic is the sole schema authority. init_db() no longer issues DDL outside
+# of a SQLite debug run, so `alembic upgrade head` is a required deploy step.
 alembic==1.14.0
 
-# Redis-backed job queue used by api/queue.py and worker.py. The live
-# processing path is the Mistral Workflows SDK, so these are only required if
-# you run the arq worker (`arq worker.WorkerSettings`).
+# Redis-backed job queue. The API enqueues an upload here and the arq
+# dispatcher (worker.py) starts the Mistral Studio run, with retry and backoff.
+# Only EXECUTION_MODE=inline runs without them.
 arq==0.28.0
 redis==5.3.1
 
-# Prometheus metrics exposed by observability.py and the pipeline engine.
+# Prometheus metrics exposed by observability.py.
 prometheus-client==0.26.0
 
 # observability.py calls FastAPIInstrumentor. The rest of the opentelemetry
@@ -126,9 +126,19 @@ prometheus-client==0.26.0
 # same train so the resolver doesn't drag the siblings forward.
 opentelemetry-instrumentation-fastapi==0.60b1
 
-# Postgres drivers — only needed if DATABASE_URL is switched away from SQLite.
-# asyncpg==0.30.0
-# psycopg2-binary==2.9.10
+# Postgres driver. DATABASE_URL selects the dialect: Postgres in Docker,
+# sqlite+aiosqlite for a local venv. asyncpg alone is enough — migrations/env.py
+# runs Alembic through async_engine_from_config, so there is no synchronous
+# driver in the path and psycopg2 is not needed.
+# 0.31.0 rather than 0.30.0: 0.30.0 ships no wheel for Python 3.13+ and falls
+# back to a source build, which makes `pip install -r requirements.txt` fail
+# outright in a modern local venv even though only Postgres deployments use it.
+asyncpg==0.31.0
+
+# Test runner for tests/. Nothing provided pytest before, so none of the
+# existing test modules could be executed.
+pytest==8.3.4
+pytest-asyncio==0.25.2
 
 # Load testing (tests/load/locustfile.py) — install separately in CI if needed.
 # locust==2.32.4

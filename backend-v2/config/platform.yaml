@@ -130,17 +130,19 @@ resilience:
 # ─── Pipeline Configuration ──────────────────────────────────────────────
 pipelines:
   document_processing:
-    # Workflow engine: "auto" | "mistral" | "local"
-    #   auto    = use Mistral Workflows SDK when llm.default is [mistral], else local
-    #   mistral = always use Mistral Workflows SDK (managed cloud — visible in Mistral Studio)
-    #   local   = always use the local PipelineEngine (arq + Redis)
-    workflow_engine: mistral
+    # There is one execution engine: Mistral Studio's managed orchestration.
+    # workflow.py defines the steps, workflow_worker.py runs them, and Studio
+    # owns durability, retries and the 24h human-input waits. The `local`
+    # PipelineEngine that used to sit behind a `workflow_engine` key here has
+    # been removed — it was a second, drifting copy of the same step list.
+    #
+    # These flags are read by the activities themselves. Where an env var of
+    # the same intent exists (ENABLE_DOC_CHECKLIST, ENABLE_PREPROCESSING), the
+    # env var is what workflow.py branches on; these mirror it for the tools
+    # that read platform.yaml directly.
     enable_pre_validation: true
     enable_preprocessing: false
     enable_fraud_check: true
-    # Step 3.2 — reconcile the upload batch against the configured classification
-    # types and pause it for a human when a type was never uploaded. The env var
-    # ENABLE_DOC_CHECKLIST is the equivalent switch for the Mistral engine.
     enable_checklist: true
     # Second-pass re-extraction of required fields that came back missing or
     # low-confidence, via the `vllm_fallback` provider. Defaults to false to

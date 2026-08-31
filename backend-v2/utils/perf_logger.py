@@ -22,29 +22,58 @@ formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 file_handler.setFormatter(formatter)
 logger.addHandler(file_handler)
 
+def _record_metrics(category: str, name: str, duration: float, status: str) -> None:
+    """
+    Mirror a timing into Prometheus.
+
+    These counters used to be recorded by the local PipelineEngine. That engine
+    is gone — Mistral Studio drives the pipeline now — so this wrapper, which
+    already sits on every @workflows.activity(), is what keeps
+    pipeline_step_duration_seconds and pipeline_step_total populated. Import is
+    local and failure is swallowed: metrics must never be able to fail a step.
+    """
+    try:
+        from observability import PIPELINE_STEP_DURATION, PIPELINE_STEP_TOTAL
+
+        PIPELINE_STEP_DURATION.labels(pipeline=category, step=name).observe(duration)
+        PIPELINE_STEP_TOTAL.labels(pipeline=category, step=name, status=status).inc()
+    except Exception:
+        pass
+
+
 def wrap_timing(func, category: str, name: str):
     """Wraps a function to measure and log its execution time."""
     if asyncio.iscoroutinefunction(func):
         @functools.wraps(func)
         async def async_wrapper(*args, **kwargs):
             start = time.perf_counter()
+            status = "completed"
             logger.info(f"[PERF] [{category.upper()}_START] {name} started")
             try:
                 return await func(*args, **kwargs)
+            except BaseException:
+                status = "failed"
+                raise
             finally:
                 duration = time.perf_counter() - start
                 logger.info(f"[PERF] [{category.upper()}_END] {name} took {duration:.3f}s")
+                _record_metrics(category, name, duration, status)
         return async_wrapper
     else:
         @functools.wraps(func)
         def sync_wrapper(*args, **kwargs):
             start = time.perf_counter()
+            status = "completed"
             logger.info(f"[PERF] [{category.upper()}_START] {name} started")
             try:
                 return func(*args, **kwargs)
+            except BaseException:
+                status = "failed"
+                raise
             finally:
                 duration = time.perf_counter() - start
                 logger.info(f"[PERF] [{category.upper()}_END] {name} took {duration:.3f}s")
+                _record_metrics(category, name, duration, status)
         return sync_wrapper
 
 def install_performance_hooks():

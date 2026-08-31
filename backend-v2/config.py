@@ -1,5 +1,7 @@
+from typing import Literal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field, ValidationError
+from pydantic import Field, ValidationError, field_validator
 
 class Settings(BaseSettings):
     MISTRAL_API_KEY: str = Field(..., description="Mistral API Key")
@@ -9,13 +11,53 @@ class Settings(BaseSettings):
     APP_PORT: int = Field(8000, description="FastAPI port")
     DEBUG: bool = Field(True, description="Enable debug mode")
 
-    # Optional: platform_core queue path (worker.py + api/queue.py). Neither is
-    # used by the default deployment, where document and claim processing run
-    # on the Mistral Workflows SDK inside the app process. Declared with empty
-    # defaults so worker.py can report a clear "not set" error instead of
-    # dying with AttributeError.
-    MISTRAL_WORKFLOW_ID: str = Field(default="", description="Workflow ID from Mistral Studio — only needed by the arq worker")
-    REDIS_URL: str = Field(default="redis://localhost:6379/0", description="Redis URL — only needed by the arq worker / api.queue")
+    # ── Mistral Studio binding ───────────────────────────────────────────────
+    # Every document and claim run executes on Mistral Studio's managed
+    # orchestration plane. MISTRAL_WORKFLOW_ID identifies the workflow that
+    # dispatch.py starts; DEPLOYMENT_NAME identifies the worker pool that
+    # Studio dispatches the activities back to.
+    #
+    # DEPLOYMENT_NAME is a *version*, not a label. Studio replays an in-flight
+    # execution's history against whatever code the pool is running, so a
+    # document parked at a 24h wait_for_input will replay tomorrow's code.
+    # Bump this on any change to workflow.py's step sequence and drain the old
+    # pool rather than cutting over — see README's deploy runbook.
+    MISTRAL_WORKFLOW_ID: str = Field(default="", description="Workflow ID from Mistral Studio — dispatch.py starts this")
+    DEPLOYMENT_NAME: str = Field(default="document-processing-workflow", description="Mistral Studio worker-pool name. Treat as a version: bump on any workflow.py step change.")
+    REDIS_URL: str = Field(default="redis://localhost:6379/0", description="Redis URL — used by the arq dispatcher and api/queue.py")
+
+    # ── Process topology ─────────────────────────────────────────────────────
+    # queue  — the API enqueues to Redis and returns; the arq dispatcher starts
+    #          the Studio run, with retry/backoff. The production path.
+    # inline — the API starts the Studio run in the request handler. No Redis
+    #          required, which is what makes a bare `uvicorn main:app` work
+    #          from a venv. Never use in production: a Mistral outage becomes
+    #          a failed upload rather than a retried dispatch.
+    EXECUTION_MODE: Literal["queue", "inline"] = Field(default="queue", description="How an upload reaches Mistral Studio: via the arq dispatcher (queue) or in-request (inline)")
+
+    # Hosts the Mistral workflow worker inside the API process. A development
+    # convenience so one `uvicorn` command is a complete stack; in Docker the
+    # worker is its own container and this stays false.
+    RUN_WORKFLOW_WORKER_IN_API: bool = Field(default=False, description="Run the Mistral workflow worker inside the API process (local dev only)")
+
+    # ── HTTP surface ─────────────────────────────────────────────────────────
+    # The canonical surface is /api/v1/*. The unprefixed paths (/upload,
+    # /status/{id}) are the contract an older frontend build calls; they are
+    # served by the same handlers and can be switched off once no such build
+    # is deployed.
+    ENABLE_LEGACY_ROOT_ROUTES: bool = Field(default=True, description="Also serve the v1 handlers at unprefixed root paths (legacy frontend contract)")
+    CORS_ORIGINS: list[str] = Field(default=["*"], description="Allowed CORS origins. '*' is incompatible with credentialed requests — set real origins in production.")
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def _split_cors_origins(cls, v):
+        """Accept a comma-separated string from .env as well as a JSON list."""
+        if isinstance(v, str):
+            stripped = v.strip()
+            if stripped.startswith("["):
+                return v  # let pydantic parse the JSON form
+            return [origin.strip() for origin in stripped.split(",") if origin.strip()]
+        return v
 
     # LLM sampling
     LLM_TEMPERATURE: float = Field(0.1, ge=0.0, le=1.0, description="Sampling temperature applied to every Mistral agent and chat completion call")
@@ -99,6 +141,68 @@ except ValidationError as e:
     print(e)
     import sys
     sys.exit(1)
+
+
+# ─── Mistral Studio agent binding ────────────────────────────────────────────
+# Each entry maps a settings field to the pipeline capability it powers. Every
+# one of these defaults to "" and every call site degrades *silently* when it is
+# unset — an unbound PRE_VALIDATOR_AGENT_ID skips quality gating entirely, an
+# unbound CHECKLIST_AGENT_ID drops to a deterministic summary, an unbound
+# SPLITTER_AGENT_ID disables packet splitting. In a container that reads as
+# "working", so /ready reports the binding and startup can refuse to come up.
+OPTIONAL_AGENT_BINDINGS: dict[str, str] = {
+    "GENERAL_EXTRACTOR_AGENT_ID": "field extraction (Step 4)",
+    "OUTPUT_AGENT_ID": "final output shaping (Step 7)",
+    "PRE_VALIDATOR_AGENT_ID": "quality pre-validation (Step 2)",
+    "INTAKE_AGENT_ID": "intake narration (Step 1)",
+    "FRAUD_AGENT_ID": "fraud examination (Step 3.5)",
+    "PREPROCESSING_AGENT_ID": "image preprocessing (Step 2.5)",
+    "AUTO_VERIFIER_AGENT_ID": "automated KYC verification (Step 5.5)",
+    "SPLITTER_AGENT_ID": "multi-document packet splitting (Step 1.5)",
+    "CHECKLIST_AGENT_ID": "batch checklist narration (Step 3.2)",
+    "FACE_MORPHOLOGY1_AGENT_ID": "face verification — morphology part 1",
+    "FACE_MORPHOLOGY2_AGENT_ID": "face verification — morphology part 2",
+    "FACE_AGE_AGENT_ID": "face verification — age variation",
+    "FACE_JUDGE_AGENT_ID": "face verification — adjudication",
+    "CLAIM_INTEGRITY_AGENT_ID": "claim integrity checks",
+    "CLAIM_MEDICAL_AGENT_ID": "claim medical validation",
+    "CLAIM_TREATMENT_AGENT_ID": "claim treatment validation",
+    "CLAIM_DISABILITY_AGENT_ID": "claim disability validation",
+    "CLAIM_LITIGATION_AGENT_ID": "claim litigation screening",
+    "CLAIM_REPORT_AGENT_ID": "claim report generation",
+}
+
+# Bindings without which the deployment is not serviceable at all. Unlike the
+# table above these are enforced: see bootstrap.assert_agent_bindings().
+REQUIRED_AGENT_IDS: tuple[str, ...] = (
+    "CLASSIFIER_AGENT_ID",
+    "VALIDATOR_AGENT_ID",
+    "REVIEWER_AGENT_ID",
+    "SIGNATURE_VISION_AGENT_ID",
+    "SIGNATURE_JUDGE_AGENT_ID",
+)
+
+
+def agent_binding_report() -> dict:
+    """
+    Which Studio agents this process is bound to, and what is lost where one is
+    not. Surfaced by GET /ready so a degraded deployment is visible instead of
+    quietly doing less work.
+    """
+    unbound = {
+        field: capability
+        for field, capability in OPTIONAL_AGENT_BINDINGS.items()
+        if not getattr(settings, field, "")
+    }
+    missing_required = [f for f in REQUIRED_AGENT_IDS if not getattr(settings, f, "")]
+    return {
+        "workflow_id_bound": bool(settings.MISTRAL_WORKFLOW_ID),
+        "deployment_name": settings.DEPLOYMENT_NAME,
+        "required_missing": missing_required,
+        "bound": len(OPTIONAL_AGENT_BINDINGS) - len(unbound),
+        "total_optional": len(OPTIONAL_AGENT_BINDINGS),
+        "degraded_capabilities": unbound,
+    }
 
 SUPPORTED_DOCUMENT_TYPES = [
     "invoice",

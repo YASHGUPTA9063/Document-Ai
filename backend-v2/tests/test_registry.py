@@ -27,14 +27,42 @@ class TestProviderRegistry:
             r2 = ProviderRegistry.get()
             assert r1 is r2
 
-    def test_get_raises_before_init(self):
-        """ProviderRegistry.get() raises if not initialized."""
+    def test_get_returns_an_empty_registry_before_init(self):
+        """
+        get() lazily creates an EMPTY registry rather than raising.
+
+        This is the mechanism behind the quietest failure mode in the system:
+        activities/extractor.py resolves the vLLM fallback through
+        ProviderRegistry.get(), and if nothing called from_config() first, the
+        lookup fails against an empty registry and the caller's except-clause
+        swallows it. Nothing is logged, and second-pass extraction simply never
+        runs.
+
+        The test pins the behaviour so it cannot change silently, and
+        bootstrap.init_platform() is what guarantees every process populates
+        the registry before serving traffic.
+        """
         from platform_core.registry import ProviderRegistry
 
         ProviderRegistry._instance = None
+        registry = ProviderRegistry.get()
 
+        assert registry.summary()["llm"] == []
         with pytest.raises(Exception):
-            ProviderRegistry.get()
+            registry.get_llm("vllm_fallback")
+
+    def test_from_config_installs_the_singleton(self):
+        """
+        bootstrap.init_platform() relies on from_config() setting the singleton
+        — that is the single line keeping the vLLM fallback alive in the
+        workflow-worker process.
+        """
+        from platform_core.registry import ProviderRegistry
+
+        ProviderRegistry._instance = None
+        built = ProviderRegistry.from_config({"providers": {}, "fallback_chains": {}})
+
+        assert ProviderRegistry.get() is built
 
     def test_get_llm_returns_provider(self):
         """Registry.get_llm() returns a registered LLM provider."""

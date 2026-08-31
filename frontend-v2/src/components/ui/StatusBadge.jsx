@@ -25,6 +25,9 @@ const STATUS_MAP = {
   rejected:         { label: 'Rejected',         cls: 'badge-red',    icon: X },
   failed:           { label: 'Failed',           cls: 'badge-red',    icon: AlertCircle },
   error:            { label: 'Error',            cls: 'badge-red',    icon: AlertCircle },
+  // A human gate that nobody answered inside its 24h window. Terminal, but
+  // recoverable: the document can be retried.
+  expired:          { label: 'Review Expired',  cls: 'badge-gray',   icon: AlertTriangle },
   deleted:          { label: 'Deleted',          cls: 'badge-gray',   icon: null },
 };
 

@@ -1,51 +1,71 @@
-# Document-AI — full-stack single-host deployment.
+# Document-AI — single-host deployment.
 #
-# Document and claim processing run on the Mistral Workflows SDK inside the
-# backend container, so `docker compose up` needs only backend + frontend.
-# Redis and the arq worker exist for the platform_core pipeline/queue path and
-# are opt-in via the `queue` profile:
+# Three backend roles from one image, because they scale and fail differently:
 #
-#   docker compose up -d                      # backend + frontend (default)
-#   docker compose --profile queue up -d      # + redis + arq worker
+#   api              stateless HTTP. Runs N uvicorn workers. Never executes a
+#                    pipeline step.
+#   dispatcher       drains the Redis queue and starts Mistral Studio runs,
+#                    with retry and backoff. Cheap, IO-bound.
+#   workflow-worker  registers with Studio under DEPLOYMENT_NAME and executes
+#                    the activities Studio dispatches back. This is where the
+#                    OCR, the vision calls and the DINOv2 inference happen, so
+#                    it is the one to scale:
+#                        docker compose up -d --scale workflow-worker=3
+#
+#   docker compose up -d --build
+#
+# Secrets and agent IDs come from backend-v2/.env (see .env.example).
+
+x-backend-image: &backend-image
+  build:
+    context: ./backend-v2
+    dockerfile: Dockerfile
+  image: document-ai-backend:latest
+
+x-backend-env: &backend-env
+  # Container-network overrides. These deliberately win over backend-v2/.env,
+  # which points at localhost for running outside Docker.
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-document_ai}
+  REDIS_URL: redis://redis:6379/0
+  STORAGE_DIR: /app/storage
+  EXECUTION_MODE: queue
+  RUN_WORKFLOW_WORKER_IN_API: "false"
+
+x-backend-common: &backend-common
+  <<: *backend-image
+  env_file:
+    - ./backend-v2/.env
+  volumes:
+    - app_storage:/app/storage
+    # Provider and resilience settings are tunable without a rebuild.
+    - ./backend-v2/config:/app/config:ro
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  restart: unless-stopped
 
 services:
-  backend:
-    build:
-      context: ./backend-v2
-      dockerfile: Dockerfile
-    env_file:
-      - ./backend-v2/.env
+  postgres:
+    image: postgres:15-alpine
     environment:
-      DATABASE_URL: sqlite+aiosqlite:////app/data/doc_workflow.db
-      STORAGE_DIR: /app/storage
-      # Only consumed by api/queue.py and worker.py. Harmless when Redis is
-      # not running: main.py never opens a connection on the default path.
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-    ports:
-      - "8000:8000"
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-document_ai}
     volumes:
-      - backend_storage:/app/storage
-      - backend_db:/app/data
-      # Platform config is bind-mounted so provider/resilience settings can be
-      # tuned without rebuilding the image.
-      - ./backend-v2/config:/app/config:ro
-      # Uncomment if GOOGLE_APPLICATION_CREDENTIALS is set in backend-v2/.env,
-      # and drop your service-account key at backend-v2/gcp-key.json:
-      # - ./backend-v2/gcp-key.json:/app/gcp-key.json:ro
-    restart: unless-stopped
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
-      interval: 30s
-      timeout: 10s
-      start_period: 180s
-      retries: 5
+      # -d matters: without it pg_isready reports ready before the database
+      # itself has been created, and the first migration then fails.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-document_ai}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
 
-  # ─── Optional: Redis + arq worker (platform_core queue path) ─────────────
   redis:
     image: redis:7-alpine
-    profiles: ["queue"]
-    ports:
-      - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -55,42 +75,84 @@ services:
       retries: 5
     restart: unless-stopped
 
-  worker:
-    build:
-      context: ./backend-v2
-      dockerfile: Dockerfile
-    profiles: ["queue"]
-    command: ["arq", "worker.WorkerSettings"]
-    env_file:
-      - ./backend-v2/.env
+  api:
+    <<: *backend-common
     environment:
-      DATABASE_URL: sqlite+aiosqlite:////app/data/doc_workflow.db
-      STORAGE_DIR: /app/storage
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-    volumes:
-      - backend_storage:/app/storage
-      - backend_db:/app/data
-      - ./backend-v2/config:/app/config:ro
+      <<: *backend-env
+      # The API owns migrations; the other two roles skip them so three
+      # containers starting together don't race for the same Alembic lock.
+      RUN_MIGRATIONS: "true"
+    command:
+      - uvicorn
+      - main:app
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8000"
+      # Safe now that the workflow worker is its own process. While it was an
+      # asyncio task inside this one, a second uvicorn worker registered a
+      # duplicate Studio pool and every activity ran twice.
+      - --workers
+      - "${API_WORKERS:-2}"
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 5
+
+  dispatcher:
+    <<: *backend-common
+    environment:
+      <<: *backend-env
+      RUN_MIGRATIONS: "false"
+    command: ["arq", "worker.WorkerSettings"]
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
-    restart: unless-stopped
+      api:
+        condition: service_started
+
+  workflow-worker:
+    <<: *backend-common
+    environment:
+      <<: *backend-env
+      RUN_MIGRATIONS: "false"
+    command: ["python", "workflow_worker.py"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+    # DINOv2 plus the torch runtime; raise if you scale replicas on a small host.
+    deploy:
+      resources:
+        limits:
+          memory: 4g
 
   frontend:
     build:
       context: ./frontend-v2
       dockerfile: Dockerfile
       args:
-        # Relative — nginx in the frontend image proxies /api to backend:8000,
-        # so the browser only needs port 5173 reachable.
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api}
+        # Relative — nginx in this image proxies /api/ through to api:8000,
+        # so the browser only needs port 5173 reachable and no host is baked
+        # into the JS bundle.
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1}
+    image: document-ai-frontend:latest
     ports:
       - "5173:80"
     depends_on:
-      - backend
+      - api
     restart: unless-stopped
 
 volumes:
-  backend_storage:
-  backend_db:
+  postgres_data:
   redis_data:
+  app_storage:

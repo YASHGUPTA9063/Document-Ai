@@ -5,11 +5,17 @@ Document upload, status, retrieval, extracted-data editing, KYC crops,
 signature/photo verification, customer references, and cross-document
 validation.
 
-Every endpoint here was moved verbatim out of branch-vm3's monolithic
-main.py. Paths, query parameters, response models and response *shapes* are
-unchanged — the frontend calls these exact paths through nginx, which strips
-the `/api` prefix. The router therefore declares no prefix of its own; main.py
-mounts it twice (at the root and under /api/v1).
+Paths are resource-prefixed (`/documents/...`, `/batches/...`) and served under
+`/api/v1` by main.py. Three of them were flat in an earlier build — `/upload`,
+`/upload/batch`, `/status/{id}` — and api/routers/v1/__init__.py re-registers
+those same handler functions at their old addresses while
+ENABLE_LEGACY_ROOT_ROUTES is on.
+
+Uploads never talk to Mistral from here. They go through
+api.queue.submit_document_run, which enqueues for the arq dispatcher under
+EXECUTION_MODE=queue and starts the run in-request under `inline`. That is why
+`workflow_run_id` can come back empty from an upload: under `queue` the
+dispatcher assigns it moments later and writes it to the row.
 """
 
 import os
@@ -43,6 +49,7 @@ from schemas.documents import (
 import db.claim_operations as claim_db
 import db.checklist_operations as checklist_db
 from api.deps import ALLOWED_TYPES, get_mistral_client
+from api.queue import submit_document_run
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +79,7 @@ async def _get_document_or_404(document_id: str) -> Document:
 
 # ─── Upload ──────────────────────────────────────────────────────────────────
 
-@router.post("/upload", response_model=DocumentUploadResponse)
+@router.post("/documents/upload", response_model=DocumentUploadResponse)
 async def upload_document(
     file: UploadFile = File(...),
     customer_id: str = Query(None, description="Optional customer ID to associate with the document"),
@@ -105,23 +112,16 @@ async def upload_document(
         await session.commit()
         await session.refresh(doc)
 
-        # Trigger Workflow asynchronously using mistralai SDK
-        # We start the workflow by its registered name
-        run_response = await get_mistral_client().workflows.execute_workflow_async(
-            workflow_identifier="document_processing_workflow",
-            input={
-                "document_id": doc.id,
-                "filename": doc.filename,
-                "file_path": doc.file_path,
-                "auto_split": auto_split
-            }
+        # Hand the document off for processing. Under EXECUTION_MODE=queue this
+        # enqueues and returns None — the dispatcher starts the Studio run and
+        # writes workflow_run_id to the row itself, so the id is not yet known
+        # here. Under `inline` the run starts now and the id comes back.
+        run_id = await submit_document_run(
+            doc.id, doc.filename, doc.file_path, auto_split=auto_split,
         )
-
-        # run_response.execution_id contains the Mistral workflow execution ID
-        run_id = run_response.execution_id if hasattr(run_response, "execution_id") else "unknown_run_id"
-
-        doc.workflow_run_id = run_id
-        await session.commit()
+        if run_id:
+            doc.workflow_run_id = run_id
+            await session.commit()
 
         # If this upload is part of a claim, create the link
         if claim_id:
@@ -140,13 +140,13 @@ async def upload_document(
             document_id=doc.id,
             filename=doc.filename,
             status=doc.status,
-            message="Upload successful, workflow started.",
-            workflow_run_id=run_id,
+            message="Upload successful, processing started.",
+            workflow_run_id=run_id or "",
             batch_id=batch_id
         )
 
 
-@router.post("/upload/batch")
+@router.post("/documents/upload/batch")
 async def upload_documents_batch(
     files: List[UploadFile] = File(...),
     customer_id: str = Query(None, description="Optional customer ID to associate with all documents in batch"),
@@ -200,23 +200,12 @@ async def upload_documents_batch(
                 await session.commit()
                 await session.refresh(doc)
 
-                run_response = await get_mistral_client().workflows.execute_workflow_async(
-                    workflow_identifier="document_processing_workflow",
-                    input={
-                        "document_id": doc.id,
-                        "filename": doc.filename,
-                        "file_path": doc.file_path,
-                        "auto_split": auto_split
-                    }
+                run_id = await submit_document_run(
+                    doc.id, doc.filename, doc.file_path, auto_split=auto_split,
                 )
-
-                run_id = (
-                    run_response.execution_id
-                    if hasattr(run_response, "execution_id")
-                    else "unknown_run_id"
-                )
-                doc.workflow_run_id = run_id
-                await session.commit()
+                if run_id:
+                    doc.workflow_run_id = run_id
+                    await session.commit()
 
                 return {
                     "document_id": doc.id,
@@ -261,7 +250,7 @@ async def upload_documents_batch(
 
 # ─── Status & listing ────────────────────────────────────────────────────────
 
-@router.get("/status/{document_id}", response_model=WorkflowStatusResponse)
+@router.get("/documents/{document_id}/status", response_model=WorkflowStatusResponse)
 async def get_status(document_id: str):
     async with AsyncSessionLocal() as session:
         result = await session.execute(
@@ -804,6 +793,63 @@ async def submit_checklist_decision(batch_id: str, decision: ChecklistDecisionRe
         "resumed": result["resumed"],
         "missed": result.get("missed", []),
         "batch_id": batch_id,
+    }
+
+
+# ─── Retry ───────────────────────────────────────────────────────────────────
+
+@router.post("/documents/{document_id}/retry")
+async def retry_document(document_id: str):
+    """
+    Start a fresh processing run for a document that failed or stalled.
+
+    This starts a *new* Studio execution rather than resuming the old one — a
+    failed run has no pending input to submit to, and Studio will not restart a
+    terminated execution. The previous workflow_run_id is therefore replaced,
+    which is also why the arq job key has to be unique per attempt: the default
+    key is the document id, and arq would treat a second retry within
+    keep_result as a duplicate and drop it.
+
+    Rejected and split-parent documents are refused: the first is a decision,
+    not a failure, and the second has children that own the work now.
+    """
+    doc = await _get_document_or_404(document_id)
+
+    if doc.is_split_parent:
+        raise HTTPException(
+            status_code=409,
+            detail="This document was split — retry the child documents instead.",
+        )
+    if doc.status in ("completed", "processing"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Document is not in a retryable state (status: {doc.status}).",
+        )
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Document).where(Document.id == document_id))
+        fresh = result.scalar_one_or_none()
+        if fresh is None:
+            raise HTTPException(status_code=404, detail="Document not found")
+        fresh.status = "pending"
+        fresh.error_details = None
+        fresh.workflow_run_id = None
+        await session.commit()
+        filename, file_path = fresh.filename, fresh.file_path
+
+    run_id = await submit_document_run(
+        document_id,
+        filename,
+        file_path,
+        auto_split=False,  # a retry re-runs this document, it does not re-split it
+        job_key=f"doc-{document_id}-retry-{uuid.uuid4().hex[:8]}",
+    )
+
+    return {
+        "document_id": document_id,
+        "status": "pending",
+        "workflow_run_id": run_id or "",
+        "message": "Retry started.",
     }
 
 

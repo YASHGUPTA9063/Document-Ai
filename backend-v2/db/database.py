@@ -1,20 +1,52 @@
+"""
+Database engine and session factory.
+
+DATABASE_URL selects the dialect. Postgres is the deployed target; SQLite is
+the zero-infrastructure local-venv path. Both are supported, which is why
+nothing in this module emits dialect-specific DDL any more — Alembic owns the
+schema (`alembic upgrade head`), and `migrations/` is the only place a column
+is defined.
+"""
+
+import logging
+
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import declarative_base
-from sqlalchemy import text, event
+from sqlalchemy import event
+
 from config import settings
 
-engine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=settings.DEBUG,
-    connect_args={"check_same_thread": False} if settings.DATABASE_URL.startswith("sqlite") else {}
-)
+logger = logging.getLogger(__name__)
+
+IS_SQLITE = settings.DATABASE_URL.startswith("sqlite")
+
+# Postgres gets a real pool: the API runs N uvicorn workers and the workflow
+# worker runs activities concurrently, so connections are the contended
+# resource. pool_pre_ping costs one round-trip per checkout and buys immunity
+# to connections severed by an idle timeout between the app and the database.
+_engine_kwargs: dict = {"echo": settings.DEBUG}
+if IS_SQLITE:
+    _engine_kwargs["connect_args"] = {"check_same_thread": False}
+else:
+    _engine_kwargs.update(
+        pool_size=10,
+        max_overflow=20,
+        pool_pre_ping=True,
+        pool_recycle=1800,
+    )
+
+engine = create_async_engine(settings.DATABASE_URL, **_engine_kwargs)
+
 
 @event.listens_for(engine.sync_engine, "connect")
 def set_sqlite_pragma(dbapi_connection, connection_record):
-    if settings.DATABASE_URL.startswith("sqlite"):
+    if IS_SQLITE:
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA synchronous=NORMAL")
+        # Without this a concurrent writer fails instantly with "database is
+        # locked" rather than waiting for the writer holding the lock.
+        cursor.execute("PRAGMA busy_timeout=5000")
         cursor.close()
 
 
@@ -29,55 +61,48 @@ Base = declarative_base()
 
 
 async def init_db():
+    """
+    Bring the schema up on a local SQLite debug run only.
+
+    Everywhere else `alembic upgrade head` runs first (entrypoint.sh in Docker,
+    documented in the README for a venv) and this is a no-op. The previous
+    implementation issued a block of raw ALTER TABLE statements wrapped in
+    `except: pass` — SQLite-dialect DDL that could not run on Postgres, and
+    that on Postgres would poison the surrounding transaction after the first
+    failure, silently skipping every statement after it.
+    """
+    # Import every model module so create_all sees the full metadata.
+    from db import models  # noqa: F401
+
+    if not (settings.DEBUG and IS_SQLITE):
+        logger.info(
+            "[DB] Schema is managed by Alembic — run `alembic upgrade head` before starting."
+        )
+        return
+
+    logger.warning(
+        "[DB] DEBUG + SQLite: creating tables directly from model metadata. "
+        "This is a convenience for local runs; Alembic remains the source of truth."
+    )
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        for col in [
-            "ALTER TABLE documents ADD COLUMN file_hash VARCHAR",
-            "ALTER TABLE documents ADD COLUMN customer_id VARCHAR",
-            "ALTER TABLE extracted_data ADD COLUMN signature_verification JSON",
-            "ALTER TABLE extracted_data ADD COLUMN photo_verification JSON",
-            "ALTER TABLE extracted_data ADD COLUMN fraud_check JSON",
-            # Multi-document packet splitting (Step 1.5)
-            "ALTER TABLE documents ADD COLUMN parent_document_id VARCHAR",
-            "ALTER TABLE documents ADD COLUMN page_range VARCHAR",
-            "ALTER TABLE documents ADD COLUMN split_doc_type_hint VARCHAR",
-            "ALTER TABLE documents ADD COLUMN split_confidence FLOAT",
-            "ALTER TABLE documents ADD COLUMN is_split_parent BOOLEAN DEFAULT 0",
-            "ALTER TABLE documents ADD COLUMN split_manifest JSON",
-            "CREATE INDEX IF NOT EXISTS ix_documents_parent_document_id ON documents (parent_document_id)",
-            # Upload batches + the Step 3.2 checklist
-            "ALTER TABLE documents ADD COLUMN batch_id VARCHAR",
-            "CREATE INDEX IF NOT EXISTS ix_documents_batch_id ON documents (batch_id)",
-            "ALTER TABLE batch_checklists ADD COLUMN gate_opened BOOLEAN DEFAULT 0",
-            "ALTER TABLE batch_checklists ADD COLUMN released BOOLEAN DEFAULT 0",
-            "ALTER TABLE batch_checklists ADD COLUMN release_mode VARCHAR",
-        ]:
-            try:
-                await conn.execute(text(col))
-            except Exception:
-                pass
 
 
 async def init_claim_tables():
     """
-    Ensures all claim processing tables exist.
-    Safe to call on every startup — uses CREATE TABLE IF NOT EXISTS via SQLAlchemy metadata.
-    Also runs defensive ALTER TABLE migrations for any columns added after initial creation.
+    Retained so existing callers keep working. Claim models live on the same
+    Base as everything else, so init_db() already covers them.
     """
-    async with engine.begin() as conn:
-        # Import claim models so SQLAlchemy registers them on Base.metadata
-        from db.models import Claim, ClaimDocument, ClaimantHistory, PolicyDetails, ClaimReport, ClaimDocumentLink  # noqa: F401
-        await conn.run_sync(Base.metadata.create_all)
+    return await init_db()
 
-        # Defensive migrations for Claim columns added in this iteration
-        for col in [
-            "ALTER TABLE claims ADD COLUMN claim_type VARCHAR",
-            "ALTER TABLE claims ADD COLUMN amount FLOAT",
-            "ALTER TABLE claims ADD COLUMN priority VARCHAR",
-            "ALTER TABLE claims ADD COLUMN description TEXT",
-            "ALTER TABLE claims ADD COLUMN workflow_run_id VARCHAR",
-        ]:
-            try:
-                await conn.execute(text(col))
-            except Exception:
-                pass
+
+async def ping() -> bool:
+    """True when the database answers. Backs GET /ready."""
+    from sqlalchemy import text as _text
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(_text("SELECT 1"))
+        return True
+    except Exception as e:
+        logger.warning(f"[DB] Ping failed: {e}")
+        return False

@@ -1,8 +1,9 @@
 import axios from 'axios';
 
 // Relative by default — nginx (Docker) and the Vite dev server both proxy
-// /api to the backend, so no hostname is baked into the bundle.
-const BASE = import.meta.env.VITE_API_BASE_URL || '/api';
+// /api/v1 straight through to the backend, so no hostname is baked into the
+// bundle and the browser never makes a cross-origin request.
+const BASE = import.meta.env.VITE_API_BASE_URL || '/api/v1';
 
 const api = axios.create({ baseURL: BASE, timeout: 30000 });
 
@@ -33,7 +34,7 @@ api.interceptors.response.use(
 export async function uploadDocument(file, onProgress, { autoSplit = true, batchId = null } = {}) {
   const form = new FormData();
   form.append('file', file);
-  const { data } = await api.post('/upload', form, {
+  const { data } = await api.post('/documents/upload', form, {
     params: { auto_split: autoSplit, ...(batchId ? { batch_id: batchId } : {}) },
     headers: { 'Content-Type': 'multipart/form-data' },
     onUploadProgress: (e) => {
@@ -54,7 +55,7 @@ export async function uploadDocument(file, onProgress, { autoSplit = true, batch
 export async function uploadDocumentsBatch(files, onProgress, { autoSplit = true, batchId = null } = {}) {
   const form = new FormData();
   files.forEach((f) => form.append('files', f));
-  const { data } = await api.post('/upload/batch', form, {
+  const { data } = await api.post('/documents/upload/batch', form, {
     params: { auto_split: autoSplit, ...(batchId ? { batch_id: batchId } : {}) },
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: 300_000, // 5 min — large batches can take a while
@@ -71,7 +72,7 @@ export async function uploadDocumentsBatch(files, onProgress, { autoSplit = true
  * @returns {Promise<WorkflowStatusResponse>}
  */
 export async function getStatus(documentId) {
-  const { data } = await api.get(`/status/${documentId}`);
+  const { data } = await api.get(`/documents/${documentId}/status`);
   return data;
 }
 
@@ -138,6 +139,18 @@ export async function resumeReview(workflowRunId, approved, corrections = null, 
  */
 export async function getAgents() {
   const { data } = await api.get('/agents');
+  return data;
+}
+
+/**
+ * Start a fresh processing run for a document that failed, errored, or whose
+ * review window expired. Starts a NEW workflow execution rather than resuming
+ * the old one — a terminated run has no pending input to submit to.
+ * @param {string} documentId
+ * @returns {Promise<{document_id, status, workflow_run_id, message}>}
+ */
+export async function retryDocument(documentId) {
+  const { data } = await api.post(`/documents/${documentId}/retry`);
   return data;
 }
 
@@ -520,7 +533,7 @@ export async function deleteClaim(claimId) {
 export async function uploadClaimDocument(claimId, file, docType, onProgress) {
   const form = new FormData();
   form.append('file', file);
-  const { data } = await api.post('/upload', form, {
+  const { data } = await api.post('/documents/upload', form, {
     params: { claim_id: claimId, doc_type: docType },
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: 120_000,

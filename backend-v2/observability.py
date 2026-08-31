@@ -61,7 +61,10 @@ def setup_observability(app: FastAPI, service_name: str = "document-ai-platform"
 
 
 # ─── Custom Prometheus Metrics ──────────────────────────────────────────────
-# Import these in PipelineEngine, provider wrappers, etc. to record telemetry.
+# Recorded by utils/perf_logger.wrap_timing, which sits on every
+# @workflows.activity() and on the Mistral client calls. The local
+# PipelineEngine used to record them; Mistral Studio drives the pipeline now,
+# so the timing wrapper is the hook point.
 
 from prometheus_client import Counter, Histogram, Gauge
 

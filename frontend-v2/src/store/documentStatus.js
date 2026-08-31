@@ -39,3 +39,13 @@ export const SPLIT_REVIEW_STATUS = 'awaiting_split_review';
 export const CHECKLIST_REVIEW_STATUS = 'awaiting_checklist_review';
 export const CHECKLIST_HOLD_STATUS = 'checklist_hold';
 export const CHECKLIST_GATE_STATUSES = [CHECKLIST_REVIEW_STATUS, CHECKLIST_HOLD_STATUS];
+
+// Terminal states. The pipeline no longer owns these documents, so pollers stop
+// and the processing queue drops them. `expired` is a human gate that ran out
+// its 24h window with no decision — unlike `rejected` it reflects nobody having
+// answered rather than a decision, which is why it is retryable.
+export const TERMINAL_STATUSES = ['completed', 'rejected', 'failed', 'error', 'expired', 'deleted'];
+
+// States the retry endpoint accepts. `completed` and in-flight documents are
+// refused by the backend, so they are absent here too.
+export const RETRYABLE_STATUSES = ['failed', 'error', 'expired'];

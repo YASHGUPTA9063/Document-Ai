@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import mistralai.workflows as workflows
 from datetime import timedelta
@@ -69,8 +70,38 @@ async def _update_doc_type(document_id: str, doc_type: str) -> str:
     with workflows.run_activities_locally():
         return await update_doc_type_activity(document_id, doc_type)
 
+# Every human gate waits this long before giving up on a reviewer.
+GATE_TIMEOUT = timedelta(hours=24)
+
+
 @workflows.workflow.define(name="document_processing_workflow")
 class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
+
+    async def _await_decision(self, document_id: str, schema, gate: str):
+        """
+        Wait for a reviewer at one of the four human gates.
+
+        Returns None when the 24-hour window expires. `wait_for_input`
+        raises asyncio.TimeoutError in that case, and left unhandled it
+        failed the whole execution with an opaque error while the document
+        stayed at `awaiting_review` / `checklist_hold` forever — visible to
+        nobody and actionable by nobody. Callers check for None and end the
+        run at the terminal `expired` status instead.
+        """
+        try:
+            return await self.wait_for_input(schema, timeout=GATE_TIMEOUT)
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"[Document {document_id}] {gate} gate expired after "
+                f"{GATE_TIMEOUT} with no decision"
+            )
+            await _update_status_and_message(
+                document_id,
+                "expired",
+                f"No decision was made at the {gate} review within "
+                f"{int(GATE_TIMEOUT.total_seconds() // 3600)} hours. Re-upload or retry to try again.",
+            )
+            return None
 
     @workflows.workflow.entrypoint
     async def run(self, document_id: str, filename: str, file_path: str,
@@ -96,7 +127,11 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
             # Pause — wait for user duplicate override decision
             logger.info(f"[Document {document_id}] Pausing for duplicate check override")
             await _update_status_and_message(document_id, "awaiting_review", "Duplicate detected. Waiting for override decision.")
-            duplicate_decision = await self.wait_for_input(DuplicateDecisionRequest, timeout=timedelta(hours=24))
+            duplicate_decision = await self._await_decision(
+                document_id, DuplicateDecisionRequest, "duplicate"
+            )
+            if duplicate_decision is None:
+                return {"status": "expired", "reason": "duplicate_gate_timeout"}
             
             if not duplicate_decision.override:
                 await _update_status_and_message(document_id, "rejected", "Duplicate not overridden.")
@@ -132,7 +167,11 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
                         document_id, "awaiting_split_review",
                         f"{len(segments)} documents detected in this file. Confirm the boundaries."
                     )
-                    split_decision = await self.wait_for_input(SplitDecisionRequest, timeout=timedelta(hours=24))
+                    split_decision = await self._await_decision(
+                        document_id, SplitDecisionRequest, "split boundary"
+                    )
+                    if split_decision is None:
+                        return {"status": "expired", "reason": "split_gate_timeout"}
 
                     if not split_decision.approved:
                         logger.info(f"[Document {document_id}] Reviewer rejected the split — processing whole")
@@ -241,9 +280,11 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
                 )
                 await _update_status_and_message(document_id, hold_status, gate.get("message", ""))
 
-                checklist_decision = await self.wait_for_input(
-                    ChecklistDecisionRequest, timeout=timedelta(hours=24)
+                checklist_decision = await self._await_decision(
+                    document_id, ChecklistDecisionRequest, "batch checklist"
                 )
+                if checklist_decision is None:
+                    return {"status": "expired", "reason": "checklist_gate_timeout"}
 
                 if not checklist_decision.proceed:
                     reason = (
@@ -316,7 +357,11 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
             review_reason = reviewer_result.get("summary") or "Confidence below threshold — manual review required."
             await _update_status_and_message(document_id, "awaiting_review", review_reason)
             # Pause workflow using Mistral Workflow SDK Interactive Workflow primitives
-            human_decision = await self.wait_for_input(ReviewerDecisionRequest, timeout=timedelta(hours=24))
+            human_decision = await self._await_decision(
+                document_id, ReviewerDecisionRequest, "manual"
+            )
+            if human_decision is None:
+                return {"status": "expired", "reason": "review_gate_timeout"}
             final_reviewer_result = {
                 "approved": human_decision.approved,
                 "corrections": human_decision.corrections

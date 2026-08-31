@@ -66,7 +66,8 @@ COPY --chown=appuser:appuser . .
 # and be owned by appuser here — otherwise they mount root-owned and the non-root
 # process can't write (SQLite fails with "unable to open database file").
 # Volumes created before this existed are repaired at boot by the entrypoint.
-RUN mkdir -p /app/storage/crops /app/storage/ocr_blocks /app/storage/.cache/huggingface /app/data \
+RUN mkdir -p /app/storage/crops /app/storage/ocr_blocks /app/storage/splits \
+        /app/storage/.cache/huggingface /app/data \
     && chown -R appuser:appuser /app/storage /app/data
 
 # sed strips CRs in case the script was checked out with Windows line endings —
@@ -75,13 +76,22 @@ RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8000/docs || exit 1
+# /health rather than /docs: it is the endpoint that actually reports whether
+# the app came up, and it stays 200 through a degraded provider so a container
+# is never restarted for a Mistral outage. Readiness is /ready.
+#
+# Only meaningful for the api role; the dispatcher and workflow-worker override
+# the command and expose no port.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=5 \
+    CMD curl -fsS http://localhost:8000/health || exit 1
 
-# Stays root only long enough to fix volume ownership, then execs as appuser.
+# Stays root only long enough to fix volume ownership and run migrations, then
+# execs the role command as appuser.
 ENTRYPOINT ["/app/entrypoint.sh"]
 
-# Single process only: startup preloads the DINOv2 model and spins up the
-# Mistral workflow worker as an in-process asyncio task (see main.py's
-# lifespan handler) — running >1 uvicorn worker would duplicate both.
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Default role: the API. Multiple uvicorn workers are safe now that the Mistral
+# workflow worker is its own process (workflow_worker.py) — while it was an
+# asyncio task in this process, a second uvicorn worker registered a duplicate
+# Studio pool and executed every activity twice. docker-compose.yml overrides
+# this command for the dispatcher and workflow-worker roles.
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

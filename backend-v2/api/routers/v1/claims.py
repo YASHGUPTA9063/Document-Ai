@@ -3,11 +3,11 @@ Claims Router
 =============
 Claim creation, listing, status, workflow triggering, reporting and decisions.
 
-Moved verbatim from branch-vm3's monolithic main.py. Claim processing is
-driven by the Mistral-hosted `claim_processing_workflow` (see
-claim_workflow.ClaimProcessingWorkflow), which stays the live orchestration
-engine — platform_core's PipelineEngine is available but not wired in front
-of it. Response shapes are unchanged.
+Claim processing runs on Mistral Studio as `claim_processing_workflow` (see
+claim_workflow.ClaimProcessingWorkflow). This router never starts a run
+directly: it goes through api.queue.submit_claim_run, so a run is enqueued for
+the dispatcher under EXECUTION_MODE=queue and started in-request under
+`inline`. Response shapes are unchanged.
 """
 
 import logging
@@ -19,7 +19,7 @@ from db.database import AsyncSessionLocal
 from db.models import Claim as _Claim, ClaimReport as _CR
 import db.claim_operations as claim_db
 from schemas.claims import CreateClaimRequest, ClaimDecisionRequest
-from api.deps import get_mistral_client
+from api.queue import submit_claim_run
 
 logger = logging.getLogger(__name__)
 
@@ -137,26 +137,14 @@ async def run_claim_workflow(claim_id: str):
         )
 
     try:
-        run_response = await get_mistral_client().workflows.execute_workflow_async(
-            workflow_identifier="claim_processing_workflow",
-            input={
-                "claim_id": claim_id,
-                "claimant_id": claim.claimant_id,
-                "policy_id": claim.policy_id,
-            }
-        )
-        run_id = run_response.execution_id if hasattr(run_response, "execution_id") else "unknown_run_id"
+        # Under `queue` this returns None: the dispatcher starts the run and
+        # writes workflow_run_id itself. Mark the claim processing either way so
+        # the UI does not offer Run a second time while it is in flight.
+        run_id = await submit_claim_run(claim_id, claim.claimant_id, claim.policy_id)
+        if run_id is None:
+            await claim_db.update_claim_status(claim_id, "processing")
 
-        # Save run_id and update status → processing
-        async with AsyncSessionLocal() as session:
-            result = await session.execute(_sel(_Claim).where(_Claim.claim_id == claim_id))
-            c = result.scalar_one_or_none()
-            if c:
-                c.workflow_run_id = run_id
-                c.status = "processing"
-                await session.commit()
-
-        return {"claim_id": claim_id, "workflow_run_id": run_id, "status": "processing"}
+        return {"claim_id": claim_id, "workflow_run_id": run_id or "", "status": "processing"}
     except Exception as e:
         logger.error(f"Failed to start claim workflow for {claim_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -189,25 +177,11 @@ async def rerun_claim_workflow(claim_id: str):
         await session.commit()
 
     try:
-        run_response = await get_mistral_client().workflows.execute_workflow_async(
-            workflow_identifier="claim_processing_workflow",
-            input={
-                "claim_id": claim_id,
-                "claimant_id": claim.claimant_id,
-                "policy_id": claim.policy_id,
-            }
-        )
-        run_id = run_response.execution_id if hasattr(run_response, "execution_id") else "unknown_run_id"
+        run_id = await submit_claim_run(claim_id, claim.claimant_id, claim.policy_id)
+        if run_id is None:
+            await claim_db.update_claim_status(claim_id, "processing")
 
-        async with AsyncSessionLocal() as session:
-            res = await session.execute(_sel(_Claim).where(_Claim.claim_id == claim_id))
-            c = res.scalar_one_or_none()
-            if c:
-                c.workflow_run_id = run_id
-                c.status = "processing"
-                await session.commit()
-
-        return {"claim_id": claim_id, "workflow_run_id": run_id, "status": "processing"}
+        return {"claim_id": claim_id, "workflow_run_id": run_id or "", "status": "processing"}
     except Exception as e:
         logger.error(f"Failed to rerun claim workflow for {claim_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))

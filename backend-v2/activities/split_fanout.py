@@ -27,7 +27,7 @@ import logging
 
 import mistralai.workflows as workflows
 
-from platform_core.adapters.resilient_mistral import get_mistral_client
+from platform_core.dispatch import UNKNOWN_RUN_ID, start_document_run_and_record
 from config import settings
 from tools.classifier import get_supported_doc_types
 from tools.splitter import OTHERS_KEY, Segment
@@ -36,7 +36,6 @@ import db.operations as db
 import db.claim_operations as claim_db
 
 logger = logging.getLogger(__name__)
-client = get_mistral_client()
 
 
 def _sha256(path: str) -> str:
@@ -125,28 +124,27 @@ async def split_fanout_activity(document_id: str, filename: str, file_path: str,
                 f"[Document {document_id}] Child {child_id} will re-classify — {skip_reason}"
             )
 
-        run_id = "unknown_run_id"
+        # Children go through the same dispatcher as any other upload, so they
+        # inherit its retry policy and its execution-id scheme. auto_split=False
+        # is the recursion guard: a child can never re-split.
+        run_id = UNKNOWN_RUN_ID
         try:
-            run_response = await client.workflows.execute_workflow_async(
-                workflow_identifier="document_processing_workflow",
-                input={
-                    "document_id": child_id,
-                    "filename": child_name,
-                    "file_path": segment.output_file,
-                    "auto_split": False,
-                    "preclassified_doc_type": doc_type,
-                    "preclassified_confidence": segment.min_confidence if doc_type else 0.0,
-                    "preclassified_reasoning": (
-                        f"Classified during packet split of {filename}, pages {segment.page_range_label}."
-                        if doc_type else ""
-                    ),
-                },
+            run_id = await start_document_run_and_record(
+                child_id,
+                child_name,
+                segment.output_file,
+                auto_split=False,
+                preclassified_doc_type=doc_type,
+                preclassified_confidence=segment.min_confidence if doc_type else 0.0,
+                preclassified_reasoning=(
+                    f"Classified during packet split of {filename}, pages {segment.page_range_label}."
+                    if doc_type else ""
+                ),
             )
-            run_id = getattr(run_response, "execution_id", "unknown_run_id")
-            await db.update_workflow_run_id(child_id, run_id)
         except Exception as e:
+            # One child failing to start must not abandon its siblings — the
+            # parent has already been carved up on disk, and the rows exist.
             logger.error(f"[Document {document_id}] Failed to start workflow for child {child_id}: {e}")
-            await db.update_error(child_id, {"error": str(e), "stage": "split_fanout"})
 
         for claim_id in claim_ids:
             try:

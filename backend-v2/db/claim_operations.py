@@ -519,6 +519,29 @@ async def update_claim_status(claim_id: str, status: str):
             logger.warning(f"[Claim {claim_id}] Attempted status update but claim not found in DB.")
 
 
+async def set_claim_run_id(claim_id: str, run_id: str, status: str = "processing"):
+    """
+    Record the Mistral Studio execution id for a claim, and move it to
+    `processing` in the same transaction.
+
+    The two belong together: `workflow_run_id` is how any later resume or
+    status query addresses the run, so a claim marked `processing` without one
+    is unreachable.
+    """
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Claim).where(Claim.claim_id == claim_id)
+        )
+        claim = result.scalar_one_or_none()
+        if claim:
+            claim.workflow_run_id = run_id
+            if status:
+                claim.status = status
+            await session.commit()
+        else:
+            logger.warning(f"[Claim {claim_id}] Attempted run-id update but claim not found in DB.")
+
+
 async def get_claim(claim_id: str) -> Optional[Claim]:
     """Fetches a Claim record by claim_id."""
     async with AsyncSessionLocal() as session:
