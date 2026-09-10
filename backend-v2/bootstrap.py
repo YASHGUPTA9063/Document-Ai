@@ -187,7 +187,7 @@ def platform_state() -> dict:
         "execution_mode": settings.EXECUTION_MODE,
         "deployment_name": settings.DEPLOYMENT_NAME,
         "providers": providers,
-        "provider_health": health_monitor.last_results() if health_monitor else {},
+        "provider_health": health_monitor.last_results if health_monitor else {},
         "circuit_breakers": breaker_status(),
         "agents": agent_binding_report(),
     }

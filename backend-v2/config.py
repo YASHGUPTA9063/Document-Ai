@@ -1,4 +1,10 @@
 from typing import Literal
+import os
+
+from dotenv import load_dotenv
+# Force .env values to override system environment variables.
+# pydantic-settings reads os.environ, so we must inject .env values first.
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"), override=True)
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, ValidationError, field_validator

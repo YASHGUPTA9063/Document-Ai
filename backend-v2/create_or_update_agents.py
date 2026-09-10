@@ -17,9 +17,9 @@ env_path = os.path.join(base_dir, ".env")
 
 # Load environment variables
 if os.path.exists(env_path):
-    load_dotenv(env_path)
+    load_dotenv(env_path, override=True)
 else:
-    load_dotenv()
+    load_dotenv(override=True)
 
 api_key = os.getenv("MISTRAL_API_KEY")
 if not api_key:
