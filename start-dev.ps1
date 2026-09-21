@@ -53,24 +53,48 @@ Log "All checks passed."
 # ── Track background processes for cleanup ───────────────────────────────────
 $script:bgProcesses = @()
 
+# Recursively kill a process and all its descendants (children first)
+function Kill-ProcessTree([int]$ParentId) {
+    # Find all direct children of this process
+    $children = Get-CimInstance Win32_Process -Filter "ParentProcessId=$ParentId" -ErrorAction SilentlyContinue
+    foreach ($child in $children) {
+        Kill-ProcessTree -ParentId $child.ProcessId
+    }
+    # Now kill the parent itself
+    try {
+        Stop-Process -Id $ParentId -Force -ErrorAction SilentlyContinue
+    } catch {}
+}
+
+# Safety-net: kill any process still listening on the given port
+function Kill-ByPort([int]$Port) {
+    $conns = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+    foreach ($conn in $conns) {
+        $pid_ = $conn.OwningProcess
+        if ($pid_ -and $pid_ -ne 0) {
+            Kill-ProcessTree -ParentId $pid_
+            Log "Safety-net: killed PID $pid_ still on port $Port"
+        }
+    }
+}
+
 function Cleanup {
     Write-Host ""
     Warn "Shutting down all services..."
     foreach ($proc in $script:bgProcesses) {
         try {
-            if (-not $proc.HasExited) {
-                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-                Log "Stopped PID $($proc.Id) ($($proc.ProcessName))"
-            }
+            Kill-ProcessTree -ParentId $proc.Id
+            Log "Stopped process tree for PID $($proc.Id)"
         } catch {}
     }
+    # Safety-net: make sure ports 8000 and 5173 are freed
+    Kill-ByPort -Port 8000
+    Kill-ByPort -Port 5173
     Log "Stopping Docker containers..."
     docker compose -f "$ROOT_DIR\docker-compose.dev.yml" down 2>&1 | Out-Null
     Log "All services stopped."
 }
 
-# Register cleanup on Ctrl+C
-$null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action { Cleanup } -ErrorAction SilentlyContinue
 try {
     [Console]::TreatControlCAsInput = $false
 } catch {}
