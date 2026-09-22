@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CheckCircle, XCircle, Edit3, RefreshCw, AlertTriangle, FileText, X, Plus, GitCompare, Loader2 } from 'lucide-react';
-import { resumeReview, resumeDuplicate, getExtractedData, crossValidate } from '../api/client';
+import { resumeReview, resumeDuplicate, getExtractedData, crossValidate, crossValidatePassportDL, crossValidateAddress } from '../api/client';
 import { useApp } from '../store/AppStore';
 import { useDocumentList } from '../hooks/useDocumentList';
 import { StatusBadge } from '../components/ui/StatusBadge';
@@ -387,6 +387,27 @@ function InlineCorrectionsEditor({ validatedData, onChange }) {
   );
 }
 
+/** Recursively flatten all leaf numbers from a nested confidence structure and average them. */
+function getAverageWordConfidence(extracted) {
+  const confidences = extracted?.raw_extracted?.field_confidences;
+  if (!confidences || typeof confidences !== 'object') return 0;
+
+  const flatConfidences = [];
+  const traverse = (obj) => {
+    if (typeof obj === 'number') {
+      flatConfidences.push(obj);
+    } else if (Array.isArray(obj)) {
+      obj.forEach(item => traverse(item));
+    } else if (obj && typeof obj === 'object') {
+      Object.values(obj).forEach(val => traverse(val));
+    }
+  };
+  traverse(confidences);
+
+  if (flatConfidences.length === 0) return 0;
+  return flatConfidences.reduce((sum, val) => sum + val, 0) / flatConfidences.length;
+}
+
 function ReviewCard({ doc, onAction }) {
   const [extracted, setExtracted] = useState(null);
   const [showEdit, setShowEdit] = useState(false);
@@ -394,7 +415,7 @@ function ReviewCard({ doc, onAction }) {
   const [rejectionReason, setRejectionReason] = useState('');
   const [corrections, setCorrections] = useState({});
   const [loading, setLoading] = useState(false);
-  const { toast } = useApp();
+  const { toast, confidenceMode, autoApproveThreshold } = useApp();
 
   useEffect(() => {
     getExtractedData(doc.id)
@@ -402,8 +423,18 @@ function ReviewCard({ doc, onAction }) {
       .catch(() => {});
   }, [doc.id]);
 
-  const score = extracted?.confidence_score;
-  const scoreColor = score == null ? 'var(--muted)' : score >= 0.8 ? 'var(--success)' : 'var(--warn)';
+  // Use the same confidence logic as the Extraction page
+  const wordConf = extracted ? getAverageWordConfidence(extracted) : 0;
+  const pageConf = extracted ? (extracted.confidence_score ?? 0) : 0;
+  const score = extracted
+    ? (confidenceMode === 'page'
+      ? pageConf
+      : confidenceMode === 'word'
+        ? wordConf
+        : Math.min(wordConf, pageConf))
+    : null;
+  const threshold = (autoApproveThreshold ?? 80) / 100;
+  const scoreColor = score == null ? 'var(--muted)' : score >= threshold ? 'var(--success)' : 'var(--warn)';
 
   const handle = async (approved, corr = null, reason = null) => {
     setLoading(true);
@@ -698,6 +729,8 @@ function FieldRow({ label, panVal, aadhaarVal, check }) {
   );
 }
 
+
+
 function CrossValidation() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -706,7 +739,7 @@ function CrossValidation() {
   const run = async () => {
     setLoading(true); setError(null);
     try {
-      setResult(await crossValidate());
+      setResult(await crossValidatePassportDL());
     } catch (e) {
       setError(e.message);
     } finally {
@@ -729,7 +762,7 @@ function CrossValidation() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <GitCompare size={16} style={{ color: 'var(--accent)' }} />
-          <div className="card-title" style={{ margin: 0 }}>PAN ↔ Aadhaar Cross-Validation</div>
+          <div className="card-title" style={{ margin: 0 }}>Passport ↔ Driving License</div>
         </div>
         <button className="btn btn-ghost btn-sm" onClick={run} disabled={loading} title="Refresh">
           <RefreshCw size={12} className={loading ? 'spin' : ''} />
@@ -772,31 +805,31 @@ function CrossValidation() {
           )}
 
           {/* Field comparison table */}
-          {result.pan && result.aadhaar && (
+          {result.passport && result.dl && (
             <div style={{ background: 'var(--surface)', borderRadius: 8, padding: '10px 12px' }}>
               {/* Column headers */}
               <div style={{ display: 'grid', gridTemplateColumns: '70px 1fr 1fr auto', gap: 8, marginBottom: 6 }}>
                 <span />
                 <div>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>PAN Card</div>
-                  <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 1 }}>{result.pan.filename}</div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Passport</div>
+                  <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 1 }}>{result.passport.filename}</div>
                 </div>
                 <div>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Aadhaar</div>
-                  <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 1 }}>{result.aadhaar.filename}</div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Driving License</div>
+                  <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 1 }}>{result.dl.filename}</div>
                 </div>
                 <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Result</span>
               </div>
               <FieldRow
                 label="Name"
-                panVal={result.pan.name}
-                aadhaarVal={result.aadhaar.name}
+                panVal={result.passport.name}
+                aadhaarVal={result.dl.name}
                 check={result.checks?.name}
               />
               <FieldRow
                 label="DOB"
-                panVal={result.pan.dob}
-                aadhaarVal={result.aadhaar.dob}
+                panVal={result.passport.dob}
+                aadhaarVal={result.dl.dob}
                 check={result.checks?.dob}
               />
             </div>
@@ -809,10 +842,128 @@ function CrossValidation() {
                 Name fuzzy threshold: {Math.round(result.checks.name.threshold * 100)}%
               </span>
             )}
-            {result.pan?.uploaded_at && (
+            {result.passport?.uploaded_at && (
               <span style={{ fontSize: 10, color: 'var(--muted)' }}>
-                PAN: {new Date(result.pan.uploaded_at).toLocaleDateString()}
-                {result.aadhaar?.uploaded_at && ` · Aadhaar: ${new Date(result.aadhaar.uploaded_at).toLocaleDateString()}`}
+                Passport: {new Date(result.passport.uploaded_at).toLocaleDateString()}
+                {result.dl?.uploaded_at && ` · DL: ${new Date(result.dl.uploaded_at).toLocaleDateString()}`}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AddressCrossValidation() {
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+
+  const run = async () => {
+    setLoading(true); setError(null);
+    try {
+      setResult(await crossValidateAddress());
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Auto-load on mount
+  useEffect(() => { run(); }, []);
+
+  const overallCfg = {
+    PASS:       { color: 'var(--success)', bg: 'var(--success-dim)',      border: 'var(--success-border)', label: '✓ PASS' },
+    FAIL:       { color: 'var(--danger)',  bg: 'var(--danger-dim)',       border: 'var(--danger-border)',  label: '✗ FAIL' },
+    INCOMPLETE: { color: 'var(--warn)',    bg: 'rgba(245,158,11,0.07)',   border: 'rgba(245,158,11,0.25)', label: '⚠ INCOMPLETE' },
+  }[result?.overall] || {};
+
+  return (
+    <div className="card" style={{ marginTop: 16, marginBottom: 16 }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <GitCompare size={16} style={{ color: 'var(--accent)' }} />
+          <div className="card-title" style={{ margin: 0 }}>Utility Bill ↔ Bank Statement</div>
+        </div>
+        <button className="btn btn-ghost btn-sm" onClick={run} disabled={loading} title="Refresh">
+          <RefreshCw size={12} className={loading ? 'spin' : ''} />
+        </button>
+      </div>
+
+      {/* Loading skeleton */}
+      {loading && !result && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--muted)', fontSize: 12, padding: '12px 0' }}>
+          <Loader2 size={14} className="spin" /> Checking latest documents…
+        </div>
+      )}
+
+      {/* Error */}
+      {error && (
+        <div style={{ fontSize: 12, color: 'var(--danger)', padding: '8px 10px', background: 'var(--danger-dim)', borderRadius: 6, border: '1px solid var(--danger-border)' }}>
+          {error}
+        </div>
+      )}
+
+      {result && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {/* Overall badge */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '10px 14px', borderRadius: 8,
+            background: overallCfg.bg, border: `1px solid ${overallCfg.border}`,
+          }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: overallCfg.color }}>{overallCfg.label}</span>
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>Latest documents</span>
+          </div>
+
+          {/* INCOMPLETE — list missing docs */}
+          {result.overall === 'INCOMPLETE' && result.missing?.length > 0 && (
+            <div style={{ fontSize: 12, color: 'var(--warn)', background: 'rgba(245,158,11,0.06)', padding: '8px 12px', borderRadius: 6, border: '1px solid rgba(245,158,11,0.2)' }}>
+              <AlertTriangle size={12} style={{ display: 'inline', marginRight: 5 }} />
+              No completed {result.missing.map(m => <strong key={m} style={{ marginLeft: 4 }}>{m.replace('_', ' ').toUpperCase()}</strong>)} found yet.
+              Upload both and wait for processing.
+            </div>
+          )}
+
+          {/* Field comparison table */}
+          {result.utility && result.bank && (
+            <div style={{ background: 'var(--surface)', borderRadius: 8, padding: '10px 12px' }}>
+              {/* Column headers */}
+              <div style={{ display: 'grid', gridTemplateColumns: '70px 1fr 1fr auto', gap: 8, marginBottom: 6 }}>
+                <span />
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Utility</div>
+                  <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 1 }}>{result.utility.filename}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Bank</div>
+                  <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 1 }}>{result.bank.filename}</div>
+                </div>
+                <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Result</span>
+              </div>
+              <FieldRow
+                label="Address"
+                panVal={result.utility.address}
+                aadhaarVal={result.bank.address}
+                check={result.checks?.address}
+              />
+            </div>
+          )}
+
+          {/* Threshold + timestamp note */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            {result.checks?.address?.threshold != null && (
+              <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+                Address fuzzy threshold: {Math.round(result.checks.address.threshold * 100)}%
+              </span>
+            )}
+            {result.utility?.uploaded_at && (
+              <span style={{ fontSize: 10, color: 'var(--muted)' }}>
+                Utility: {new Date(result.utility.uploaded_at).toLocaleDateString()}
+                {result.bank?.uploaded_at && ` · Bank: ${new Date(result.bank.uploaded_at).toLocaleDateString()}`}
               </span>
             )}
           </div>
@@ -906,6 +1057,7 @@ export function Validation() {
 
         <div>
           <CrossValidation />
+          <AddressCrossValidation />
 
           <div className="card">
             <div className="card-title" style={{ marginBottom: 12 }}>Validation Rules</div>

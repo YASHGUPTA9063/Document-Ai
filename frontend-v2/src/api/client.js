@@ -554,5 +554,25 @@ export async function crossValidate() {
   return data;
 }
 
+/**
+ * Cross-validate Name and DOB between the most recently completed
+ * Passport and Driving License documents in the system.
+ * @returns {Promise<object>}
+ */
+export async function crossValidatePassportDL() {
+  const { data } = await api.get('/cross-validate/passport-dl');
+  return data;
+}
+
+/**
+ * Cross-validate Address between the most recently completed
+ * Utility Bill and Bank Statement documents in the system.
+ * @returns {Promise<object>}
+ */
+export async function crossValidateAddress() {
+  const { data } = await api.get('/cross-validate/address');
+  return data;
+}
+
 export default api;
 

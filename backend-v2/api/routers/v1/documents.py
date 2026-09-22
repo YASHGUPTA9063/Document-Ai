@@ -1138,6 +1138,219 @@ def _exact_dob(a: str, b: str) -> dict:
     return {"result": "MATCH" if da == db else "MISMATCH"}
 
 
+def _norm_address(s: str) -> str:
+    # lowercase, remove punctuation except spaces, strip
+    return _re.sub(r'[^a-z0-9 ]', '', (s or '').lower().strip())
+
+
+def _fuzzy_address(a: str, b: str) -> dict:
+    na, nb = _norm_address(a), _norm_address(b)
+    if not na or not nb:
+        return {"result": "NOT_FOUND", "score": None, "threshold": 0.5}
+
+    words_a = set(na.split())
+    words_b = set(nb.split())
+
+    if not words_a or not words_b:
+        return {"result": "MISMATCH", "score": 0.0, "threshold": 0.5}
+
+    intersection = words_a.intersection(words_b)
+    
+    shorter = words_a if len(words_a) < len(words_b) else words_b
+    score = len(intersection) / len(shorter)
+    
+    threshold = 0.5 # 50% overlap of words
+    is_match = score >= threshold
+    
+    return {
+        "result": "MATCH" if is_match else "MISMATCH",
+        "score": round(score, 3),
+        "threshold": threshold
+    }
+
+
+@router.get("/cross-validate/passport-dl")
+async def cross_validate_passport_dl():
+    """
+    Cross-validates Name and DOB between the most recently completed
+    Passport and Driving License documents in the system.
+    """
+    async with AsyncSessionLocal() as session:
+        passport_result = await session.execute(
+            select(Document)
+            .options(selectinload(Document.extracted_data))
+            .where(Document.doc_type == "passport")
+            .where(Document.status == "completed")
+            .order_by(_desc(Document.updated_at))
+            .limit(1)
+        )
+        passport_doc = passport_result.scalar_one_or_none()
+
+        dl_result = await session.execute(
+            select(Document)
+            .options(selectinload(Document.extracted_data))
+            .where(Document.doc_type == "driving_license")
+            .where(Document.status == "completed")
+            .order_by(_desc(Document.updated_at))
+            .limit(1)
+        )
+        dl_doc = dl_result.scalar_one_or_none()
+
+    missing = []
+    if not passport_doc:
+        missing.append("passport")
+    if not dl_doc:
+        missing.append("driving_license")
+
+    if missing:
+        return {
+            "overall": "INCOMPLETE",
+            "missing": missing,
+            "passport": None,
+            "dl": None,
+            "checks": None,
+        }
+
+    pass_data = (passport_doc.extracted_data.validated_data or {}) if passport_doc.extracted_data else {}
+    dl_data = (dl_doc.extracted_data.validated_data or {}) if dl_doc.extracted_data else {}
+
+    pass_name = (
+        pass_data.get("full_name") or
+        pass_data.get("full_name_english") or
+        pass_data.get("name") or
+        f"{pass_data.get('given_names', '')} {pass_data.get('surname', '')}".strip()
+    )
+    pass_dob  = pass_data.get("date_of_birth", "")
+    dl_name = (
+        dl_data.get("full_name_english") or
+        dl_data.get("full_name") or
+        dl_data.get("name") or
+        f"{dl_data.get('given_names', '')} {dl_data.get('surname', '')}".strip()
+    )
+    dl_dob  = dl_data.get("date_of_birth", "")
+
+    name_check = _fuzzy_name(pass_name, dl_name)
+    dob_check  = _exact_dob(pass_dob, dl_dob)
+
+    overall = (
+        "PASS"
+        if name_check["result"] == "MATCH" and dob_check["result"] == "MATCH"
+        else "FAIL"
+    )
+
+    return {
+        "overall": overall,
+        "missing": [],
+        "passport": {
+            "document_id": passport_doc.id,
+            "filename": passport_doc.filename,
+            "name": pass_name,
+            "dob": pass_dob,
+            "uploaded_at": passport_doc.updated_at.isoformat() if passport_doc.updated_at else None,
+        },
+        "dl": {
+            "document_id": dl_doc.id,
+            "filename": dl_doc.filename,
+            "name": dl_name,
+            "dob": dl_dob,
+            "uploaded_at": dl_doc.updated_at.isoformat() if dl_doc.updated_at else None,
+        },
+        "checks": {
+            "name": name_check,
+            "dob": dob_check,
+        }
+    }
+
+
+@router.get("/cross-validate/address")
+async def cross_validate_address():
+    """
+    Cross-validates Address between the most recently completed
+    Utility Bill and Bank Statement documents in the system.
+    """
+    async with AsyncSessionLocal() as session:
+        utility_result = await session.execute(
+            select(Document)
+            .options(selectinload(Document.extracted_data))
+            .where(Document.doc_type == "utility_bill")
+            .where(Document.status == "completed")
+            .order_by(_desc(Document.updated_at))
+            .limit(1)
+        )
+        utility_doc = utility_result.scalar_one_or_none()
+
+        bank_result = await session.execute(
+            select(Document)
+            .options(selectinload(Document.extracted_data))
+            .where(Document.doc_type.in_(["bank_statement", "Bank_Statement"]))
+            .where(Document.status == "completed")
+            .order_by(_desc(Document.updated_at))
+            .limit(1)
+        )
+        bank_doc = bank_result.scalar_one_or_none()
+
+    missing = []
+    if not utility_doc:
+        missing.append("utility_bill")
+    if not bank_doc:
+        missing.append("Bank_Statement")
+
+    if missing:
+        return {
+            "overall": "INCOMPLETE",
+            "missing": missing,
+            "utility": None,
+            "bank": None,
+            "checks": None,
+        }
+
+    util_data = (utility_doc.extracted_data.validated_data or {}) if utility_doc.extracted_data else {}
+    bank_data = (bank_doc.extracted_data.validated_data or {}) if bank_doc.extracted_data else {}
+
+    util_addr = (
+        util_data.get("billing_address") or
+        util_data.get("address") or
+        util_data.get("customer_address") or
+        util_data.get("service_address") or
+        ""
+    )
+    bank_addr = (
+        bank_data.get("account_holder_address") or
+        bank_data.get("address") or
+        bank_data.get("customer_address") or
+        ""
+    )
+    
+    if type(util_addr) is dict:
+        util_addr = " ".join([str(v) for v in util_addr.values() if v])
+    if type(bank_addr) is dict:
+        bank_addr = " ".join([str(v) for v in bank_addr.values() if v])
+
+    addr_check = _fuzzy_address(str(util_addr), str(bank_addr))
+
+    overall = "PASS" if addr_check["result"] == "MATCH" else "FAIL"
+
+    return {
+        "overall": overall,
+        "missing": [],
+        "utility": {
+            "document_id": utility_doc.id,
+            "filename": utility_doc.filename,
+            "address": util_addr,
+            "uploaded_at": utility_doc.updated_at.isoformat() if utility_doc.updated_at else None,
+        },
+        "bank": {
+            "document_id": bank_doc.id,
+            "filename": bank_doc.filename,
+            "address": bank_addr,
+            "uploaded_at": bank_doc.updated_at.isoformat() if bank_doc.updated_at else None,
+        },
+        "checks": {
+            "address": addr_check,
+        }
+    }
+
+
 @router.get("/cross-validate/latest")
 async def cross_validate_latest():
     """

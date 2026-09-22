@@ -2117,20 +2117,36 @@ export function Extraction() {
     return docs;
   }, [tabItems]);
 
+  // Track the docId the user navigated to (from Documents page, Dashboard, etc.)
+  // so we can apply it as soon as the doc appears in selectableDocs,
+  // even if it wasn't loaded yet on the first render.
+  const pendingNavDocId = useRef(null);
+  const userHasManuallySelected = useRef(false);
+
+  // Capture navDocId from location state whenever it changes
+  useEffect(() => {
+    const navDocId = location.state?.docId;
+    if (navDocId) {
+      pendingNavDocId.current = navDocId;
+      userHasManuallySelected.current = false;
+    }
+  }, [location.state?.docId]);
+
   useEffect(() => {
     if (selectableDocs.length === 0) return;
-    const navDocId = location.state?.docId;
-    if (navDocId && selectableDocs.some((d) => d.id === navDocId)) {
-      setActiveId(navDocId);
+    const targetId = pendingNavDocId.current;
+    if (targetId && !userHasManuallySelected.current && selectableDocs.some((d) => d.id === targetId)) {
+      setActiveId(targetId);
+      pendingNavDocId.current = null; // consumed — don't re-apply
       // Auto-expand the parent packet if navigating to a split child
-      const navDoc = selectableDocs.find(d => d.id === navDocId);
+      const navDoc = selectableDocs.find(d => d.id === targetId);
       if (navDoc?.parent_document_id) {
         setExpandedPackets(prev => new Set([...prev, navDoc.parent_document_id]));
       }
     } else if (!activeId || !selectableDocs.some(d => d.id === activeId)) {
       setActiveId(selectableDocs[0].id);
     }
-  }, [selectableDocs, location.state?.docId]);
+  }, [selectableDocs]);
 
   useEffect(() => {
     if (!activeId) return;
@@ -2307,7 +2323,7 @@ export function Extraction() {
               <div
                 key={doc.id}
                 className={`tab ${activeId === doc.id ? 'active' : ''}`}
-                onClick={() => setActiveId(doc.id)}
+                onClick={() => { userHasManuallySelected.current = true; setActiveId(doc.id); }}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
               >
                 <FileText size={13} />
@@ -2336,6 +2352,7 @@ export function Extraction() {
                   });
                   // Auto-select first completed child when expanding
                   if (!isExpanded && completedChildren.length > 0 && !hasActiveChild) {
+                    userHasManuallySelected.current = true;
                     setActiveId(completedChildren[0].id);
                   }
                 }}
@@ -2365,7 +2382,7 @@ export function Extraction() {
                 <div
                   key={child.id}
                   className={`tab ${activeId === child.id ? 'active' : ''}`}
-                  onClick={() => setActiveId(child.id)}
+                  onClick={() => { userHasManuallySelected.current = true; setActiveId(child.id); }}
                   style={{
                     display: 'inline-flex', alignItems: 'center', gap: 6,
                     paddingLeft: 24,

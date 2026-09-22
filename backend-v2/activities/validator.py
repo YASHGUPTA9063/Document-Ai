@@ -27,6 +27,30 @@ def _extract_text(content) -> str:
     return str(content) if content is not None else ""
 
 
+def _flatten_confidence(conf):
+    """Recursively collect all leaf numbers from a nested confidence structure
+    and return their average.  Mirrors the frontend's flattenConfidence().
+    Returns None when no numeric leaves are found."""
+    if conf is None:
+        return None
+    if isinstance(conf, (int, float)):
+        return float(conf)
+    nums = []
+    def _collect(node):
+        if isinstance(node, (int, float)):
+            nums.append(float(node))
+        elif isinstance(node, list):
+            for item in node:
+                _collect(item)
+        elif isinstance(node, dict):
+            for v in node.values():
+                _collect(v)
+    _collect(conf)
+    if not nums:
+        return None
+    return sum(nums) / len(nums)
+
+
 from tools.validator import VALIDATOR_TOOLS, get_template_fields
 
 
@@ -270,37 +294,36 @@ async def validator_activity(
                 parsed["is_valid"] = False
 
         # ─── Weighted Document Score ───
-        # Compute doc_score as: Σ(field_confidence × weight) / Σ(weight)
-        # Each template field carries a "weight" (default 80).
-        # field_confidences values are 0.0–1.0.
+        # Mirrors the Extraction page's weightedDocConfidence calculation:
+        #   • Iterates over existing field_confidences (missing fields are NOT penalised)
+        #   • Nested dicts/lists are recursively flattened to an average
+        #   • Each field's weight comes from the template (default 80)
         doc_score = None
         fc = field_confidences or {}
         if template_fields and isinstance(template_fields, list) and fc:
-            total_weighted = 0.0
-            total_weight = 0.0
-            low_confidence_fields = []
+            # Build weight map from template fields
+            weight_map = {}
             for f in template_fields:
                 if not isinstance(f, dict):
                     continue
                 key = f.get("key") or f.get("name")
-                if not key:
-                    continue
-                weight = f.get("weight", 80)
-                conf = fc.get(key)
-                if conf is None:
-                    # Field not extracted — treat as 0 confidence
-                    conf = 0.0
-                elif isinstance(conf, dict):
-                    # Nested confidence (e.g. line items) — skip for now
-                    continue
-                elif isinstance(conf, list):
-                    # Array of sub-confidences — average them
-                    flat = [c for c in conf if isinstance(c, (int, float))]
-                    conf = (sum(flat) / len(flat)) if flat else 0.0
-                total_weighted += conf * weight
+                if key:
+                    weight_map[key] = f.get("weight", 80)
+
+            total_weighted = 0.0
+            total_weight = 0.0
+            low_confidence_fields = []
+
+            for key, conf_val in fc.items():
+                # Recursively flatten nested confidence structures
+                resolved = _flatten_confidence(conf_val)
+                if resolved is None:
+                    continue  # no usable confidence — skip (same as Extraction page)
+                weight = weight_map.get(key, 80)
+                total_weighted += resolved * weight
                 total_weight += weight
-                if conf < 0.8:
-                    low_confidence_fields.append((key, conf))
+                if resolved < 0.8:
+                    low_confidence_fields.append((key, resolved))
 
             if total_weight > 0:
                 doc_score = total_weighted / total_weight

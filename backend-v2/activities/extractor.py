@@ -288,6 +288,25 @@ async def extractor_activity(document_id: str, file_path: str, doc_type: str) ->
             )
             message = response.choices[0].message
 
+        # ── Deterministic fallback: ensure crop_kyc_images runs for KYC ──
+        # The LLM agent may non-deterministically skip the tool call despite
+        # being prompted with "You MUST".  When that happens, call it directly.
+        if is_kyc and kyc_image_result is None:
+            logger.warning(
+                f"[Document {document_id}] Agent did not call crop_kyc_images "
+                f"— invoking deterministic fallback for KYC signature/photo extraction"
+            )
+            try:
+                fallback_res = crop_kyc_images(file_path, doc_type, document_id)
+                kyc_image_result = fallback_res["kyc_image_result"]
+                logger.info(
+                    f"[Document {document_id}] Deterministic crop_kyc_images fallback: "
+                    f"signature={fallback_res['tool_output'].get('has_signature')}, "
+                    f"photo={fallback_res['tool_output'].get('has_photo')}"
+                )
+            except Exception as e:
+                logger.error(f"[Document {document_id}] Deterministic crop_kyc_images fallback failed: {e}")
+
         # Parse final response
         content = _extract_text(message.content).strip()
         try:
