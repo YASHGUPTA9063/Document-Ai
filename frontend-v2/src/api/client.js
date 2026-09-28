@@ -574,5 +574,15 @@ export async function crossValidateAddress() {
   return data;
 }
 
+/**
+ * Get the aggregated KYC verdict — calls the backend which runs
+ * cross-validations + checks biometric verification + LLM verdict.
+ * @returns {Promise<{verdict, confidence, summary, reasoning, risk_flags, checks}>}
+ */
+export async function getKycVerdict() {
+  const { data } = await api.get('/kyc-verdict', { timeout: 60000 });
+  return data;
+}
+
 export default api;
 

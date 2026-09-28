@@ -1445,3 +1445,212 @@ async def cross_validate_latest():
             "dob":  dob_check,
         },
     }
+
+
+# ─── KYC Verdict ─────────────────────────────────────────────────────────────
+
+KYC_DOC_TYPES = ["passport", "driving_license", "utility_bill", "bank_statement", "Bank_Statement"]
+
+
+@router.get("/kyc-verdict")
+async def kyc_verdict():
+    """
+    Aggregate KYC verification data and produce an LLM-powered verdict.
+
+    Collects:
+      1. Passport ↔ DL cross-validation (name + DOB)
+      2. Utility ↔ Bank address cross-validation
+      3. Signature verification result (from any KYC doc that has one)
+      4. Photo/face verification result (from any KYC doc that has one)
+
+    Then sends all results to Mistral LLM to produce a final KYC verdict
+    with reasoning.
+    """
+    # ── 1. Cross-validations ────────────────────────────────────────────────
+    passport_dl_result = await cross_validate_passport_dl()
+    address_result = await cross_validate_address()
+
+    # ── 2. Signature & photo verification from any KYC doc ──────────────────
+    sig_verification = None
+    photo_verification = None
+
+    async with AsyncSessionLocal() as session:
+        # Find the latest KYC docs that have verification results
+        for doc_type in KYC_DOC_TYPES:
+            if sig_verification and photo_verification:
+                break
+
+            result = await session.execute(
+                select(Document)
+                .options(selectinload(Document.extracted_data))
+                .where(Document.doc_type == doc_type)
+                .where(Document.status == "completed")
+                .order_by(_desc(Document.updated_at))
+                .limit(5)
+            )
+            docs = result.scalars().all()
+
+            for doc in docs:
+                if not doc.extracted_data:
+                    continue
+                if not sig_verification and doc.extracted_data.signature_verification:
+                    sv = doc.extracted_data.signature_verification
+                    if sv.get("verdict"):
+                        sig_verification = {
+                            "document_id": doc.id,
+                            "filename": doc.filename,
+                            "doc_type": doc.doc_type,
+                            **sv,
+                        }
+                if not photo_verification and doc.extracted_data.photo_verification:
+                    pv = doc.extracted_data.photo_verification
+                    if pv.get("verdict"):
+                        photo_verification = {
+                            "document_id": doc.id,
+                            "filename": doc.filename,
+                            "doc_type": doc.doc_type,
+                            **pv,
+                        }
+
+    # ── 3. Build LLM prompt ─────────────────────────────────────────────────
+    checks_summary = []
+
+    # Passport ↔ DL
+    if passport_dl_result.get("overall") == "PASS":
+        checks_summary.append("Passport ↔ Driving License cross-validation: PASS (Name and DOB match)")
+    elif passport_dl_result.get("overall") == "FAIL":
+        details = []
+        checks = passport_dl_result.get("checks", {})
+        if checks.get("name", {}).get("result") == "MISMATCH":
+            details.append(f"Name mismatch: Passport='{passport_dl_result.get('passport', {}).get('name', 'N/A')}' vs DL='{passport_dl_result.get('dl', {}).get('name', 'N/A')}'")
+        if checks.get("dob", {}).get("result") == "MISMATCH":
+            details.append(f"DOB mismatch: Passport='{passport_dl_result.get('passport', {}).get('dob', 'N/A')}' vs DL='{passport_dl_result.get('dl', {}).get('dob', 'N/A')}'")
+        checks_summary.append(f"Passport ↔ Driving License cross-validation: FAIL ({'; '.join(details)})")
+    else:
+        missing = passport_dl_result.get("missing", [])
+        checks_summary.append(f"Passport ↔ Driving License cross-validation: INCOMPLETE (missing: {', '.join(missing)})")
+
+    # Address
+    if address_result.get("overall") == "PASS":
+        checks_summary.append("Utility Bill ↔ Bank Statement address cross-validation: PASS (Addresses match)")
+    elif address_result.get("overall") == "FAIL":
+        addr_score = address_result.get("checks", {}).get("address", {}).get("score")
+        checks_summary.append(f"Utility Bill ↔ Bank Statement address cross-validation: FAIL (similarity score: {addr_score})")
+    else:
+        missing = address_result.get("missing", [])
+        checks_summary.append(f"Utility Bill ↔ Bank Statement address cross-validation: INCOMPLETE (missing: {', '.join(missing)})")
+
+    # Signature
+    if sig_verification:
+        verdict = sig_verification.get("verdict", "unknown")
+        confidence = sig_verification.get("judge", {}).get("confidence") or sig_verification.get("confidence", "N/A")
+        checks_summary.append(f"Signature verification: {verdict.upper()} (confidence: {confidence}%, document: {sig_verification.get('filename', 'N/A')})")
+    else:
+        checks_summary.append("Signature verification: NOT PERFORMED (no document has been verified yet)")
+
+    # Photo
+    if photo_verification:
+        verdict = photo_verification.get("verdict", "unknown")
+        verdict_label = photo_verification.get("verdict_label", verdict.upper())
+        output_code = photo_verification.get("output_code", "N/A")
+        checks_summary.append(f"Photo/face verification: {verdict_label} (score: {output_code}/5, document: {photo_verification.get('filename', 'N/A')})")
+    else:
+        checks_summary.append("Photo/face verification: NOT PERFORMED (no document has been verified yet)")
+
+    checks_text = "\n".join(f"  {i+1}. {c}" for i, c in enumerate(checks_summary))
+
+    prompt = f"""You are a KYC compliance officer AI. Based on the following verification checks, provide a final KYC verdict.
+
+VERIFICATION RESULTS:
+{checks_text}
+
+Analyze these results and provide your verdict in the following JSON format:
+{{
+  "verdict": "APPROVED" or "REJECTED" or "NEEDS_REVIEW",
+  "confidence": <number 0-100>,
+  "summary": "<one-line summary of the decision>",
+  "reasoning": "<detailed 2-3 sentence explanation of why this verdict was reached>",
+  "risk_flags": ["<list of any risk flags or concerns, empty if none>"]
+}}
+
+Rules:
+- APPROVED: All completed cross-validations pass AND at least one biometric verification (signature or photo) is genuine/same_person.
+- REJECTED: Any cross-validation fails with clear mismatch OR any biometric verification shows forged/different_person.
+- NEEDS_REVIEW: Some checks are incomplete/not performed, or results are uncertain/inconclusive.
+- If no biometric verification has been performed at all, verdict should be NEEDS_REVIEW regardless of cross-validation results.
+- Be specific in your reasoning about which checks passed and which failed."""
+
+    # ── 4. LLM call ─────────────────────────────────────────────────────────
+    try:
+        client = get_mistral_client()
+        response = client.chat.complete(
+            model="mistral-large-latest",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            temperature=0.1,
+            max_tokens=500,
+        )
+        llm_response = json.loads(response.choices[0].message.content)
+    except Exception as e:
+        logger.error(f"KYC verdict LLM call failed: {e}")
+        # Fallback: compute verdict without LLM
+        llm_response = _compute_fallback_verdict(
+            passport_dl_result, address_result, sig_verification, photo_verification
+        )
+
+    return {
+        "verdict": llm_response.get("verdict", "NEEDS_REVIEW"),
+        "confidence": llm_response.get("confidence", 0),
+        "summary": llm_response.get("summary", ""),
+        "reasoning": llm_response.get("reasoning", ""),
+        "risk_flags": llm_response.get("risk_flags", []),
+        "checks": {
+            "passport_dl": passport_dl_result,
+            "address": address_result,
+            "signature": sig_verification,
+            "photo": photo_verification,
+        },
+    }
+
+
+def _compute_fallback_verdict(passport_dl, address, sig, photo):
+    """Rule-based fallback when the LLM call fails."""
+    has_fail = False
+    has_incomplete = False
+    has_biometric = False
+
+    for cv in [passport_dl, address]:
+        o = cv.get("overall", "INCOMPLETE")
+        if o == "FAIL":
+            has_fail = True
+        elif o != "PASS":
+            has_incomplete = True
+
+    if sig:
+        v = (sig.get("verdict") or "").lower()
+        has_biometric = True
+        if v == "forged":
+            has_fail = True
+    if photo:
+        v = (photo.get("verdict") or "").lower()
+        has_biometric = True
+        if v == "different_person":
+            has_fail = True
+
+    if has_fail:
+        verdict = "REJECTED"
+        summary = "One or more KYC checks failed."
+    elif not has_biometric or has_incomplete:
+        verdict = "NEEDS_REVIEW"
+        summary = "Some KYC checks are incomplete or biometric verification is missing."
+    else:
+        verdict = "APPROVED"
+        summary = "All KYC checks passed."
+
+    return {
+        "verdict": verdict,
+        "confidence": 50 if verdict == "NEEDS_REVIEW" else 85,
+        "summary": summary,
+        "reasoning": "Computed by rule-based fallback (LLM unavailable).",
+        "risk_flags": [],
+    }

@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Upload, Cpu, FileSearch,
   CheckCircle, FileText, Bot, BarChart2,
   ChevronLeft, ChevronRight, Settings, FileCode,
-  ClipboardList
+  ClipboardList, Shield
 } from 'lucide-react';
 import { useApp } from '../../store/AppStore';
 
@@ -12,25 +12,26 @@ const navSections = [
   {
     label: 'Main',
     items: [
-      { label: 'Dashboard',  icon: LayoutDashboard, to: '/'           },
-      { label: 'Upload',     icon: Upload,          to: '/upload'     },
-      { label: 'Processing', icon: Cpu,             to: '/processing' },
+      { label: 'Dashboard', icon: LayoutDashboard, to: '/' },
+      { label: 'Upload', icon: Upload, to: '/upload' },
+      { label: 'Processing', icon: Cpu, to: '/processing' },
     ],
   },
   {
     label: 'Data',
     items: [
-      { label: 'Extraction', icon: FileSearch,  to: '/extraction' },
+      { label: 'Extraction', icon: FileSearch, to: '/extraction' },
       { label: 'Validation', icon: CheckCircle, to: '/validation' },
-      { label: 'Documents',  icon: FileText,    to: '/documents'  },
+      { label: 'KYC', icon: Shield, to: '/kyc-verdict' },
+      { label: 'Documents', icon: FileText, to: '/documents' },
     ],
   },
   {
     label: 'Intelligence',
     items: [
-      { label: 'Agents',    icon: Bot,      to: '/agents'    },
+      { label: 'Agents', icon: Bot, to: '/agents' },
       { label: 'Analytics', icon: BarChart2, to: '/analytics' },
-      { label: 'Templates', icon: FileCode,  to: '/templates' },
+      { label: 'Templates', icon: FileCode, to: '/templates' },
     ],
   },
   {
@@ -57,7 +58,7 @@ export function Sidebar({ mobileOpen, onMobileClose }) {
   const toggleCollapse = useCallback(() => {
     setCollapsed((v) => {
       const next = !v;
-      try { localStorage.setItem('sidebar-collapsed', String(next)); } catch {}
+      try { localStorage.setItem('sidebar-collapsed', String(next)); } catch { }
       return next;
     });
   }, []);
@@ -65,7 +66,7 @@ export function Sidebar({ mobileOpen, onMobileClose }) {
   // Close mobile drawer on route change
   useEffect(() => {
     if (mobileOpen && onMobileClose) onMobileClose();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const sidebarClass = [
@@ -88,13 +89,13 @@ export function Sidebar({ mobileOpen, onMobileClose }) {
             <div className="logo-mark">
               <div className="logo-icon">
                 <svg width="20" height="20" viewBox="0 0 22 22" fill="none">
-                  <rect x="3" y="1" width="12" height="16" rx="2" fill="white" fillOpacity="0.15"/>
-                  <rect x="3" y="1" width="12" height="16" rx="2" stroke="white" strokeOpacity="0.5" strokeWidth="1"/>
-                  <line x1="5.5" y1="5" x2="12.5" y2="5" stroke="white" strokeOpacity="0.7" strokeWidth="1" strokeLinecap="round"/>
-                  <line x1="5.5" y1="8" x2="12.5" y2="8" stroke="white" strokeOpacity="0.7" strokeWidth="1" strokeLinecap="round"/>
-                  <line x1="5.5" y1="11" x2="10" y2="11" stroke="white" strokeOpacity="0.5" strokeWidth="1" strokeLinecap="round"/>
-                  <circle cx="16" cy="16" r="5" fill="var(--accent3)" fillOpacity="0.9"/>
-                  <path d="M13.5 16L15.2 17.7L18.5 14" stroke="white" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <rect x="3" y="1" width="12" height="16" rx="2" fill="white" fillOpacity="0.15" />
+                  <rect x="3" y="1" width="12" height="16" rx="2" stroke="white" strokeOpacity="0.5" strokeWidth="1" />
+                  <line x1="5.5" y1="5" x2="12.5" y2="5" stroke="white" strokeOpacity="0.7" strokeWidth="1" strokeLinecap="round" />
+                  <line x1="5.5" y1="8" x2="12.5" y2="8" stroke="white" strokeOpacity="0.7" strokeWidth="1" strokeLinecap="round" />
+                  <line x1="5.5" y1="11" x2="10" y2="11" stroke="white" strokeOpacity="0.5" strokeWidth="1" strokeLinecap="round" />
+                  <circle cx="16" cy="16" r="5" fill="var(--accent3)" fillOpacity="0.9" />
+                  <path d="M13.5 16L15.2 17.7L18.5 14" stroke="white" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </div>
               <div className="logo-text-wrap">
@@ -114,8 +115,8 @@ export function Sidebar({ mobileOpen, onMobileClose }) {
                   label === 'Validation' && reviewDocs.length > 0
                     ? reviewDocs.length
                     : label === 'Processing' && pendingDocs.length > 0
-                    ? pendingDocs.length
-                    : null;
+                      ? pendingDocs.length
+                      : null;
 
                 return (
                   <NavLink
