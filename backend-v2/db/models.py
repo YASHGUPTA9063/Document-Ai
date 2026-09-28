@@ -238,3 +238,68 @@ class ClaimDocumentLink(Base):
     doc_type = Column(String, nullable=False)    # e.g. "medical_report"
     synced = Column(String, nullable=False, default="pending")  # pending | synced | failed
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ─── KYC PROCESS MODELS ───────────────────────────────────────────────────────
+
+class KycApplication(Base):
+    """
+    One KYC application = one person being verified.
+    Stores the applicant's self-declared data (from form upload or manual entry).
+    """
+    __tablename__ = "kyc_applications"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    kyc_id = Column(String, index=True, unique=True, nullable=False)   # e.g. KYC-2026-001
+    applicant_name = Column(String, nullable=True)
+    fathers_name = Column(String, nullable=True)
+    date_of_birth = Column(String, nullable=True)       # stored as string for display flexibility
+    address = Column(Text, nullable=True)
+    form_source = Column(String, nullable=False, default="manual")  # "manual" | "uploaded"
+    form_document_id = Column(String, ForeignKey("documents.id"), nullable=True)  # links to Document if form was uploaded
+    photo_path = Column(String, nullable=True)       # file path for applicant photo
+    signature_path = Column(String, nullable=True)    # file path for applicant signature
+    status = Column(String, nullable=False, default="form_submitted")
+    # statuses: form_submitted → doc_uploaded → extracting → ready → verifying → completed → verified → failed
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    documents = relationship("KycDocument", back_populates="application", cascade="all, delete-orphan")
+    result = relationship("KycResult", back_populates="application", uselist=False, cascade="all, delete-orphan")
+
+
+class KycDocument(Base):
+    """
+    Links an uploaded identity document (Passport/DL) to a KYC application.
+    The document_id references the main Document table (OCR pipeline).
+    """
+    __tablename__ = "kyc_documents"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    kyc_id = Column(String, ForeignKey("kyc_applications.kyc_id"), nullable=False, index=True)
+    document_id = Column(String, ForeignKey("documents.id"), nullable=False)
+    doc_type = Column(String, nullable=False)   # "passport" | "driving_license"
+    extracted_fields = Column(JSON, nullable=True)   # synced from OCR after extraction
+    synced = Column(String, nullable=False, default="pending")  # pending | synced | failed
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    application = relationship("KycApplication", back_populates="documents")
+
+
+class KycResult(Base):
+    """
+    Final verification result: field-by-field comparison + overall verdict.
+    """
+    __tablename__ = "kyc_results"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    kyc_id = Column(String, ForeignKey("kyc_applications.kyc_id"), nullable=False, unique=True, index=True)
+    form_data = Column(JSON, nullable=True)     # snapshot of applicant-declared fields
+    doc_data = Column(JSON, nullable=True)      # snapshot of OCR-extracted fields from ID doc
+    field_checks = Column(JSON, nullable=True)  # per-field match result [{field, form_val, doc_val, result, score}]
+    overall_status = Column(String, nullable=True)   # VERIFIED | FAILED | REVIEW
+    confidence = Column(Float, nullable=True)
+    summary = Column(Text, nullable=True)       # LLM-generated explanation
+    processed_at = Column(DateTime, default=datetime.utcnow)
+
+    application = relationship("KycApplication", back_populates="result")

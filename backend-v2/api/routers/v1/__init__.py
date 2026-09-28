@@ -21,6 +21,7 @@ from fastapi.routing import APIRoute
 
 from .documents import router as documents_router
 from .claims import router as claims_router
+from .kyc import router as kyc_router
 from .workflow import router as workflow_router
 from .settings import router as settings_router
 
@@ -29,6 +30,7 @@ from .settings import router as settings_router
 ROUTERS = [
     documents_router,
     claims_router,
+    kyc_router,
     workflow_router,
     settings_router,
 ]

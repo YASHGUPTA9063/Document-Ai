@@ -22,7 +22,6 @@ const navSections = [
     items: [
       { label: 'Extraction', icon: FileSearch, to: '/extraction' },
       { label: 'Validation', icon: CheckCircle, to: '/validation' },
-      { label: 'KYC', icon: Shield, to: '/kyc-verdict' },
       { label: 'Documents', icon: FileText, to: '/documents' },
     ],
   },
@@ -38,6 +37,12 @@ const navSections = [
     label: 'Claims',
     items: [
       { label: 'Claim Process', icon: ClipboardList, to: '/claim-process' },
+    ],
+  },
+  {
+    label: 'KYC',
+    items: [
+      { label: 'KYC Process', icon: Shield, to: '/kyc-process' },
     ],
   },
   {

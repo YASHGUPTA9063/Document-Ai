@@ -584,5 +584,156 @@ export async function getKycVerdict() {
   return data;
 }
 
-export default api;
+// ─── KYC Process APIs ─────────────────────────────────────────────────────────
 
+/**
+ * Create a new KYC application with form data.
+ * @param {{ applicant_name, fathers_name, date_of_birth, address, form_source, form_document_id }} payload
+ */
+export async function createKycApplication(payload) {
+  const { data } = await api.post('/kyc', payload);
+  return data;
+}
+
+/**
+ * List all KYC applications.
+ * @returns {Promise<Array>}
+ */
+export async function listKycApplications() {
+  const { data } = await api.get('/kyc');
+  return data;
+}
+
+/**
+ * Get a single KYC application.
+ * @param {string} kycId
+ */
+export async function getKycApplication(kycId) {
+  const { data } = await api.get(`/kyc/${kycId}`);
+  return data;
+}
+
+/**
+ * Update KYC form data.
+ * @param {string} kycId
+ * @param {{ applicant_name, fathers_name, date_of_birth, address }} payload
+ */
+export async function updateKycForm(kycId, payload) {
+  const { data } = await api.put(`/kyc/${kycId}`, payload);
+  return data;
+}
+
+/**
+ * Get extraction status of KYC linked documents.
+ * @param {string} kycId
+ */
+export async function getKycStatus(kycId) {
+  const { data } = await api.get(`/kyc/${kycId}/status`);
+  return data;
+}
+
+/**
+ * Upload an identity document (passport/driving_license) for KYC verification.
+ * @param {string} kycId
+ * @param {File} file
+ * @param {string} docType - 'passport' or 'driving_license'
+ * @param {(pct: number) => void} onProgress
+ */
+export async function uploadKycDocument(kycId, file, docType, onProgress) {
+  const form = new FormData();
+  form.append('file', file);
+  const { data } = await api.post(`/kyc/${kycId}/upload-doc`, form, {
+    params: { doc_type: docType },
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120_000,
+    onUploadProgress: (e) => {
+      if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100));
+    },
+  });
+  return data;
+}
+
+/**
+ * Trigger KYC verification (cross-validates form data vs document data).
+ * @param {string} kycId
+ */
+export async function runKycVerification(kycId) {
+  const { data } = await api.post(`/kyc/${kycId}/verify`, null, { timeout: 60_000 });
+  return data;
+}
+
+/**
+ * Get the final KYC verification result.
+ * @param {string} kycId
+ */
+export async function getKycResult(kycId) {
+  const { data } = await api.get(`/kyc/${kycId}/result`);
+  return data;
+}
+
+/**
+ * Submit reviewer's KYC decision (approve/reject).
+ * @param {string} kycId
+ * @param {'approve'|'reject'} decision
+ * @param {string} [notes]
+ */
+export async function submitKycDecision(kycId, decision, notes = '') {
+  const { data } = await api.post(`/kyc/${kycId}/decision`, { decision, notes });
+  return data;
+}
+
+/**
+ * Delete a KYC application.
+ * @param {string} kycId
+ */
+export async function deleteKycApplication(kycId) {
+  const { data } = await api.delete(`/kyc/${kycId}`);
+  return data;
+}
+
+/**
+ * Upload a pre-filled application form for OCR extraction.
+ * @param {string} kycId
+ * @param {File} file
+ * @param {(pct: number) => void} [onProgress]
+ */
+export async function uploadKycForm(kycId, file, onProgress) {
+  const form = new FormData();
+  form.append('file', file);
+  const { data } = await api.post(`/kyc/${kycId}/upload-form`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120_000,
+    onUploadProgress: (e) => {
+      if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100));
+    },
+  });
+  return data;
+}
+
+/**
+ * Poll the OCR extraction status of the uploaded form.
+ * @param {string} kycId
+ */
+export async function getKycFormStatus(kycId) {
+  const { data } = await api.get(`/kyc/${kycId}/form-status`);
+  return data;
+}
+
+/**
+ * Upload a photo or signature image for the KYC application.
+ * @param {string} kycId
+ * @param {File} file
+ * @param {'photo'|'signature'} attachmentType
+ */
+export async function uploadKycAttachment(kycId, file, attachmentType) {
+  const form = new FormData();
+  form.append('file', file);
+  const { data } = await api.post(`/kyc/${kycId}/upload-attachment`, form, {
+    params: { attachment_type: attachmentType },
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 60_000,
+  });
+  return data;
+}
+
+export default api;
