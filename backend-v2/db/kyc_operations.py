@@ -117,6 +117,34 @@ async def update_kyc_form_data(
         return app
 
 
+async def fill_empty_form_fields(kyc_id: str, **fields):
+    """
+    Sets applicant form fields that are still empty — values extracted from an
+    uploaded form never overwrite what the applicant entered or edited.
+    """
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(KycApplication).where(KycApplication.kyc_id == kyc_id)
+        )
+        app = result.scalar_one_or_none()
+        if not app:
+            return
+        for attr, value in fields.items():
+            if value and not getattr(app, attr):
+                setattr(app, attr, str(value))
+        await session.commit()
+
+
+async def get_validated_data(document_id: str) -> dict:
+    """Returns the pipeline's validated_data for a document ({} if not extracted yet)."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(ExtractedData).where(ExtractedData.document_id == document_id)
+        )
+        extracted = result.scalar_one_or_none()
+        return dict(extracted.validated_data or {}) if extracted else {}
+
+
 async def delete_kyc_application(kyc_id: str) -> bool:
     """Deletes a KYC application and all its linked documents/results. Returns True if deleted."""
     async with AsyncSessionLocal() as session:
@@ -136,7 +164,12 @@ async def delete_kyc_application(kyc_id: str) -> bool:
 
 # ─── KYC DOCUMENT OPERATIONS ──────────────────────────────────────────────────
 
-async def link_document_to_kyc(kyc_id: str, document_id: str, doc_type: str) -> KycDocument:
+async def link_document_to_kyc(
+    kyc_id: str,
+    document_id: str,
+    doc_type: Optional[str] = None,
+    upload_batch: Optional[str] = None,
+) -> KycDocument:
     """
     Creates a KycDocument entry linking an OCR document to a KYC application.
     Also transitions status to 'doc_uploaded' → 'extracting'.
@@ -146,6 +179,7 @@ async def link_document_to_kyc(kyc_id: str, document_id: str, doc_type: str) -> 
             kyc_id=kyc_id,
             document_id=document_id,
             doc_type=doc_type,
+            upload_batch=upload_batch,
             synced="pending",
         )
         session.add(kyc_doc)
@@ -155,12 +189,13 @@ async def link_document_to_kyc(kyc_id: str, document_id: str, doc_type: str) -> 
             select(KycApplication).where(KycApplication.kyc_id == kyc_id)
         )
         app = app_result.scalar_one_or_none()
-        if app and app.status in ("form_submitted", "doc_uploaded"):
+        # 'ready' too: adding another ID document re-opens extraction.
+        if app and app.status in ("form_submitted", "doc_uploaded", "ready"):
             app.status = "extracting"
 
         await session.commit()
         await session.refresh(kyc_doc)
-        logger.info(f"Linked document {document_id} (type: {doc_type}) → KYC {kyc_id}")
+        logger.info(f"Linked document {document_id} (batch: {upload_batch}) → KYC {kyc_id}")
         return kyc_doc
 
 
@@ -179,7 +214,9 @@ async def get_kyc_doc_status(kyc_id: str) -> dict:
 
         # Get linked KYC documents
         docs_result = await session.execute(
-            select(KycDocument).where(KycDocument.kyc_id == kyc_id)
+            select(KycDocument)
+            .where(KycDocument.kyc_id == kyc_id)
+            .order_by(KycDocument.created_at)   # oldest first — the UI tracks the latest upload
         )
         kyc_docs = docs_result.scalars().all()
 
@@ -206,6 +243,10 @@ async def get_kyc_doc_status(kyc_id: str) -> dict:
             doc_statuses.append({
                 "document_id": kyc_doc.document_id,
                 "doc_type": kyc_doc.doc_type,
+                "upload_batch": kyc_doc.upload_batch,
+                # What the pipeline classified it as — may differ from the type
+                # picked in the KYC UI (doc_type).
+                "classified_type": doc.doc_type if doc else None,
                 "filename": filename,
                 "status": status,
                 "synced": kyc_doc.synced,
@@ -236,6 +277,8 @@ async def get_kyc_doc_status(kyc_id: str) -> dict:
             "ready_to_verify": ready,
             "images_pending": images_pending,
             "doc_statuses": doc_statuses,
+            # The most recent upload — the documents the user picks from.
+            "latest_batch": kyc_docs[-1].upload_batch if kyc_docs else None,
             "form_data": {
                 "applicant_name": app.applicant_name,
                 "fathers_name": app.fathers_name,

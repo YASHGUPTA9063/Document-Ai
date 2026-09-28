@@ -22,6 +22,11 @@ logger = logging.getLogger(__name__)
 # to upload, so it never appears on the checklist.
 OTHERS_KEY = "others"
 
+# Types that are classified like any other but never required in a batch. The
+# KYC application form is uploaded on its own, ahead of the identity documents,
+# so requiring it would hold every document batch waiting for it.
+NOT_REQUIRED_KEYS = {OTHERS_KEY, "kyc_form"}
+
 # Statuses that mean a document will never produce a doc_type. Anything else
 # without one is still on its way through the pipeline, and the batch is not
 # ready to be judged yet.
@@ -37,7 +42,7 @@ def build_required_types() -> list[dict]:
     return [
         {"doc_type": key, "label": label}
         for key, label in get_supported_doc_types().items()
-        if key != OTHERS_KEY
+        if key not in NOT_REQUIRED_KEYS
     ]
 
 

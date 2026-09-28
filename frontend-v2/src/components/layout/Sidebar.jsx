@@ -40,9 +40,9 @@ const navSections = [
     ],
   },
   {
-    label: 'KYC',
+    label: 'Customer',
     items: [
-      { label: 'KYC Process', icon: Shield, to: '/kyc-process' },
+      { label: 'Customer Onboarding', icon: Shield, to: '/kyc-process' },
     ],
   },
   {

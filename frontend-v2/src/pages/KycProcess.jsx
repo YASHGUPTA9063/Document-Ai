@@ -1,10 +1,10 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Shield, Plus, Sparkles, User, FileText, Upload as UploadIcon, UploadCloud,
   CheckCircle, XCircle, AlertTriangle, Loader2, Trash2, Eye,
   ChevronRight, ChevronLeft, Edit3, ArrowRight, X, RefreshCw,
-  CreditCard, Fingerprint, Calendar, MapPin, Users, Camera, PenTool, Image,
+  Calendar, Camera, PenTool, Users, MapPin,
 } from 'lucide-react';
 import { Modal } from '../components/ui/Modal';
 import {
@@ -116,6 +116,22 @@ function ResultChip({ result, score }) {
   );
 }
 
+
+/* An ID document can be verified against once OCR and its photo/signature crop are done */
+const isUsableIdDoc = (d) => d.status === 'completed' && d.images_status !== 'running';
+
+/* Status line for a processed ID document */
+function idDocStatus(d) {
+  if (isUsableIdDoc(d)) return { label: 'Ready', color: 'var(--success)' };
+  if (d.status === 'failed' || d.status === 'rejected') return { label: d.status === 'rejected' ? 'Rejected' : 'Failed', color: 'var(--danger)' };
+  if (d.status === 'awaiting_review') return { label: 'Awaiting manual review', color: 'var(--warn)' };
+  return { label: 'Processing…', color: 'var(--info)' };
+}
+
+/* The documents from the most recent upload — the ones the user picks from */
+const latestBatchDocs = (status) =>
+  (status?.doc_statuses || []).filter(d => d.upload_batch === (status.latest_batch ?? null));
+
 function ExtractedImage({ label, url, kind, size = 80 }) {
   return (
     <div style={{ textAlign: 'center' }}>
@@ -134,6 +150,7 @@ function ExtractedImage({ label, url, kind, size = 80 }) {
 /* ─── Main component ─── */
 export function KycProcess() {
   const navigate = useNavigate();
+  const location = useLocation();
 
   /* ── List state ── */
   const [applications, setApplications] = useState([]);
@@ -148,8 +165,8 @@ export function KycProcess() {
   /* ── Form state (Step 1) ── */
   const [formMode, setFormMode] = useState('manual'); // 'manual' | 'upload'
   const [fName, setFName] = useState('');
-  const [fFather, setFFather] = useState('');
   const [fDob, setFDob] = useState('');
+  const [fFather, setFFather] = useState('');
   const [fAddress, setFAddress] = useState('');
   const [fFile, setFFile] = useState(null);
   const [fFormDragActive, setFFormDragActive] = useState(false);
@@ -157,16 +174,16 @@ export function KycProcess() {
   const [fPhotoPreview, setFPhotoPreview] = useState(null);
   const [fSignature, setFSignature] = useState(null);
   const [fSignaturePreview, setFSignaturePreview] = useState(null);
-  const [formExtractStatus, setFormExtractStatus] = useState(null); // null | 'uploading' | 'processing' | 'completed' | 'failed'
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
-  /* ── Upload ID doc state (Step 3) ── */
-  const [idDocType, setIdDocType] = useState('passport');
-  const [idFile, setIdFile] = useState(null);
+  /* ── ID documents state (Step 3) ── */
+  const [idQueue, setIdQueue] = useState([]);         // files added but not uploaded: { key, file }
   const [uploading, setUploading] = useState(false);
+  const [uploadIndex, setUploadIndex] = useState(0);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [extractionStatus, setExtractionStatus] = useState(null);
+  const [verifyDocId, setVerifyDocId] = useState(null); // the processed document chosen for the KYC check
   const [dragActive, setDragActive] = useState(false);
 
   /* ── Result state (Step 4) ── */
@@ -177,23 +194,22 @@ export function KycProcess() {
   const photoInputRef = useRef(null);
   const signatureInputRef = useRef(null);
   const idFileInputRef = useRef(null);
-  const pollRef = useRef(null);
-  const formPollRef = useRef(null);
+  const pollRef = useRef(null);      // application list refresh
 
   /* ── Load applications ── */
   const loadApps = useCallback(async () => {
     try {
       setLoadError('');
       const data = await listKycApplications();
-      setApplications(Array.isArray(data) ? data : []);
+      const apps = Array.isArray(data) ? data : [];
+      setApplications(apps);
+      return apps;
     } catch (e) {
       setLoadError(e.message || 'Failed to load');
     } finally {
       setLoading(false);
     }
   }, []);
-
-  useEffect(() => { loadApps(); }, [loadApps]);
 
   /* ── Poll for active applications ── */
   useEffect(() => {
@@ -212,17 +228,33 @@ export function KycProcess() {
     setWizardStep(0);
     setActiveKycId(null);
     setFormMode('manual');
-    setFName(''); setFFather(''); setFDob(''); setFAddress('');
+    setFName(''); setFDob(''); setFFather(''); setFAddress('');
     setFFile(null); setFFormDragActive(false);
     setFPhoto(null); setFPhotoPreview(null);
     setFSignature(null); setFSignaturePreview(null);
-    setFormExtractStatus(null);
     setSubmitting(false); setSubmitError('');
-    setIdDocType('passport'); setIdFile(null);
-    setUploading(false); setUploadProgress(0); setExtractionStatus(null);
+    setIdQueue([]);
+    setUploading(false); setUploadIndex(0); setUploadProgress(0);
+    setExtractionStatus(null); setVerifyDocId(null);
     setVerifying(false); setVerifyResult(null);
     setDragActive(false);
-    clearInterval(formPollRef.current);
+  }, []);
+
+  /* ── Hand uploads off to the Processing page; it returns here when they finish ── */
+  const goToProcessing = useCallback((kycId, kind, documentIds) => {
+    navigate('/processing', { state: { kyc: { kycId, kind, documentIds } } });
+  }, [navigate]);
+
+  /* ── Load processed ID documents and preselect one to verify against ── */
+  const loadIdStatus = useCallback(async (kycId, preselect) => {
+    try {
+      const status = await getKycStatus(kycId);
+      setExtractionStatus(status);
+      const usable = latestBatchDocs(status).filter(isUsableIdDoc).map(d => d.document_id);
+      // Prefer one of the documents just processed, else the most recent usable one.
+      const fresh = usable.find(id => preselect?.includes(id));
+      setVerifyDocId(fresh || usable.at(-1) || null);
+    } catch { /* ignore */ }
   }, []);
 
   /* ── Handle photo/signature preview ── */
@@ -250,8 +282,8 @@ export function KycProcess() {
       // 1. Create the application record
       const data = await createKycApplication({
         applicant_name: fName.trim() || undefined,
-        fathers_name: fFather.trim() || undefined,
         date_of_birth: fDob.trim() || undefined,
+        fathers_name: fFather.trim() || undefined,
         address: fAddress.trim() || undefined,
         form_source: formMode,
       });
@@ -266,49 +298,12 @@ export function KycProcess() {
         try { await uploadKycAttachment(kycId, fSignature, 'signature'); } catch (e) { console.error('Signature upload failed:', e); }
       }
 
-      // 3. If upload mode, send the form through OCR pipeline
+      // 3. If upload mode, send the form through the OCR pipeline and follow it
+      //    on the Processing page — it brings the user back to review.
       if (formMode === 'upload' && fFile) {
-        setFormExtractStatus('uploading');
-        await uploadKycForm(kycId, fFile);
-        setFormExtractStatus('processing');
-
-        // Poll for extraction completion
-        const pollForm = async () => {
-          try {
-            const status = await getKycFormStatus(kycId);
-            if (status.status === 'completed') {
-              clearInterval(formPollRef.current);
-              setFormExtractStatus('completed');
-              // Populate form fields from extraction
-              if (status.populated) {
-                setFName(status.populated.applicant_name || '');
-                setFFather(status.populated.fathers_name || '');
-                setFDob(status.populated.date_of_birth || '');
-                setFAddress(status.populated.address || '');
-                // Attempt to fetch extracted images via backend URL
-                if (status.populated.photo_url) {
-                  // Prepend backend URL logic if needed, but relative URL should work with proxy
-                  setFPhotoPreview(status.populated.photo_url);
-                }
-                if (status.populated.signature_url) {
-                  setFSignaturePreview(status.populated.signature_url);
-                }
-              }
-              await loadApps();
-              setSubmitting(false);
-              setWizardStep(1); // Move to Review with extracted data
-            } else if (status.status === 'failed') {
-              clearInterval(formPollRef.current);
-              setFormExtractStatus('failed');
-              setSubmitError('Form extraction failed. You can try again or switch to manual entry.');
-              setSubmitting(false);
-            }
-            // otherwise keep polling (status is 'pending', 'processing', etc.)
-          } catch { /* ignore poll errors */ }
-        };
-        pollForm();
-        formPollRef.current = setInterval(pollForm, 3000);
-        return; // Don't set submitting=false yet — wait for OCR
+        const res = await uploadKycForm(kycId, fFile);
+        goToProcessing(kycId, 'form', [res.document_id]);
+        return;
       }
 
       // Manual mode — go to review
@@ -317,47 +312,74 @@ export function KycProcess() {
     } catch (e) {
       setSubmitError(e.message || 'Failed to create application');
     } finally {
-      if (formMode === 'manual') setSubmitting(false);
+      setSubmitting(false);
     }
-  }, [formMode, fName, fFather, fDob, fAddress, fFile, fPhoto, fSignature, loadApps]);
+  }, [formMode, fName, fDob, fFather, fAddress, fFile, fPhoto, fSignature, loadApps, goToProcessing]);
 
-  /* ── Step 3: Upload ID document ── */
-  const handleUploadIdDoc = useCallback(async () => {
-    if (!idFile || !activeKycId) return;
-    setUploading(true);
-    setUploadProgress(0);
+  /* ── Step 2: Save reviewed details — verification compares against these ── */
+  const handleConfirmReview = useCallback(async () => {
+    if (!activeKycId) return;
+    setSubmitting(true);
+    setSubmitError('');
     try {
-      await uploadKycDocument(activeKycId, idFile, idDocType, (pct) => setUploadProgress(pct));
-      setUploadProgress(100);
-
-      // Start polling extraction status
-      const pollExtraction = async () => {
-        try {
-          const status = await getKycStatus(activeKycId);
-          setExtractionStatus(status);
-          if (status.ready_to_verify) {
-            clearInterval(pollRef.current);
-            await loadApps();
-          } else if (status.failed_docs > 0) {
-            clearInterval(pollRef.current);
-          }
-        } catch { /* ignore */ }
-      };
-      pollExtraction();
-      pollRef.current = setInterval(pollExtraction, 3000);
+      await updateKycForm(activeKycId, {
+        applicant_name: fName.trim(),
+        date_of_birth: fDob.trim(),
+        fathers_name: fFather.trim(),
+        address: fAddress.trim(),
+      });
+      await Promise.all([loadApps(), loadIdStatus(activeKycId)]);
+      setWizardStep(2);
     } catch (e) {
-      setSubmitError(e.message || 'Upload failed');
+      setSubmitError(e.message || 'Failed to save application details');
     } finally {
+      setSubmitting(false);
+    }
+  }, [activeKycId, fName, fDob, fFather, fAddress, loadApps, loadIdStatus]);
+
+  /* ── Step 3: Queue ID documents ── */
+  const addIdFiles = useCallback((files) => {
+    const added = Array.from(files || []).map(file => ({
+      key: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2, 7)}`,
+      file,
+    }));
+    if (added.length) setIdQueue(q => [...q, ...added]);
+  }, []);
+
+  /* ── Step 3: Upload the added documents, then follow them on the Processing page ── */
+  const handleUploadIdDocs = useCallback(async () => {
+    const toUpload = idQueue;
+    if (!toUpload.length || !activeKycId) return;
+    setUploading(true);
+    setSubmitError('');
+    const documentIds = [];
+    const uploadedKeys = [];
+    let batch = null; // every file in this upload shares the batch the first one gets
+    try {
+      for (let i = 0; i < toUpload.length; i++) {
+        setUploadIndex(i);
+        setUploadProgress(0);
+        const res = await uploadKycDocument(activeKycId, toUpload[i].file, batch, setUploadProgress);
+        batch = res.upload_batch;
+        documentIds.push(res.document_id);
+        uploadedKeys.push(toUpload[i].key);
+      }
+      goToProcessing(activeKycId, 'id', documentIds);
+    } catch (e) {
+      // Drop what already went up so a retry doesn't upload it twice.
+      setIdQueue(q => q.filter(item => !uploadedKeys.includes(item.key)));
+      if (uploadedKeys.length) await loadIdStatus(activeKycId);
+      setSubmitError(`${e.message || 'Upload failed'}${uploadedKeys.length ? ` — ${uploadedKeys.length} of ${toUpload.length} uploaded before the error.` : ''}`);
       setUploading(false);
     }
-  }, [idFile, activeKycId, idDocType, loadApps]);
+  }, [idQueue, activeKycId, goToProcessing, loadIdStatus]);
 
   /* ── Step 4: Run verification ── */
   const handleVerify = useCallback(async () => {
     if (!activeKycId) return;
     setVerifying(true);
     try {
-      const result = await runKycVerification(activeKycId);
+      const result = await runKycVerification(activeKycId, verifyDocId ? [verifyDocId] : undefined);
       setVerifyResult(result);
       await loadApps();
     } catch (e) {
@@ -365,7 +387,7 @@ export function KycProcess() {
     } finally {
       setVerifying(false);
     }
-  }, [activeKycId, loadApps]);
+  }, [activeKycId, verifyDocId, loadApps]);
 
   /* ── View existing result ── */
   const handleViewResult = useCallback(async (kycId) => {
@@ -382,45 +404,83 @@ export function KycProcess() {
   }, []);
 
   /* ── Resume wizard for existing application ── */
-  const handleResume = useCallback(async (app) => {
+  const handleResume = useCallback(async (app, { documentIds, error } = {}) => {
+    // Still being read by the pipeline → follow it on the Processing page.
+    if (app.status === 'form_submitted' && app.form_source === 'uploaded') {
+      try {
+        const s = await getKycFormStatus(app.kyc_id);
+        if (!['completed', 'failed', 'no_form', 'not_found'].includes(s.status)) {
+          goToProcessing(app.kyc_id, 'form', app.form_document_id ? [app.form_document_id] : []);
+          return;
+        }
+        // The list row may predate the extraction — prefer the freshly populated fields.
+        if (s.status === 'completed' && s.populated) {
+          app = {
+            ...app,
+            applicant_name: s.populated.applicant_name || app.applicant_name,
+            date_of_birth: s.populated.date_of_birth || app.date_of_birth,
+            fathers_name: s.populated.fathers_name || app.fathers_name,
+            address: s.populated.address || app.address,
+            photo_url: s.populated.photo_url || app.photo_url,
+            signature_url: s.populated.signature_url || app.signature_url,
+          };
+        }
+      } catch { /* fall through to review */ }
+    }
+    if (app.status === 'extracting') {
+      try {
+        const s = await getKycStatus(app.kyc_id);
+        const pending = (s.doc_statuses || [])
+          .filter(d => !['completed', 'failed', 'rejected'].includes(d.status) || d.images_status === 'running')
+          .map(d => d.document_id);
+        if (pending.length) {
+          goToProcessing(app.kyc_id, 'id', pending);
+          return;
+        }
+      } catch { /* fall through to the documents step */ }
+    }
+
+    resetWizard();
     setActiveKycId(app.kyc_id);
     setFName(app.applicant_name || '');
-    setFFather(app.fathers_name || '');
     setFDob(app.date_of_birth || '');
+    setFFather(app.fathers_name || '');
     setFAddress(app.address || '');
+    setFPhotoPreview(app.photo_url || null);
+    setFSignaturePreview(app.signature_url || null);
     setWizardOpen(true);
+    if (error) setSubmitError(error);
 
     if (app.status === 'form_submitted') {
       setWizardStep(1); // Go to review
-    } else if (app.status === 'ready' || app.status === 'doc_uploaded') {
-      setWizardStep(2); // Upload ID doc step — also try to load status
-      try {
-        const status = await getKycStatus(app.kyc_id);
-        setExtractionStatus(status);
-      } catch { /* ignore */ }
-    } else if (app.status === 'extracting') {
-      setWizardStep(2);
-      // Start polling
-      const pollExtraction = async () => {
-        try {
-          const status = await getKycStatus(app.kyc_id);
-          setExtractionStatus(status);
-          if (status.ready_to_verify) {
-            clearInterval(pollRef.current);
-            await loadApps();
-          }
-        } catch { /* ignore */ }
-      };
-      pollExtraction();
-      pollRef.current = setInterval(pollExtraction, 3000);
+    } else if (['ready', 'doc_uploaded', 'extracting'].includes(app.status)) {
+      setWizardStep(2); // ID documents step
+      loadIdStatus(app.kyc_id, documentIds);
     } else if (['completed', 'verified', 'failed'].includes(app.status)) {
       handleViewResult(app.kyc_id);
     }
-  }, [loadApps, handleViewResult]);
+  }, [resetWizard, goToProcessing, loadIdStatus, handleViewResult]);
+
+  /* ── Initial load; when returning from the Processing page (/kyc-process?kyc_id=…) resume that application ── */
+  useEffect(() => {
+    const kycId = new URLSearchParams(location.search).get('kyc_id');
+    const { documentIds, formFailed } = location.state || {};
+    if (kycId) navigate('/kyc-process', { replace: true });
+    loadApps().then((apps) => {
+      const app = kycId && apps?.find(a => a.kyc_id === kycId);
+      if (!app) return;
+      handleResume(app, {
+        documentIds,
+        error: formFailed ? 'Form extraction failed — enter the details manually below, or start over with a clearer copy.' : undefined,
+      });
+    });
+    // Mount only — the query string is consumed (and cleared) on the first run.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /* ── Delete ── */
   const handleDelete = useCallback(async (kycId) => {
-    if (!window.confirm('Delete this KYC application? This cannot be undone.')) return;
+    if (!window.confirm('Delete this customer? This cannot be undone.')) return;
     try {
       await deleteKycApplication(kycId);
       setApplications(prev => prev.filter(a => a.kyc_id !== kycId));
@@ -438,8 +498,12 @@ export function KycProcess() {
   const handleDrop = useCallback((e) => {
     e.preventDefault(); e.stopPropagation();
     setDragActive(false);
-    if (e.dataTransfer.files?.[0]) setIdFile(e.dataTransfer.files[0]);
-  }, []);
+    addIdFiles(e.dataTransfer.files);
+  }, [addIdFiles]);
+
+  /* ── ID documents ── */
+  const processedIdDocs = latestBatchDocs(extractionStatus);
+  const verifyDoc = processedIdDocs.find(d => d.document_id === verifyDocId);
 
   /* ── Stats ── */
   const totalCount = applications.length;
@@ -460,17 +524,17 @@ export function KycProcess() {
       <div className="claim-page-header" style={{ marginBottom: 20 }}>
         <div>
           <div className="chip" style={{ marginBottom: 6 }}>
-            <Shield size={12} /> KYC Verification
+            <Shield size={12} /> Customer Verification
           </div>
           <div className="claim-page-title">
-            KYC <span className="grad">Process</span>
+            Customer <span className="grad">Onboarding</span>
           </div>
           <div className="claim-page-sub">
             Submit applicant details, upload identity documents, and run AI-powered verification.
           </div>
         </div>
         <button className="btn btn-primary" onClick={() => { resetWizard(); setWizardOpen(true); }}>
-          <Plus size={14} /> New KYC Application
+          <Plus size={14} /> New Customer
         </button>
       </div>
 
@@ -511,7 +575,7 @@ export function KycProcess() {
         <div className="card" style={{ marginBottom: 24, position: 'relative', overflow: 'visible' }}>
           <button
             className="btn btn-ghost btn-sm"
-            onClick={() => { resetWizard(); setWizardOpen(false); clearInterval(pollRef.current); }}
+            onClick={() => { resetWizard(); setWizardOpen(false); }}
             style={{ position: 'absolute', top: 12, right: 12, padding: 4 }}
             title="Close"
           >
@@ -527,7 +591,7 @@ export function KycProcess() {
                 Applicant Details
               </div>
               <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)', marginBottom: 20 }}>
-                Fill in the applicant's KYC details manually, or upload a pre-filled application form for automatic extraction.
+                Fill in the customer's details manually, or upload a pre-filled application form for automatic extraction.
               </div>
 
               {/* Mode toggle — styled like claim priority selector */}
@@ -558,7 +622,7 @@ export function KycProcess() {
 
               {formMode === 'manual' ? (
                 <>
-                  {/* Row 1: Name + Father's Name */}
+                  {/* Row 1: Name + DOB */}
                   <div className="claim-form-grid">
                     <div>
                       <label className="claim-form-label">
@@ -574,22 +638,6 @@ export function KycProcess() {
                     </div>
                     <div>
                       <label className="claim-form-label">
-                        <Users size={12} style={{ display: 'inline', verticalAlign: '-1px', marginRight: 4 }} />
-                        Father's Name
-                      </label>
-                      <input
-                        className="styled-input"
-                        value={fFather}
-                        onChange={e => setFFather(e.target.value)}
-                        placeholder="e.g. Vijay Kumar Sharma"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Row 2: DOB + (placeholder for future) */}
-                  <div className="claim-form-grid" style={{ marginTop: 14 }}>
-                    <div>
-                      <label className="claim-form-label">
                         <Calendar size={12} style={{ display: 'inline', verticalAlign: '-1px', marginRight: 4 }} />
                         Date of Birth
                       </label>
@@ -600,30 +648,38 @@ export function KycProcess() {
                         placeholder="DD-MM-YYYY (e.g. 15-03-1995)"
                       />
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: 2 }}>
-                      <div className="claim-form-note" style={{ margin: 0, padding: '8px 12px', width: '100%' }}>
-                        <strong>Tip:</strong> Dates in any format (DD/MM/YYYY, YYYY-MM-DD, etc.) are normalised during verification.
-                      </div>
+                    <div>
+                      <label className="claim-form-label">
+                        <Users size={12} style={{ display: 'inline', verticalAlign: '-1px', marginRight: 4 }} />
+                        Father's Name
+                      </label>
+                      <input
+                        className="styled-input"
+                        value={fFather}
+                        onChange={e => setFFather(e.target.value)}
+                        placeholder="e.g. Suresh Sharma"
+                      />
+                    </div>
+                    <div style={{ gridColumn: '1 / -1' }}>
+                      <label className="claim-form-label">
+                        <MapPin size={12} style={{ display: 'inline', verticalAlign: '-1px', marginRight: 4 }} />
+                        Address
+                      </label>
+                      <textarea
+                        className="styled-input"
+                        value={fAddress}
+                        onChange={e => setFAddress(e.target.value)}
+                        placeholder="House / street, locality, city, state, PIN"
+                        rows={2}
+                        style={{ resize: 'vertical', fontFamily: 'inherit' }}
+                      />
                     </div>
                   </div>
-
-                  {/* Row 3: Address (full width) */}
-                  <div style={{ marginTop: 14 }}>
-                    <label className="claim-form-label">
-                      <MapPin size={12} style={{ display: 'inline', verticalAlign: '-1px', marginRight: 4 }} />
-                      Address
-                    </label>
-                    <textarea
-                      className="styled-input"
-                      rows={3}
-                      value={fAddress}
-                      onChange={e => setFAddress(e.target.value)}
-                      placeholder="Full residential address — e.g. 42, MG Road, Sector 14, Gurugram, Haryana 122001"
-                      style={{ minHeight: 80, resize: 'vertical', width: '100%', fontFamily: 'inherit' }}
-                    />
+                  <div className="claim-form-note" style={{ marginTop: 10, padding: '8px 12px' }}>
+                    <strong>Tip:</strong> Dates in any format (DD/MM/YYYY, YYYY-MM-DD, etc.) are normalised during verification.
                   </div>
 
-                  {/* Row 4: Photo + Signature uploads */}
+                  {/* Row 2: Photo + Signature uploads */}
                   <div className="claim-form-grid" style={{ marginTop: 18 }}>
                     {/* Photo */}
                     <div>
@@ -779,7 +835,7 @@ export function KycProcess() {
                   )}
 
                   <div className="claim-form-note" style={{ marginTop: 12 }}>
-                    <strong>Note:</strong> The uploaded form will be processed through the document OCR pipeline. Extracted fields (Name, Father's Name, DOB, Address) will auto-populate the application.
+                    <strong>Note:</strong> After upload you'll be taken to the Processing page while the form runs through the OCR pipeline. When it's done you'll come back here to review the extracted name, date of birth, father's name, address, photo and signature.
                   </div>
                 </div>
               )}
@@ -805,8 +861,8 @@ export function KycProcess() {
                 >
                   {submitting ? <Loader2 size={14} className="spin" /> : <ArrowRight size={14} />}
                   {submitting
-                    ? (formExtractStatus === 'processing' ? 'Extracting from form…' : 'Creating…')
-                    : (formMode === 'upload' ? 'Upload & Extract' : 'Create & Continue')
+                    ? (formMode === 'upload' ? 'Uploading…' : 'Creating…')
+                    : (formMode === 'upload' ? 'Upload & Process' : 'Create & Continue')
                   }
                 </button>
               </div>
@@ -820,10 +876,10 @@ export function KycProcess() {
                 Review Application Data
               </div>
               <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 20 }}>
-                Confirm the applicant's details before proceeding to document upload.
+                Confirm the applicant's details before proceeding to document upload. These are the values the ID document is verified against — correct anything the extraction got wrong.
               </div>
 
-              {/* KYC Card */}
+              {/* Customer Card */}
               <div style={{
                 background: 'linear-gradient(135deg, rgba(79,110,247,0.06) 0%, rgba(168,85,247,0.04) 100%)',
                 border: '1px solid rgba(79,110,247,0.2)',
@@ -839,24 +895,39 @@ export function KycProcess() {
                   </div>
                   <div>
                     <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>{fName || '—'}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>KYC Application · {activeKycId}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>Customer · {activeKycId}</div>
                   </div>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                   {[
-                    { label: 'Full Name', value: fName },
-                    { label: "Father's Name", value: fFather },
-                    { label: 'Date of Birth', value: fDob },
-                    { label: 'Address', value: fAddress },
-                  ].map(({ label, value }) => (
-                    <div key={label} style={{ padding: '10px 14px', borderRadius: 8, background: 'rgba(0,0,0,0.06)' }}>
+                    { label: 'Full Name', value: fName, set: setFName },
+                    { label: 'Date of Birth', value: fDob, set: setFDob },
+                    { label: "Father's Name", value: fFather, set: setFFather },
+                    { label: 'Address', value: fAddress, set: setFAddress, wide: true },
+                  ].map(({ label, value, set, wide }) => (
+                    <div key={label} style={{ padding: '10px 14px', borderRadius: 8, background: 'rgba(0,0,0,0.06)', gridColumn: wide ? '1 / -1' : undefined }}>
                       <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>
                         {label}
                       </div>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', wordBreak: 'break-word' }}>
-                        {value || <span style={{ color: 'var(--muted)', fontStyle: 'italic' }}>Not provided</span>}
-                      </div>
+                      {wide ? (
+                        <textarea
+                          className="styled-input"
+                          value={value}
+                          onChange={e => set(e.target.value)}
+                          placeholder="Not provided"
+                          rows={2}
+                          style={{ fontSize: 14, fontWeight: 600, width: '100%', resize: 'vertical', fontFamily: 'inherit' }}
+                        />
+                      ) : (
+                        <input
+                          className="styled-input"
+                          value={value}
+                          onChange={e => set(e.target.value)}
+                          placeholder="Not provided"
+                          style={{ fontSize: 14, fontWeight: 600, width: '100%' }}
+                        />
+                      )}
                     </div>
                   ))}
                 </div>
@@ -879,124 +950,134 @@ export function KycProcess() {
                 )}
               </div>
 
+              {submitError && (
+                <div style={{ marginBottom: 12, fontSize: 12, color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <AlertTriangle size={13} /> {submitError}
+                </div>
+              )}
+
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
                 <button className="btn btn-ghost" onClick={() => setWizardStep(0)} style={{ gap: 6, display: 'flex', alignItems: 'center' }}>
                   <ChevronLeft size={14} /> Back
                 </button>
-                <button className="btn btn-primary" onClick={() => setWizardStep(2)} style={{ padding: '10px 28px', fontSize: 13, fontWeight: 600, gap: 6, display: 'flex', alignItems: 'center' }}>
-                  <ArrowRight size={14} /> Upload ID Document
+                <button className="btn btn-primary" onClick={handleConfirmReview} disabled={submitting || !fName.trim()} style={{ padding: '10px 28px', fontSize: 13, fontWeight: 600, gap: 6, display: 'flex', alignItems: 'center' }}>
+                  {submitting ? <Loader2 size={14} className="spin" /> : <ArrowRight size={14} />} Upload ID Document
                 </button>
               </div>
             </div>
           )}
 
-          {/* ─── STEP 3: Upload Identity Document ─── */}
+          {/* ─── STEP 3: Identity Documents ─── */}
           {wizardStep === 2 && (
             <div style={{ animation: 'fadeIn 0.3s ease' }}>
               <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>
-                Upload Identity Document
+                Identity Documents
               </div>
               <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 20 }}>
-                Upload a Passport or Driving License for verification against the application data.
+                Upload one or more identity documents, then choose the one to use for customer verification.
               </div>
 
-              {/* Document type selection */}
-              <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
-                {[
-                  { key: 'passport', icon: <CreditCard size={14} />, label: 'Passport' },
-                  { key: 'driving_license', icon: <Fingerprint size={14} />, label: 'Driving License' },
-                ].map(({ key, icon, label }) => (
-                  <button
-                    key={key}
-                    className={`btn ${idDocType === key ? 'btn-primary' : 'btn-outline'}`}
-                    onClick={() => setIdDocType(key)}
-                    disabled={uploading || extractionStatus?.ready_to_verify}
-                    style={{ flex: 1, padding: '10px 16px', fontSize: 13, gap: 6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                  >
-                    {icon} {label}
-                  </button>
-                ))}
-              </div>
-
-              {/* Upload zone OR extraction status */}
-              {!extractionStatus?.ready_to_verify ? (
-                <>
-                  <div
-                    style={{
-                      border: `2px dashed ${dragActive ? 'var(--accent)' : 'var(--border)'}`,
-                      borderRadius: 12, padding: '36px 20px', textAlign: 'center',
-                      background: dragActive ? 'rgba(79,110,247,0.05)' : 'var(--surface-sunken)',
-                      cursor: uploading ? 'default' : 'pointer',
-                      transition: 'all 0.2s ease',
-                    }}
-                    onDragEnter={handleDrag} onDragOver={handleDrag} onDragLeave={handleDrag}
-                    onDrop={handleDrop}
-                    onClick={() => !uploading && idFileInputRef.current?.click()}
-                  >
-                    {uploading ? (
-                      <>
-                        <Loader2 size={32} className="spin" style={{ color: 'var(--accent)', marginBottom: 8 }} />
-                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Uploading & Extracting…</div>
-                        <div style={{ width: '60%', height: 4, borderRadius: 2, background: 'var(--border)', margin: '10px auto 0', overflow: 'hidden' }}>
-                          <div style={{ width: `${uploadProgress}%`, height: '100%', background: 'var(--accent)', borderRadius: 2, transition: 'width 0.3s ease' }} />
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <UploadCloud size={36} style={{ color: 'var(--accent)', marginBottom: 10 }} />
-                        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>
-                          {idFile ? idFile.name : 'Drop your document here or click to browse'}
-                        </div>
-                        <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4 }}>
-                          PDF, PNG, JPG accepted · Will be processed through OCR pipeline
-                        </div>
-                      </>
-                    )}
-                    <input ref={idFileInputRef} type="file" hidden accept=".pdf,.png,.jpg,.jpeg,.tiff,.bmp" onChange={e => setIdFile(e.target.files?.[0] || null)} />
-                  </div>
-
-                  {/* Extraction progress for docs being processed */}
-                  {extractionStatus && !extractionStatus.ready_to_verify && extractionStatus.total_docs > 0 && (
-                    <div style={{ marginTop: 14, padding: '12px 16px', borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--border)' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
-                        <Loader2 size={13} className="spin" style={{ color: 'var(--info)' }} />
-                        <span style={{ color: 'var(--text)' }}>
-                          {extractionStatus.completed_docs < extractionStatus.total_docs
-                            ? `Extracting document data… (${extractionStatus.completed_docs}/${extractionStatus.total_docs} complete)`
-                            : 'Extracting photo & signature from the ID…'}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <div style={{
-                  padding: '16px 20px', borderRadius: 10,
-                  background: 'var(--success-dim)', border: '1px solid var(--success-border)',
-                  display: 'flex', alignItems: 'center', gap: 10,
-                }}>
-                  <CheckCircle size={18} style={{ color: 'var(--success)' }} />
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--success)' }}>Document Extraction Complete</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-                      {extractionStatus.completed_docs} document(s) processed. Ready for verification.
-                    </div>
+              {/* Documents already processed for this application */}
+              {processedIdDocs.length > 0 && (
+                <div style={{ marginBottom: 20 }}>
+                  <label className="claim-form-label" style={{ marginBottom: 8, display: 'block' }}>
+                    Uploaded documents
+                    <span style={{ fontWeight: 400, color: 'var(--muted)', marginLeft: 6 }}>(select the one to use for customer verification)</span>
+                  </label>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {processedIdDocs.map(ds => {
+                      const usable = isUsableIdDoc(ds);
+                      const checked = verifyDocId === ds.document_id;
+                      const st = idDocStatus(ds);
+                      return (
+                        <label key={ds.document_id} style={{
+                          display: 'flex', gap: 12, alignItems: 'flex-start',
+                          padding: '12px 16px', borderRadius: 10,
+                          background: 'var(--surface)',
+                          border: `1px solid ${checked ? 'var(--accent)' : 'var(--border)'}`,
+                          cursor: usable ? 'pointer' : 'default', opacity: usable ? 1 : 0.75,
+                        }}>
+                          <input
+                            type="radio"
+                            name="kyc-verify-doc"
+                            checked={checked}
+                            disabled={!usable}
+                            onChange={() => setVerifyDocId(ds.document_id)}
+                            style={{ marginTop: 3 }}
+                          />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{ds.filename}</span>
+                              <span style={{ fontSize: 11, fontWeight: 600, color: st.color }}>· {st.label}</span>
+                            </div>
+                            {usable && (
+                              <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', marginTop: 10 }}>
+                                <ExtractedImage label="Photo" url={ds.photo_url} kind="photo" size={64} />
+                                <ExtractedImage label="Signature" url={ds.signature_url} kind="signature" size={64} />
+                              </div>
+                            )}
+                          </div>
+                        </label>
+                      );
+                    })}
                   </div>
                 </div>
               )}
 
-              {/* Photo / signature extracted from the ID */}
-              {extractionStatus?.ready_to_verify && (extractionStatus.doc_statuses || []).map(ds => (
-                <div key={ds.document_id} style={{ marginTop: 12, padding: '12px 16px', borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--border)' }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
-                    Extracted from {ds.doc_type === 'passport' ? 'Passport' : 'Driving License'}
-                  </div>
-                  <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end' }}>
-                    <ExtractedImage label="Photo" url={ds.photo_url} kind="photo" />
-                    <ExtractedImage label="Signature" url={ds.signature_url} kind="signature" />
-                  </div>
+              {/* Add new documents */}
+              <label className="claim-form-label" style={{ marginBottom: 8, display: 'block' }}>
+                {processedIdDocs.length > 0 ? 'Upload a new set of documents' : 'Upload documents'}
+              </label>
+              <div
+                className={`bulk-upload-zone ${dragActive ? 'drag-active' : ''}`}
+                onDragEnter={handleDrag} onDragOver={handleDrag} onDragLeave={handleDrag}
+                onDrop={handleDrop}
+                onClick={() => !uploading && idFileInputRef.current?.click()}
+              >
+                <UploadCloud className="bulk-upload-icon" size={28} />
+                <div className="bulk-upload-title">
+                  Drag & drop documents here or <span style={{ color: 'var(--accent)', textDecoration: 'underline' }}>browse</span>
                 </div>
-              ))}
+                <div className="bulk-upload-sub">PDF, PNG, JPG accepted · add as many as you need</div>
+                <input
+                  ref={idFileInputRef}
+                  type="file"
+                  hidden
+                  multiple
+                  accept=".pdf,.png,.jpg,.jpeg,.tiff,.bmp"
+                  onChange={e => { addIdFiles(e.target.files); e.target.value = ''; }}
+                />
+              </div>
+
+              {idQueue.length > 0 && (
+                <div className="bulk-file-list">
+                  {idQueue.map(item => (
+                    <div key={item.key} className="bulk-file-item" style={{ gap: 10 }}>
+                      <div className="bulk-file-info" style={{ flex: 1, minWidth: 0 }}>
+                        <FileText size={14} color="var(--accent)" />
+                        <span className="bulk-file-name" title={item.file.name}>{item.file.name}</span>
+                        <span className="bulk-file-size">({formatFileSize(item.file.size)})</span>
+                      </div>
+                      <button
+                        className="btn btn-ghost btn-icon btn-sm"
+                        onClick={() => setIdQueue(q => q.filter(x => x.key !== item.key))}
+                        disabled={uploading}
+                        title="Remove file"
+                        type="button"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {uploading && (
+                <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-dim)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Loader2 size={13} className="spin" />
+                  Uploading {uploadIndex + 1} of {idQueue.length} · {uploadProgress}%
+                </div>
+              )}
 
               {submitError && (
                 <div style={{ marginTop: 12, fontSize: 12, color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1005,18 +1086,19 @@ export function KycProcess() {
               )}
 
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginTop: 20 }}>
-                <button className="btn btn-ghost" onClick={() => setWizardStep(1)} style={{ gap: 6, display: 'flex', alignItems: 'center' }}>
+                <button className="btn btn-ghost" onClick={() => setWizardStep(1)} disabled={uploading} style={{ gap: 6, display: 'flex', alignItems: 'center' }}>
                   <ChevronLeft size={14} /> Back
                 </button>
                 <div style={{ display: 'flex', gap: 10 }}>
-                  {!extractionStatus?.ready_to_verify && idFile && !uploading && (
-                    <button className="btn btn-primary" onClick={handleUploadIdDoc} style={{ padding: '10px 24px', fontSize: 13, fontWeight: 600, gap: 6, display: 'flex', alignItems: 'center' }}>
-                      <UploadIcon size={14} /> Upload & Extract
+                  {idQueue.length > 0 && (
+                    <button className="btn btn-primary" onClick={handleUploadIdDocs} disabled={uploading} style={{ padding: '10px 24px', fontSize: 13, fontWeight: 600, gap: 6, display: 'flex', alignItems: 'center' }}>
+                      {uploading ? <Loader2 size={14} className="spin" /> : <UploadIcon size={14} />}
+                      Upload & Process {idQueue.length} {idQueue.length === 1 ? 'document' : 'documents'}
                     </button>
                   )}
-                  {extractionStatus?.ready_to_verify && (
+                  {idQueue.length === 0 && verifyDoc && (
                     <button className="btn btn-primary" onClick={() => setWizardStep(3)} style={{ padding: '10px 28px', fontSize: 13, fontWeight: 600, gap: 6, display: 'flex', alignItems: 'center' }}>
-                      <ArrowRight size={14} /> Run Verification
+                      <ArrowRight size={14} /> Verify with {verifyDoc.filename}
                     </button>
                   )}
                 </div>
@@ -1028,10 +1110,10 @@ export function KycProcess() {
           {wizardStep === 3 && (
             <div style={{ animation: 'fadeIn 0.3s ease' }}>
               <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>
-                KYC Verification Result
+                Customer Verification Result
               </div>
               <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 20 }}>
-                Cross-validation of form data against the uploaded identity document.
+                Cross-validation of form data against the selected identity document.
               </div>
 
               {!verifyResult && !verifying && (
@@ -1048,7 +1130,7 @@ export function KycProcess() {
                     boxShadow: '0 4px 20px rgba(79,110,247,0.35)',
                     borderRadius: 10,
                   }}>
-                    <Shield size={16} /> Run KYC Verification
+                    <Shield size={16} /> Run Customer Verification
                   </button>
                 </div>
               )}
@@ -1131,6 +1213,11 @@ export function KycProcess() {
                               {check[urlKey]
                                 ? <ExtractedImage label={check[valKey]} url={check[urlKey]} kind={kind} size={56} />
                                 : (check[valKey] || <em style={{ color: 'var(--muted)' }}>—</em>)}
+                              {valKey === 'doc_value' && check.doc_source && (
+                                <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'inherit', marginTop: 3 }}>
+                                  from {check.doc_source}
+                                </div>
+                              )}
                             </span>
                           );
                         })}
@@ -1195,8 +1282,8 @@ export function KycProcess() {
       ) : applications.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: '50px 20px' }}>
           <Shield size={40} style={{ color: 'var(--muted)', margin: '0 auto 12px', opacity: 0.3 }} />
-          <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>No KYC Applications</div>
-          <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>Create a new application to start the KYC verification process.</div>
+          <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>No Customers</div>
+          <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>Add a new customer to start the onboarding process.</div>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

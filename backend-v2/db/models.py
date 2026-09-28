@@ -279,7 +279,8 @@ class KycDocument(Base):
     id = Column(String, primary_key=True, default=generate_uuid)
     kyc_id = Column(String, ForeignKey("kyc_applications.kyc_id"), nullable=False, index=True)
     document_id = Column(String, ForeignKey("documents.id"), nullable=False)
-    doc_type = Column(String, nullable=False)   # "passport" | "driving_license"
+    doc_type = Column(String, nullable=True)    # legacy: "passport" | "driving_license"; no longer chosen at upload
+    upload_batch = Column(String, nullable=True)     # shared by the documents added in one upload
     extracted_fields = Column(JSON, nullable=True)   # synced from OCR after extraction
     synced = Column(String, nullable=False, default="pending")  # pending | synced | failed
     photo_path = Column(String, nullable=True)       # cardholder photo cropped from the ID

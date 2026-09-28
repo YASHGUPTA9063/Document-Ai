@@ -25,6 +25,11 @@ class UpdateKycFormRequest(BaseModel):
     address: Optional[str] = None
 
 
+class KycVerifyRequest(BaseModel):
+    # ID documents to verify against; None means every extracted document.
+    document_ids: Optional[List[str]] = None
+
+
 class KycDecisionRequest(BaseModel):
     decision: str          # "approve" or "reject"
     notes: Optional[str] = None

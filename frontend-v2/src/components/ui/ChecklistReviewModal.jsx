@@ -25,8 +25,12 @@ const WATCH_TIMEOUT = 120000;  // give up following after 2 min; Re-check still 
  * Everything here is batch-scoped, not document-scoped: releasing one document
  * and not its siblings would leave the batch half-processed against a decision
  * that was meant to cover all of it.
+ *
+ * `onUploadFiles(files)` replaces the generic upload for callers whose documents
+ * must go through their own endpoint (KYC links each file to its application).
+ * It must upload into `batchId` and resolve to the number of files added.
  */
-export function ChecklistReviewModal({ batchId, open, onClose, onDecided, toast }) {
+export function ChecklistReviewModal({ batchId, open, onClose, onDecided, toast, onUploadFiles }) {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -99,9 +103,11 @@ export function ChecklistReviewModal({ batchId, open, onClose, onDecided, toast 
     try {
       // Same batchId — the new documents join the set the gate is holding, which
       // is what makes them count rather than starting an unrelated upload.
-      const result = await uploadDocumentsBatch(files, null, { batchId });
+      const added = onUploadFiles
+        ? await onUploadFiles(files)
+        : (await uploadDocumentsBatch(files, null, { batchId })).succeeded;
       toast?.(
-        `${result.succeeded} document(s) added to this batch — classifying…`,
+        `${added} document(s) added to this batch — classifying…`,
         'success',
       );
       await load();
@@ -160,7 +166,7 @@ export function ChecklistReviewModal({ batchId, open, onClose, onDecided, toast 
           Loading the batch checklist…
         </div>
       ) : (
-        <div style={{ maxWidth: 720 }}>
+        <div>
           {/* Agent summary */}
           <div style={{
             display: 'flex', gap: 10, alignItems: 'flex-start',
@@ -193,7 +199,7 @@ export function ChecklistReviewModal({ batchId, open, onClose, onDecided, toast 
           </div>
 
           {/* Checklist lines */}
-          <div style={{ maxHeight: 340, overflowY: 'auto', paddingRight: 4 }}>
+          <div>
             {required.map((entry) => {
               const hit = present.find((p) => p.doc_type === entry.doc_type);
               return (

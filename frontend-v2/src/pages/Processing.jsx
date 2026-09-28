@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { RefreshCw, Cpu, CheckCircle, ListTodo, FileText, AlertCircle, ChevronDown, ChevronUp, Scissors, ListChecks } from 'lucide-react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { RefreshCw, Cpu, CheckCircle, ListTodo, FileText, AlertCircle, ChevronDown, ChevronUp, Scissors, ListChecks, Shield, Loader2 } from 'lucide-react';
 import { useApp } from '../store/AppStore';
 import {
   ACTIVE_STATUSES, REVIEW_STATUSES, SPLIT_REVIEW_STATUS,
-  CHECKLIST_REVIEW_STATUS, CHECKLIST_GATE_STATUSES,
+  CHECKLIST_REVIEW_STATUS, CHECKLIST_HOLD_STATUS, CHECKLIST_GATE_STATUSES,
 } from '../store/documentStatus';
 import { useDocumentList } from '../hooks/useDocumentList';
 import { useDocumentPoller } from '../hooks/useDocumentPoller';
@@ -12,6 +12,7 @@ import { StatusBadge } from '../components/ui/StatusBadge';
 import { PipelineSteps } from '../components/ui/PipelineSteps';
 import { SplitReviewModal } from '../components/ui/SplitReviewModal';
 import { ChecklistReviewModal } from '../components/ui/ChecklistReviewModal';
+import { getKycFormStatus, getKycStatus, uploadKycDocument } from '../api/client';
 
 // While anything is in flight the list is re-fetched on this cadence. A packet
 // split creates its child documents server-side, and they only become visible
@@ -22,6 +23,12 @@ const LIST_REFRESH_INTERVAL = 4000; // ms
 // and its children appearing in the list. Confirm the drain against the server
 // before treating it as "everything is done".
 const DRAIN_SETTLE_DELAY = 1500; // ms
+
+// How often a KYC hand-off checks whether its uploads are done.
+const KYC_POLL_INTERVAL = 3000; // ms
+
+// An ID document is done once OCR has settled and its photo/signature crop finished.
+const isKycDocDone = (d) => ['completed', 'failed', 'rejected'].includes(d.status) && d.images_status !== 'running';
 
 /** Renders a rejection/failure reason with expand/collapse if the text is long */
 function ExpandableReason({ reason }) {
@@ -71,12 +78,59 @@ export function Processing() {
   const { documents, pendingDocs, reviewDocs, toast } = useApp();
   const { refresh, loading } = useDocumentList();
   const navigate = useNavigate();
+  const location = useLocation();
+  // Set when the KYC Process page sends its uploads here: { kycId, kind: 'form' | 'id', documentIds }.
+  // The user is taken back to the KYC wizard when they finish, instead of the
+  // generic extraction/validation pages.
+  const kyc = location.state?.kyc || null;
+  const [kycNote, setKycNote] = useState('');
   const [reviewingSplit, setReviewingSplit] = useState(null);
   // batch_id of the upload parked at the checklist barrier. The decision is
   // batch-scoped, so it does not matter which held document was clicked.
   const [reviewingChecklist, setReviewingChecklist] = useState(null);
+  // Batches whose checklist dialog the user closed — not popped open again.
+  const dismissedChecklists = useRef(new Set());
+  // The KYC documents this hand-off waits for. Grows when missing documents are
+  // added from the checklist dialog, so the return to onboarding waits for them too.
+  const [kycDocIds, setKycDocIds] = useState(kyc?.documentIds || []);
 
   useEffect(() => { refresh(); }, []);
+
+  // Open the checklist dialog on its own once a batch is known to be missing
+  // documents — every file in it has been classified by then. In a KYC hand-off
+  // only this application's batch counts.
+  const gatedBatch = pendingDocs.find((d) =>
+    d.status === CHECKLIST_REVIEW_STATUS && d.batch_id && (!kyc || kycDocIds.includes(d.id))
+  )?.batch_id;
+  // The dialog only shows while its batch is still held, so it goes away on its
+  // own once the batch leaves the gate some other way — the missing documents
+  // arrived and released it, or someone decided elsewhere.
+  const showChecklist = Boolean(reviewingChecklist) && pendingDocs.some(
+    (d) => d.batch_id === reviewingChecklist && CHECKLIST_GATE_STATUSES.includes(d.status)
+  );
+  useEffect(() => {
+    if (gatedBatch && !showChecklist && !dismissedChecklists.current.has(gatedBatch)) {
+      setReviewingChecklist(gatedBatch);
+    }
+  }, [gatedBatch]);
+
+  const closeChecklist = () => {
+    dismissedChecklists.current.add(reviewingChecklist);
+    setReviewingChecklist(null);
+  };
+
+  // KYC documents must go through the KYC endpoint so they are linked to the
+  // application; passing the gated batch as upload_batch puts them in that batch.
+  const uploadMissingKycDocs = async (files) => {
+    const ids = [];
+    for (const file of files) {
+      const res = await uploadKycDocument(kyc.kycId, file, reviewingChecklist);
+      ids.push(res.document_id);
+    }
+    setKycDocIds((prev) => [...prev, ...ids]);
+    refresh();
+    return ids.length;
+  };
 
   // Keep the list in sync while work is in flight, so documents that appear
   // out of band — the children of a split packet — join the queue on their own.
@@ -88,15 +142,54 @@ export function Processing() {
 
   // Redirect to /validation when any doc needs human review
   useEffect(() => {
-    if (reviewDocs.length > 0) navigate('/validation');
+    if (!kyc && reviewDocs.length > 0) navigate('/validation');
   }, [reviewDocs.length]);
+
+  // KYC hand-off: watch the KYC application's own status and return to it.
+  useEffect(() => {
+    if (!kyc) return;
+    let stopped = false;
+    const backToKyc = (extra = {}) => navigate(`/kyc-process?kyc_id=${kyc.kycId}`, {
+      replace: true,
+      state: { documentIds: kycDocIds, ...extra },
+    });
+    const poll = async () => {
+      try {
+        if (kyc.kind === 'form') {
+          // Completing this call also copies the extracted fields into the application.
+          const s = await getKycFormStatus(kyc.kycId);
+          if (stopped) return;
+          if (s.status === 'completed') backToKyc();
+          else if (s.status === 'failed') backToKyc({ formFailed: true });
+          else if (s.status === 'extracting_images') setKycNote('Form read — extracting the applicant photo & signature…');
+        } else {
+          const s = await getKycStatus(kyc.kycId);
+          if (stopped) return;
+          const mine = (s.doc_statuses || []).filter((d) => kycDocIds.includes(d.document_id));
+          if (mine.length > 0 && mine.every(isKycDocDone)) backToKyc();
+          else if (mine.some((d) => d.status === CHECKLIST_REVIEW_STATUS)) {
+            setKycNote('Some document types are missing — add them or continue from the checklist dialog.');
+          } else if (mine.some((d) => d.status === CHECKLIST_HOLD_STATUS)) {
+            setKycNote('Waiting for the rest of this upload to reach the checklist…');
+          } else if (mine.some((d) => d.status === 'awaiting_review')) {
+            setKycNote('A document is waiting for manual review in the Validation queue before onboarding can continue.');
+          } else if (mine.some((d) => d.status === 'completed' && d.images_status === 'running')) {
+            setKycNote('Extracting the holder photo & signature…');
+          }
+        }
+      } catch { /* transient — retry on the next tick */ }
+    };
+    poll();
+    const id = setInterval(poll, KYC_POLL_INTERVAL);
+    return () => { stopped = true; clearInterval(id); };
+  }, [kyc?.kycId, kyc?.kind, kycDocIds]);
 
   // Redirect to /extraction when all queued docs finish processing
   const prevPendingCount = useRef(0);
   const prevPendingIds = useRef([]);
   const settleTimer = useRef(null);
   useEffect(() => {
-    if (prevPendingCount.current > 0 && pendingDocs.length === 0 && reviewDocs.length === 0) {
+    if (!kyc && prevPendingCount.current > 0 && pendingDocs.length === 0 && reviewDocs.length === 0) {
       const drainedIds = prevPendingIds.current;
       clearTimeout(settleTimer.current);
       settleTimer.current = setTimeout(async () => {
@@ -126,6 +219,7 @@ export function Processing() {
   // Most recently active doc for the live pipeline display. A packet waiting on
   // a split decision is the one thing worth looking at, so it wins the slot.
   const featured =
+    (kyc && pendingDocs.find((d) => kycDocIds.includes(d.id))) ||
     pendingDocs.find((d) => d.status === SPLIT_REVIEW_STATUS) ||
     pendingDocs.find((d) => d.status === CHECKLIST_REVIEW_STATUS) ||
     pendingDocs[0];
@@ -145,14 +239,41 @@ export function Processing() {
         />
       )}
 
-      {reviewingChecklist && (
+      {showChecklist && (
         <ChecklistReviewModal
           batchId={reviewingChecklist}
           open
           toast={toast}
-          onClose={() => setReviewingChecklist(null)}
+          onClose={closeChecklist}
           onDecided={() => refresh()}
+          onUploadFiles={kyc?.kind === 'id' ? uploadMissingKycDocs : undefined}
         />
+      )}
+
+      {/* KYC hand-off banner */}
+      {kyc && (
+        <div className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <div>
+            <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Shield size={16} style={{ color: 'var(--accent)' }} />
+              Customer {kyc.kind === 'form' ? 'application form' : 'identity documents'}
+            </div>
+            <div className="card-sub">
+              Application <strong style={{ color: 'var(--accent)' }}>{kyc.kycId}</strong> — you'll return to customer onboarding
+              automatically once {kyc.kind === 'form'
+                ? 'the form has been read'
+                : `${kycDocIds.length === 1 ? 'the document has' : `all ${kycDocIds.length} documents have`} been processed`}.
+            </div>
+            {kycNote && (
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Loader2 size={11} className="spin" /> {kycNote}
+              </div>
+            )}
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={() => navigate('/kyc-process')}>
+            Back to Customer Onboarding
+          </button>
+        </div>
       )}
 
       {/* Live Pipeline for featured doc */}
@@ -174,6 +295,14 @@ export function Processing() {
             </div>
           </div>
           <PipelineSteps status={featured.status} />
+        </div>
+      ) : kyc ? (
+        <div className="card">
+          <div className="empty-state">
+            <Loader2 size={28} className="spin" style={{ color: 'var(--accent)' }} />
+            <div className="empty-title">Finishing up</div>
+            <div className="empty-sub">OCR is done — wrapping up the customer extraction.</div>
+          </div>
         </div>
       ) : (
         <div className="card">

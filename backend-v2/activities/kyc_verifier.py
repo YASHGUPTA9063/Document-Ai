@@ -114,47 +114,66 @@ def _date_match(date1: str, date2: str) -> tuple[str, float]:
     return ("MISMATCH", 0.0)
 
 
-def _normalize_address(addr: str) -> str:
-    """Normalize an address for comparison."""
-    if not addr:
-        return ""
-    a = addr.lower().strip()
-    # Normalize common abbreviations
-    replacements = {
-        "road": "rd", "street": "st", "avenue": "ave", "lane": "ln",
-        "nagar": "ngr", "colony": "col", "sector": "sec",
-        "m.g.": "mg", "m.g": "mg",
-        ",": " ", ".": " ", "#": " ", "-": " ",
+# Common address abbreviations, expanded so "Rd" and "Road" compare equal.
+_ADDRESS_ABBREVIATIONS = {
+    "rd": "road", "st": "street", "ave": "avenue", "apt": "apartment", "bldg": "building",
+    "flr": "floor", "fl": "floor", "no": "number", "nr": "near", "opp": "opposite",
+    "sec": "sector", "ngr": "nagar", "dist": "district", "po": "post", "ps": "police",
+    "e": "east", "w": "west", "n": "north", "s": "south",
+}
+# Filler words that say nothing about where the address is.
+_ADDRESS_NOISE = {"h", "hno", "house", "no", "number", "flat", "the", "of", "and", "at", "near", "nr", "post", "po"}
+_PIN_RE = re.compile(r"\b\d{6}\b")
+
+
+def _address_tokens(address: str) -> set[str]:
+    words = re.findall(r"[a-z0-9]+", (address or "").lower())
+    # Join runs of single letters so "M.G. Road" and "MG Road" agree.
+    merged, run = [], ""
+    for w in words:
+        if len(w) == 1 and w.isalpha():
+            run += w
+            continue
+        if run:
+            merged.append(run)
+            run = ""
+        merged.append(w)
+    if run:
+        merged.append(run)
+    return {
+        _ADDRESS_ABBREVIATIONS.get(w, w)
+        for w in merged
+        if w not in _ADDRESS_NOISE
     }
-    for old, new in replacements.items():
-        a = a.replace(old, new)
-    # Collapse whitespace
-    a = re.sub(r'\s+', ' ', a).strip()
-    return a
 
 
 def _address_match(addr1: str, addr2: str) -> tuple[str, float]:
-    """Compare two addresses using fuzzy matching."""
-    a1 = _normalize_address(addr1)
-    a2 = _normalize_address(addr2)
-
-    if not a1 or not a2:
+    """
+    Compare two addresses by the words they share. IDs and forms order, abbreviate
+    and punctuate addresses differently, so the score is the share of the shorter
+    address's words found in the other. Differing PIN codes are a mismatch outright.
+    """
+    t1, t2 = _address_tokens(addr1), _address_tokens(addr2)
+    if not t1 or not t2:
         return ("NOT_FOUND", 0.0)
 
-    if a1 == a2:
-        return ("MATCH", 1.0)
+    pins1, pins2 = set(_PIN_RE.findall(addr1)), set(_PIN_RE.findall(addr2))
+    if pins1 and pins2 and not (pins1 & pins2):
+        return ("MISMATCH", 0.0)
 
-    ratio = SequenceMatcher(None, a1, a2).ratio()
-
-    if ratio >= 0.80:
-        return ("MATCH", ratio)
-    elif ratio >= 0.55:
-        return ("PARTIAL", ratio)
-    else:
-        return ("MISMATCH", ratio)
+    score = len(t1 & t2) / min(len(t1), len(t2))
+    if score >= 0.8:
+        return ("MATCH", score)
+    elif score >= 0.5:
+        return ("PARTIAL", score)
+    return ("MISMATCH", score)
 
 
 # ─── MAIN VERIFICATION FUNCTION ───────────────────────────────────────────────
+
+def _is_scalar(val) -> bool:
+    return isinstance(val, (str, int, float)) and not isinstance(val, bool) and str(val).strip() != ""
+
 
 def _find_field_value(data: dict, field_names: list[str]) -> Optional[str]:
     """Look up a field from extracted data by trying multiple possible key names."""
@@ -162,15 +181,52 @@ def _find_field_value(data: dict, field_names: list[str]) -> Optional[str]:
         return None
     for key in field_names:
         val = data.get(key)
-        if val is not None and str(val).strip():
+        if _is_scalar(val):
             return str(val).strip()
     # Also try case-insensitive lookup
     lower_data = {k.lower().replace(" ", "_"): v for k, v in data.items()}
     for key in field_names:
         val = lower_data.get(key.lower().replace(" ", "_"))
-        if val is not None and str(val).strip():
+        if _is_scalar(val):
             return str(val).strip()
     return None
+
+
+_ROW_LABEL_KEYS = ("field", "label", "key", "description")
+_ROW_VALUE_KEYS = ("value", "amount")
+
+
+def _flatten_fields(data: dict) -> dict:
+    """
+    Lift values out of nested sections so templates that group identity data
+    (e.g. `personal_details: {...}` or `[{"label": "Full Name", "value": ...}]`)
+    resolve like flat ones. Top-level keys win over nested ones.
+    """
+    flat = {}
+
+    def _put(key, val):
+        if isinstance(key, str) and _is_scalar(val):
+            flat.setdefault(key.strip().lower().replace(" ", "_").replace("'", ""), val)
+
+    def _walk(node):
+        if isinstance(node, dict):
+            label = next((node[k] for k in _ROW_LABEL_KEYS if isinstance(node.get(k), str)), None)
+            value = next((node[k] for k in _ROW_VALUE_KEYS if _is_scalar(node.get(k))), None)
+            if label and value is not None:
+                _put(label, value)
+            for k, v in node.items():
+                _put(k, v)
+            for v in node.values():
+                if isinstance(v, (dict, list)):
+                    _walk(v)
+        elif isinstance(node, list):
+            for item in node:
+                _walk(item)
+
+    for k, v in data.items():
+        _put(k, v)
+    _walk({k: v for k, v in data.items() if isinstance(v, (dict, list))})
+    return flat
 
 
 # Key aliases seen across form templates, passports and driving licences.
@@ -181,30 +237,46 @@ NAME_KEYS = [
 GIVEN_NAME_KEYS = ["given_name", "given_names", "first_name", "Given Name", "First Name"]
 MIDDLE_NAME_KEYS = ["middle_name", "Middle Name"]
 SURNAME_KEYS = ["surname", "last_name", "family_name", "Surname", "Last Name"]
-FATHER_KEYS = [
-    "fathers_name", "father_name", "father's_name", "father", "Father Name", "Father's Name",
-    "father_spouse_name", "father_or_spouse_name", "father_husband_name", "father_or_husband_name",
-    "son_daughter_wife_of", "s/d/w_of", "s/d/w", "s/o", "S/O", "son_of", "d/o", "D/O", "daughter_of",
-    "guardian_name", "parent_name",
-]
 DOB_KEYS = [
     "date_of_birth", "dob", "DOB", "birth_date", "Date of Birth",
     "Date_of_Birth", "birthdate", "d.o.b", "d.o.b.",
 ]
-ADDRESS_KEYS = [
-    "address", "Address", "residential_address", "permanent_address", "present_address",
-    "current_address", "full_address", "addr", "correspondence_address",
+FATHERS_NAME_KEYS = [
+    "fathers_name", "father_name", "father_s_name", "Father's Name", "Father Name",
+    "father_or_spouse_name", "father_spouse_name", "Father/Spouse Name", "s_o", "son_of",
 ]
-ADDRESS_LINE_KEYS = ["address_line_1", "address_line_2", "address_line_3"]
+ADDRESS_KEYS = [
+    "address", "permanent_address", "residential_address", "correspondence_address",
+    "current_address", "Address", "Permanent Address", "Residential Address",
+    "billing_address", "service_address",
+]
+# Where the utility_bill template (and bills in general) keep the customer's address.
+UTILITY_ADDRESS_KEYS = [
+    "billing_address", "service_address", "supply_address", "installation_address",
+    "customer_address", "address", "Billing Address", "Service Address",
+]
+
+
+def extract_utility_address(fields: dict) -> Optional[str]:
+    """The customer's address from a utility bill's extracted fields, as one line."""
+    fields = fields or {}
+    for key in UTILITY_ADDRESS_KEYS:
+        val = fields.get(key)
+        # Some extractions split the address into parts (street, city, postcode…).
+        if isinstance(val, dict):
+            joined = ", ".join(str(v).strip() for v in val.values() if _is_scalar(v))
+            if joined:
+                return joined
+    return _find_field_value(_flatten_fields(fields), UTILITY_ADDRESS_KEYS)
 
 
 def extract_identity_fields(data: dict) -> dict:
     """
-    Resolve name / father's name / DOB / address from an extracted-field dict
-    whose keys depend on the template (e.g. passports split given_name + surname,
-    bank forms use first_name + last_name and address_line_1..3).
+    Resolve name / DOB / father's name / address from an extracted-field dict whose keys depend on the
+    template (e.g. passports split given_name + surname, bank forms use
+    first_name + last_name).
     """
-    data = data or {}
+    data = _flatten_fields(data or {})
 
     name = _find_field_value(data, NAME_KEYS)
     if not name:
@@ -214,16 +286,11 @@ def extract_identity_fields(data: dict) -> dict:
         ]
         name = " ".join(p for p in parts if p) or None
 
-    address = _find_field_value(data, ADDRESS_KEYS)
-    if not address:
-        lines = [_find_field_value(data, [k]) for k in ADDRESS_LINE_KEYS]
-        address = ", ".join(l for l in lines if l) or None
-
     return {
         "applicant_name": name,
-        "fathers_name": _find_field_value(data, FATHER_KEYS),
         "date_of_birth": _find_field_value(data, DOB_KEYS),
-        "address": address,
+        "fathers_name": _find_field_value(data, FATHERS_NAME_KEYS),
+        "address": _find_field_value(data, ADDRESS_KEYS),
     }
 
 
@@ -263,12 +330,17 @@ async def _image_check(field: str, form_label: str, doc_label: str,
     return check
 
 
+# Fields many IDs don't carry — missing values don't affect the verdict.
+_OPTIONAL_FIELDS = {"Father's Name", "Address"}
+_ADDRESS_FIELDS = {"Address"}
+
+
 async def verify_kyc(form_data: dict, doc_data: dict) -> dict:
     """
     Cross-validate applicant form data against OCR-extracted document data.
 
     Args:
-        form_data: {"applicant_name", "fathers_name", "date_of_birth", "address", "photo_image", "signature_image"}
+        form_data: {"applicant_name", "date_of_birth", "fathers_name", "address", "photo_image", "signature_image"}
         doc_data:  OCR-extracted fields from passport/DL (variable keys, plus "photo_image" and "signature_image")
 
     Returns:
@@ -298,22 +370,7 @@ async def verify_kyc(form_data: dict, doc_data: dict) -> dict:
     if name_result != "NOT_FOUND":
         scores.append(name_score)
 
-    # 2. Father's Name check
-    form_father = form_data.get("fathers_name", "")
-    doc_father = doc_ident["fathers_name"]
-
-    father_result, father_score = _fuzzy_name_match(form_father, doc_father or "")
-    field_checks.append({
-        "field": "Father's Name",
-        "form_value": form_father,
-        "doc_value": doc_father,
-        "result": father_result,
-        "score": round(father_score, 3),
-    })
-    if father_result != "NOT_FOUND":
-        scores.append(father_score)
-
-    # 3. DOB check
+    # 2. DOB check
     form_dob = form_data.get("date_of_birth", "")
     doc_dob = doc_ident["date_of_birth"]
 
@@ -328,22 +385,26 @@ async def verify_kyc(form_data: dict, doc_data: dict) -> dict:
     if dob_result != "NOT_FOUND":
         scores.append(dob_score)
 
-    # 4. Address check
-    form_addr = form_data.get("address", "")
-    doc_addr = doc_ident["address"]
+    # 3. Father's name + address. Many IDs don't print them, so a value missing
+    # on either side is informational and doesn't hold the verdict for review.
+    for field, key, matcher in (
+        ("Father's Name", "fathers_name", _fuzzy_name_match),
+        ("Address", "address", _address_match),
+    ):
+        form_val = form_data.get(key) or ""
+        doc_val = doc_ident[key]
+        result, score = matcher(form_val, doc_val or "")
+        field_checks.append({
+            "field": field,
+            "form_value": form_val,
+            "doc_value": doc_val,
+            "result": result,
+            "score": round(score, 3),
+        })
+        if result != "NOT_FOUND":
+            scores.append(score)
 
-    addr_result, addr_score = _address_match(form_addr, doc_addr or "")
-    field_checks.append({
-        "field": "Address",
-        "form_value": form_addr,
-        "doc_value": doc_addr,
-        "result": addr_result,
-        "score": round(addr_score, 3),
-    })
-    if addr_result != "NOT_FOUND":
-        scores.append(addr_score)
-
-    # 5 + 6. Photo and signature checks — independent, multi-agent pipelines,
+    # 4 + 5. Photo and signature checks — independent, multi-agent pipelines,
     # so run them concurrently.
     from tools.auto_verifier import verify_face, verify_signature
     photo_check, sig_check = await asyncio.gather(
@@ -359,9 +420,15 @@ async def verify_kyc(form_data: dict, doc_data: dict) -> dict:
 
     # ── Compute overall verdict ──
     results = [c["result"] for c in field_checks]
-    has_mismatch = "MISMATCH" in results
-    has_partial = "PARTIAL" in results or "REVIEW" in results
-    has_not_found = "NOT_FOUND" in results
+    verdict_results = [
+        # People move — a different address needs a look, it doesn't fail the check.
+        "PARTIAL" if c["field"] in _ADDRESS_FIELDS and c["result"] == "MISMATCH" else c["result"]
+        for c in field_checks
+        if not (c["field"] in _OPTIONAL_FIELDS and c["result"] == "NOT_FOUND")
+    ]
+    has_mismatch = "MISMATCH" in verdict_results
+    has_partial = "PARTIAL" in verdict_results or "REVIEW" in verdict_results
+    has_not_found = "NOT_FOUND" in verdict_results
     match_count = results.count("MATCH")
 
     if has_mismatch:
@@ -386,6 +453,8 @@ async def verify_kyc(form_data: dict, doc_data: dict) -> dict:
             summary_parts.append(f"⚠️ {check['field']}: Automated comparison failed — manual review required")
         elif check["result"] == "MISMATCH":
             summary_parts.append(f"❌ {check['field']}: Mismatch — form: \"{check['form_value']}\" vs document: \"{check['doc_value']}\"")
+        elif not check["form_value"]:
+            summary_parts.append(f"❓ {check['field']}: Not provided on the application")
         else:
             summary_parts.append(f"❓ {check['field']}: Not found in document")
 

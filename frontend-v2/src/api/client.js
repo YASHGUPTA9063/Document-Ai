@@ -633,17 +633,17 @@ export async function getKycStatus(kycId) {
 }
 
 /**
- * Upload an identity document (passport/driving_license) for KYC verification.
+ * Upload an identity document for KYC verification.
  * @param {string} kycId
  * @param {File} file
- * @param {string} docType - 'passport' or 'driving_license'
+ * @param {string|null} uploadBatch - batch id from an earlier upload, to group files added together
  * @param {(pct: number) => void} onProgress
  */
-export async function uploadKycDocument(kycId, file, docType, onProgress) {
+export async function uploadKycDocument(kycId, file, uploadBatch, onProgress) {
   const form = new FormData();
   form.append('file', file);
   const { data } = await api.post(`/kyc/${kycId}/upload-doc`, form, {
-    params: { doc_type: docType },
+    params: uploadBatch ? { upload_batch: uploadBatch } : {},
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: 120_000,
     onUploadProgress: (e) => {
@@ -656,10 +656,12 @@ export async function uploadKycDocument(kycId, file, docType, onProgress) {
 /**
  * Trigger KYC verification (cross-validates form data vs document data).
  * @param {string} kycId
+ * @param {string[]} [documentIds] - ID documents to verify against; omit for all extracted docs
  */
-export async function runKycVerification(kycId) {
+export async function runKycVerification(kycId, documentIds) {
+  const body = documentIds?.length ? { document_ids: documentIds } : null;
   // Face + signature comparison each run several model calls — allow for it.
-  const { data } = await api.post(`/kyc/${kycId}/verify`, null, { timeout: 300_000 });
+  const { data } = await api.post(`/kyc/${kycId}/verify`, body, { timeout: 300_000 });
   return data;
 }
 

@@ -51,6 +51,10 @@ import db.operations as db
 logger = logging.getLogger(__name__)
 client = get_mistral_client()
 
+# Batches that are single-document by design and never go through the checklist.
+# Kept in step with the batch ids minted in api/routers/v1/kyc.py.
+SOLO_BATCH_PREFIXES = ("kyc-form-",)
+
 
 def _extract_text(content) -> str:
     """Safely extract text from the various Mistral response content shapes."""
@@ -184,17 +188,17 @@ async def evaluate_batch(batch_id: str, gate_document_id: str | None = None) -> 
         + (f" — missing {[m['doc_type'] for m in result['missing']]}" if result["missing"] else " — complete")
     )
 
-    row = await checklist_db.get_checklist(batch_id)
-    gate_already_open = bool(row and row.gate_opened)
-
-    # Nothing missing, and no reviewer is mid-decision: let the batch go.
-    if result["complete"] and not gate_already_open:
+    # Nothing missing: let the batch go. This holds even when the gate was
+    # already opened — a document that classified before its siblings were
+    # uploaded opens it early, and the batch must not stay parked once the rest
+    # arrive. release_batch is the mutex, so a reviewer answering at the same
+    # moment just finds the batch already released.
+    if result["complete"]:
         await release_batch(batch_id, True, "", "auto")
         return {"action": "released", "batch_id": batch_id, "summary": summary,
                 "complete": True, **result}
 
-    # Something is missing — or a reviewer already holds this batch, in which
-    # case the decision stays theirs even though the gap has since been filled.
+    # Something is missing — hold the batch for a reviewer.
     await checklist_db.mark_gate_opened(batch_id)
     return {"action": "gate", "batch_id": batch_id, "summary": summary, **result}
 
@@ -218,6 +222,12 @@ async def checklist_activity(document_id: str) -> dict:
         # Documents ingested before batches existed have no set to reconcile.
         logger.info(f"[Document {document_id}] No batch_id — skipping the checklist.")
         return _go("no_batch")
+
+    if batch_id.startswith(SOLO_BATCH_PREFIXES):
+        # The KYC application form is uploaded on its own, so reconciling its
+        # one-document batch would always report every other type as missing.
+        logger.info(f"[Document {document_id}] Solo upload ({batch_id}) — skipping the checklist.")
+        return _go("solo_upload", batch_id=batch_id)
 
     # Sticky release: a batch that has already been let through never re-gates,
     # so documents uploaded into it afterwards are not stranded behind a
