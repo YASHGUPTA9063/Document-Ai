@@ -186,6 +186,7 @@ async def get_kyc_doc_status(kyc_id: str) -> dict:
         doc_statuses = []
         completed = 0
         failed = 0
+        images_pending = 0
 
         for kyc_doc in kyc_docs:
             doc_result = await session.execute(
@@ -199,6 +200,8 @@ async def get_kyc_doc_status(kyc_id: str) -> dict:
                 completed += 1
             elif status in ("failed", "rejected"):
                 failed += 1
+            if kyc_doc.images_status == "running":
+                images_pending += 1
 
             doc_statuses.append({
                 "document_id": kyc_doc.document_id,
@@ -206,11 +209,16 @@ async def get_kyc_doc_status(kyc_id: str) -> dict:
                 "filename": filename,
                 "status": status,
                 "synced": kyc_doc.synced,
+                "images_status": kyc_doc.images_status,
+                "photo_url": kyc_doc_image_url(kyc_id, kyc_doc.document_id, "photo") if kyc_doc.photo_path else None,
+                "signature_url": kyc_doc_image_url(kyc_id, kyc_doc.document_id, "signature") if kyc_doc.signature_path else None,
             })
 
         total = len(kyc_docs)
         all_done = total > 0 and (completed + failed) == total
-        ready = all_done and completed > 0
+        # Photo/signature crops must be finished too, otherwise verification
+        # would run without the images it is supposed to compare.
+        ready = all_done and completed > 0 and images_pending == 0
 
         # Auto-transition to 'ready' if all docs are extracted
         if ready and app.status == "extracting":
@@ -226,6 +234,7 @@ async def get_kyc_doc_status(kyc_id: str) -> dict:
             "completed_docs": completed,
             "failed_docs": failed,
             "ready_to_verify": ready,
+            "images_pending": images_pending,
             "doc_statuses": doc_statuses,
             "form_data": {
                 "applicant_name": app.applicant_name,
@@ -274,6 +283,90 @@ async def sync_kyc_document_fields(kyc_id: str) -> int:
 
         await session.commit()
     return synced_count
+
+
+# ─── KYC IMAGE (PHOTO / SIGNATURE) OPERATIONS ────────────────────────────────
+
+def kyc_form_image_url(kyc_id: str, attachment_type: str) -> str:
+    return f"/api/v1/kyc/{kyc_id}/attachment/{attachment_type}"
+
+
+def kyc_doc_image_url(kyc_id: str, document_id: str, attachment_type: str) -> str:
+    return f"/api/v1/kyc/{kyc_id}/documents/{document_id}/attachment/{attachment_type}"
+
+
+async def set_form_images(
+    kyc_id: str,
+    status: str,
+    photo_path: Optional[str] = None,
+    signature_path: Optional[str] = None,
+):
+    """
+    Records the photo/signature cropped from the uploaded application form.
+    Never overwrites an image the applicant uploaded explicitly — a manual
+    upload is a better reference than a crop.
+    """
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(KycApplication).where(KycApplication.kyc_id == kyc_id)
+        )
+        app = result.scalar_one_or_none()
+        if not app:
+            return
+        app.form_images_status = status
+        if photo_path and not app.photo_path:
+            app.photo_path = photo_path
+        if signature_path and not app.signature_path:
+            app.signature_path = signature_path
+        await session.commit()
+
+
+async def set_doc_images(
+    kyc_id: str,
+    document_id: str,
+    status: str,
+    photo_path: Optional[str] = None,
+    signature_path: Optional[str] = None,
+):
+    """Records the photo/signature cropped from an uploaded ID document."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(KycDocument).where(
+                KycDocument.kyc_id == kyc_id,
+                KycDocument.document_id == document_id,
+            )
+        )
+        kyc_doc = result.scalar_one_or_none()
+        if not kyc_doc:
+            return
+        kyc_doc.images_status = status
+        if photo_path:
+            kyc_doc.photo_path = photo_path
+        if signature_path:
+            kyc_doc.signature_path = signature_path
+        await session.commit()
+
+
+async def get_kyc_documents(kyc_id: str) -> list[KycDocument]:
+    """Returns all identity documents linked to a KYC application, oldest first."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(KycDocument)
+            .where(KycDocument.kyc_id == kyc_id)
+            .order_by(KycDocument.created_at)
+        )
+        return result.scalars().all()
+
+
+async def get_kyc_document(kyc_id: str, document_id: str) -> Optional[KycDocument]:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(KycDocument).where(
+                KycDocument.kyc_id == kyc_id,
+                KycDocument.document_id == document_id,
+            )
+        )
+        return result.scalar_one_or_none()
 
 
 # ─── KYC RESULT OPERATIONS ────────────────────────────────────────────────────

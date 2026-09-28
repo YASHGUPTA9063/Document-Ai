@@ -658,7 +658,8 @@ export async function uploadKycDocument(kycId, file, docType, onProgress) {
  * @param {string} kycId
  */
 export async function runKycVerification(kycId) {
-  const { data } = await api.post(`/kyc/${kycId}/verify`, null, { timeout: 60_000 });
+  // Face + signature comparison each run several model calls — allow for it.
+  const { data } = await api.post(`/kyc/${kycId}/verify`, null, { timeout: 300_000 });
   return data;
 }
 

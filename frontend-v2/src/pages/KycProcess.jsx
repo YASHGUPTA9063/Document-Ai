@@ -97,6 +97,7 @@ function ResultChip({ result, score }) {
     PARTIAL:   { color: 'var(--warn)',    bg: 'var(--warn-dim)',    border: 'var(--warn-border)',    icon: '~' },
     MISMATCH:  { color: 'var(--danger)',  bg: 'var(--danger-dim)',  border: 'var(--danger-border)',  icon: '✗' },
     NOT_FOUND: { color: 'var(--muted)',   bg: 'var(--surface)',     border: 'var(--border)',          icon: '?' },
+    REVIEW:    { color: 'var(--warn)',    bg: 'var(--warn-dim)',    border: 'var(--warn-border)',    icon: '!' },
   }[result] || { color: 'var(--muted)', bg: 'var(--surface)', border: 'var(--border)', icon: '?' };
 
   return (
@@ -112,6 +113,21 @@ function ResultChip({ result, score }) {
         </span>
       )}
     </span>
+  );
+}
+
+function ExtractedImage({ label, url, kind, size = 80 }) {
+  return (
+    <div style={{ textAlign: 'center' }}>
+      {url ? (
+        <img src={url} alt={label} style={kind === 'photo'
+          ? { width: size, height: size, objectFit: 'cover', borderRadius: 6, border: '1px solid rgba(0,0,0,0.1)' }
+          : { maxHeight: size, maxWidth: size * 2, objectFit: 'contain', background: '#fff', borderRadius: 6, padding: 4, border: '1px solid rgba(0,0,0,0.1)' }} />
+      ) : (
+        <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>Not found</div>
+      )}
+      <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>{label}</div>
+    </div>
   );
 }
 
@@ -945,7 +961,9 @@ export function KycProcess() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
                         <Loader2 size={13} className="spin" style={{ color: 'var(--info)' }} />
                         <span style={{ color: 'var(--text)' }}>
-                          Extracting document data… ({extractionStatus.completed_docs}/{extractionStatus.total_docs} complete)
+                          {extractionStatus.completed_docs < extractionStatus.total_docs
+                            ? `Extracting document data… (${extractionStatus.completed_docs}/${extractionStatus.total_docs} complete)`
+                            : 'Extracting photo & signature from the ID…'}
                         </span>
                       </div>
                     </div>
@@ -966,6 +984,19 @@ export function KycProcess() {
                   </div>
                 </div>
               )}
+
+              {/* Photo / signature extracted from the ID */}
+              {extractionStatus?.ready_to_verify && (extractionStatus.doc_statuses || []).map(ds => (
+                <div key={ds.document_id} style={{ marginTop: 12, padding: '12px 16px', borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
+                    Extracted from {ds.doc_type === 'passport' ? 'Passport' : 'Driving License'}
+                  </div>
+                  <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end' }}>
+                    <ExtractedImage label="Photo" url={ds.photo_url} kind="photo" />
+                    <ExtractedImage label="Signature" url={ds.signature_url} kind="signature" />
+                  </div>
+                </div>
+              ))}
 
               {submitError && (
                 <div style={{ marginTop: 12, fontSize: 12, color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1027,7 +1058,7 @@ export function KycProcess() {
                   <Loader2 size={36} className="spin" style={{ color: 'var(--accent)', marginBottom: 12 }} />
                   <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>Verifying…</div>
                   <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 4 }}>
-                    Cross-validating form fields against document data
+                    Cross-validating form fields, photo and signature against the ID — this can take a minute or two
                   </div>
                 </div>
               )}
@@ -1093,13 +1124,22 @@ export function KycProcess() {
                         borderBottom: i < (verifyResult.field_checks || []).length - 1 ? '1px solid var(--border)' : 'none',
                       }}>
                         <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>{check.field}</span>
-                        <span style={{ fontSize: 12, color: 'var(--text)', fontFamily: 'monospace', wordBreak: 'break-all' }}>
-                          {check.form_value || <em style={{ color: 'var(--muted)' }}>—</em>}
-                        </span>
-                        <span style={{ fontSize: 12, color: 'var(--text)', fontFamily: 'monospace', wordBreak: 'break-all' }}>
-                          {check.doc_value || <em style={{ color: 'var(--muted)' }}>—</em>}
-                        </span>
-                        <ResultChip result={check.result} score={check.score} />
+                        {[['form_image_url', 'form_value'], ['doc_image_url', 'doc_value']].map(([urlKey, valKey]) => {
+                          const kind = check.field === 'Applicant Photo' ? 'photo' : 'signature';
+                          return (
+                            <span key={valKey} style={{ fontSize: 12, color: 'var(--text)', fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                              {check[urlKey]
+                                ? <ExtractedImage label={check[valKey]} url={check[urlKey]} kind={kind} size={56} />
+                                : (check[valKey] || <em style={{ color: 'var(--muted)' }}>—</em>)}
+                            </span>
+                          );
+                        })}
+                        <div style={{ textAlign: 'right' }}>
+                          <ResultChip result={check.result} score={check.score} />
+                          {check.verdict && (
+                            <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 3 }}>{check.verdict}</div>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>

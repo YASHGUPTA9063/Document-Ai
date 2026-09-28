@@ -259,6 +259,7 @@ class KycApplication(Base):
     form_document_id = Column(String, ForeignKey("documents.id"), nullable=True)  # links to Document if form was uploaded
     photo_path = Column(String, nullable=True)       # file path for applicant photo
     signature_path = Column(String, nullable=True)    # file path for applicant signature
+    form_images_status = Column(String, nullable=True)  # photo/signature crop from uploaded form: running | done | failed
     status = Column(String, nullable=False, default="form_submitted")
     # statuses: form_submitted → doc_uploaded → extracting → ready → verifying → completed → verified → failed
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -281,6 +282,9 @@ class KycDocument(Base):
     doc_type = Column(String, nullable=False)   # "passport" | "driving_license"
     extracted_fields = Column(JSON, nullable=True)   # synced from OCR after extraction
     synced = Column(String, nullable=False, default="pending")  # pending | synced | failed
+    photo_path = Column(String, nullable=True)       # cardholder photo cropped from the ID
+    signature_path = Column(String, nullable=True)   # holder signature cropped from the ID
+    images_status = Column(String, nullable=True)    # photo/signature crop: running | done | failed
     created_at = Column(DateTime, default=datetime.utcnow)
 
     application = relationship("KycApplication", back_populates="documents")

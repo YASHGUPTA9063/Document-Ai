@@ -14,7 +14,8 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Query, Backgroun
 
 import db.kyc_operations as kyc_db
 from schemas.kyc import CreateKycApplicationRequest, UpdateKycFormRequest, KycDecisionRequest
-from activities.kyc_verifier import verify_kyc
+from activities.kyc_verifier import verify_kyc, extract_identity_fields
+from activities.kyc_images import extract_form_images, extract_doc_images, ensure_images_ready
 
 logger = logging.getLogger(__name__)
 
@@ -125,13 +126,15 @@ async def get_kyc_status(kyc_id: str):
 @router.post("/kyc/{kyc_id}/upload-doc")
 async def upload_kyc_document(
     kyc_id: str,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     doc_type: str = Query(..., description="Document type: 'passport' or 'driving_license'"),
 ):
     """
     Upload an identity document for KYC verification.
-    Reuses the existing document upload + OCR pipeline.
-    Links the uploaded document to this KYC application.
+    Reuses the existing document upload + OCR pipeline for the text fields, and
+    crops the holder's photo and signature in the background so they can be
+    compared against the ones from the application form.
     """
     import uuid
     import os
@@ -189,6 +192,11 @@ async def upload_kyc_document(
 
     # Link document to KYC application
     await kyc_db.link_document_to_kyc(kyc_id, doc.id, doc_type)
+
+    # Mark as running before responding so /status never reports ready_to_verify
+    # in the gap before the background task starts.
+    await kyc_db.set_doc_images(kyc_id, doc.id, "running")
+    background_tasks.add_task(extract_doc_images, kyc_id, file_path, doc.id)
 
     return {
         "kyc_id": kyc_id,
@@ -264,53 +272,11 @@ async def upload_kyc_form(
             kyc_app.form_source = "uploaded"
             await session.commit()
 
-    # Define a background task to extract signature/photo from the form
-    def _extract_and_save_attachments(kid: str, f_path: str, d_id: str):
-        import base64
-        import os
-        import uuid as _uuid
-        from utils.signature_extractor import extract_signature_and_photo
-        from config import settings
-        from db.database import SessionLocal
-        from db.models import KycApplication
-        
-        try:
-            logger.info(f"[KYC {kid}] Background extraction of photo/signature from form started.")
-            # Run the extraction (this uses Mistral/Pixtral)
-            ext_result = extract_signature_and_photo(
-                file_path=f_path,
-                document_id=d_id
-            )
-            
-            with SessionLocal() as sync_session:
-                app_obj = sync_session.query(KycApplication).filter_by(kyc_id=kid).first()
-                if not app_obj:
-                    return
-
-                kyc_dir = os.path.join(settings.STORAGE_DIR, "kyc_attachments", kid)
-                os.makedirs(kyc_dir, exist_ok=True)
-
-                if ext_result.get("has_photo") and ext_result.get("photo_base64"):
-                    p_data = base64.b64decode(ext_result["photo_base64"])
-                    p_path = os.path.join(kyc_dir, f"photo_{_uuid.uuid4().hex[:8]}.png")
-                    with open(p_path, "wb") as pf:
-                        pf.write(p_data)
-                    app_obj.photo_path = p_path
-                    logger.info(f"[KYC {kid}] Form photo extracted and saved.")
-
-                if ext_result.get("has_signature") and ext_result.get("signature_base64"):
-                    s_data = base64.b64decode(ext_result["signature_base64"])
-                    s_path = os.path.join(kyc_dir, f"signature_{_uuid.uuid4().hex[:8]}.png")
-                    with open(s_path, "wb") as sf:
-                        sf.write(s_data)
-                    app_obj.signature_path = s_path
-                    logger.info(f"[KYC {kid}] Form signature extracted and saved.")
-                    
-                sync_session.commit()
-        except Exception as e:
-            logger.error(f"[KYC {kid}] Background extraction failed: {e}")
-
-    background_tasks.add_task(_extract_and_save_attachments, kyc_id, file_path, doc.id)
+    # Crop the applicant's photo + signature from the form in the background.
+    # Marked running up front so /form-status keeps the frontend polling until
+    # the crops are ready, not just the OCR text.
+    await kyc_db.set_form_images(kyc_id, "running")
+    background_tasks.add_task(extract_form_images, kyc_id, file_path, doc.id)
 
     logger.info(f"[KYC {kyc_id}] Form uploaded as document {doc.id}, OCR started.")
     return {
@@ -352,12 +318,20 @@ async def get_kyc_form_status(kyc_id: str):
         if doc.status in ("failed", "rejected"):
             return {"kyc_id": kyc_id, "status": "failed", "extracted_fields": None}
 
+        # Text is done — hold the frontend until the photo/signature crops are too,
+        # so the review step shows them.
+        if app.form_images_status == "running":
+            return {"kyc_id": kyc_id, "status": "extracting_images", "extracted_fields": None}
+
         # Fetch extracted data
         ed_result = await session.execute(
             select(ExtractedData).where(ExtractedData.document_id == app.form_document_id)
         )
         extracted = ed_result.scalar_one_or_none()
-        fields = extracted.validated_data if extracted else {}
+        fields = dict(extracted.validated_data or {}) if extracted else {}
+        # Images are served via /attachment URLs, not inline base64.
+        for k in ("photo_image", "signature_image"):
+            fields.pop(k, None)
 
         # Auto-populate the KYC application with extracted fields
         kyc_result = await session.execute(
@@ -365,33 +339,24 @@ async def get_kyc_form_status(kyc_id: str):
         )
         kyc_app = kyc_result.scalar_one_or_none()
         if kyc_app and fields:
-            # Try common field names from different form types
-            name = fields.get("name") or fields.get("applicant_name") or fields.get("full_name") or fields.get("claimant_name")
-            father = fields.get("fathers_name") or fields.get("father_name") or fields.get("father's_name") or fields.get("s/o") or fields.get("son_of")
-            dob = fields.get("date_of_birth") or fields.get("dob") or fields.get("DOB") or fields.get("birth_date")
-            addr = fields.get("address") or fields.get("residential_address") or fields.get("permanent_address")
-
-            if name and not kyc_app.applicant_name:
-                kyc_app.applicant_name = str(name)
-            if father and not kyc_app.fathers_name:
-                kyc_app.fathers_name = str(father)
-            if dob and not kyc_app.date_of_birth:
-                kyc_app.date_of_birth = str(dob)
-            if addr and not kyc_app.address:
-                kyc_app.address = str(addr)
+            ident = extract_identity_fields(fields)
+            for attr, value in ident.items():
+                if value and not getattr(kyc_app, attr):
+                    setattr(kyc_app, attr, str(value))
             await session.commit()
 
         return {
             "kyc_id": kyc_id,
             "status": "completed",
             "extracted_fields": fields,
+            "images_status": kyc_app.form_images_status if kyc_app else None,
             "populated": {
                 "applicant_name": kyc_app.applicant_name if kyc_app else None,
                 "fathers_name": kyc_app.fathers_name if kyc_app else None,
                 "date_of_birth": kyc_app.date_of_birth if kyc_app else None,
                 "address": kyc_app.address if kyc_app else None,
-                "photo_url": f"/api/v1/kyc/{kyc_id}/attachment/photo" if kyc_app and kyc_app.photo_path else None,
-                "signature_url": f"/api/v1/kyc/{kyc_id}/attachment/signature" if kyc_app and kyc_app.signature_path else None,
+                "photo_url": kyc_db.kyc_form_image_url(kyc_id, "photo") if kyc_app and kyc_app.photo_path else None,
+                "signature_url": kyc_db.kyc_form_image_url(kyc_id, "signature") if kyc_app and kyc_app.signature_path else None,
             },
         }
 
@@ -484,6 +449,31 @@ async def get_kyc_attachment(kyc_id: str, attachment_type: str):
         headers={"Cache-Control": "no-cache"},
     )
 
+@router.get("/kyc/{kyc_id}/documents/{document_id}/attachment/{attachment_type}")
+async def get_kyc_doc_attachment(kyc_id: str, document_id: str, attachment_type: str):
+    """Serve the photo or signature cropped from an uploaded ID document."""
+    import os
+    from fastapi.responses import FileResponse
+
+    if attachment_type not in ("photo", "signature"):
+        raise HTTPException(status_code=400, detail="attachment_type must be 'photo' or 'signature'")
+
+    kyc_doc = await kyc_db.get_kyc_document(kyc_id, document_id)
+    if not kyc_doc:
+        raise HTTPException(status_code=404, detail=f"Document {document_id} is not linked to KYC {kyc_id}")
+
+    file_path = kyc_doc.photo_path if attachment_type == "photo" else kyc_doc.signature_path
+    if not file_path or not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail=f"No {attachment_type} extracted from this document")
+
+    return FileResponse(
+        file_path,
+        media_type="image/png",
+        content_disposition_type="inline",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.post("/kyc/{kyc_id}/verify")
 async def run_kyc_verification(kyc_id: str):
     """
@@ -505,10 +495,15 @@ async def run_kyc_verification(kyc_id: str):
             detail="No documents have been extracted yet. Upload and wait for OCR to complete."
         )
 
-    # Gather form data
+    # Make sure the photo/signature crops (form + ID) are finished, then re-read
+    # the application since the form crop may have just filled photo/signature.
+    await ensure_images_ready(kyc_id)
+    app = await kyc_db.get_kyc_application(kyc_id)
+
     import base64
+    import os
+
     def _read_b64(path):
-        import os
         if path and os.path.exists(path):
             try:
                 with open(path, "rb") as f:
@@ -526,25 +521,31 @@ async def run_kyc_verification(kyc_id: str):
         "signature_image": _read_b64(app.signature_path),
     }
 
-    # Gather doc data (merge all extracted fields from linked KYC docs)
+    # Gather doc data: merge text fields from all synced ID docs; take the
+    # photo/signature from the first doc that yielded each crop.
     doc_data = {}
-    for ds in status.get("doc_statuses", []):
-        if ds["synced"] == "synced":
-            from db.database import AsyncSessionLocal
-            from db.models import KycDocument
-            from sqlalchemy.future import select
-            async with AsyncSessionLocal() as session:
-                result = await session.execute(
-                    select(KycDocument).where(
-                        KycDocument.kyc_id == kyc_id,
-                        KycDocument.document_id == ds["document_id"]
-                    )
-                )
-                kyc_doc = result.scalar_one_or_none()
-                if kyc_doc and kyc_doc.extracted_fields:
-                    doc_data.update(kyc_doc.extracted_fields)
+    doc_image_urls = {"photo": None, "signature": None}
+    for kyc_doc in await kyc_db.get_kyc_documents(kyc_id):
+        if kyc_doc.synced != "synced":
+            continue
+        fields = dict(kyc_doc.extracted_fields or {})
+        # The generic pipeline only inlines crops for is_kyc templates — keep
+        # them as a fallback, but prefer the dedicated KYC crop.
+        inline = {k: fields.pop(k, None) for k in ("photo_image", "signature_image")}
+        doc_data.update({k: v for k, v in fields.items() if k not in doc_data or not doc_data[k]})
 
-    if not doc_data:
+        for kind, path in (("photo", kyc_doc.photo_path), ("signature", kyc_doc.signature_path)):
+            key = f"{kind}_image"
+            if doc_data.get(key):
+                continue
+            img = _read_b64(path)
+            if img:
+                doc_data[key] = img
+                doc_image_urls[kind] = kyc_db.kyc_doc_image_url(kyc_id, kyc_doc.document_id, kind)
+            elif inline.get(key):
+                doc_data[key] = inline[key]
+
+    if not any(k not in ("photo_image", "signature_image") for k in doc_data):
         raise HTTPException(
             status_code=400,
             detail="Document extraction completed but no fields were extracted. The document may not contain readable text."
@@ -557,11 +558,25 @@ async def run_kyc_verification(kyc_id: str):
     try:
         result = await verify_kyc(form_data, doc_data)
 
-        # Save result
+        # Attach image links so the UI can show both sides of each comparison.
+        form_image_urls = {
+            "photo": kyc_db.kyc_form_image_url(kyc_id, "photo") if app.photo_path else None,
+            "signature": kyc_db.kyc_form_image_url(kyc_id, "signature") if app.signature_path else None,
+        }
+        for check in result["field_checks"]:
+            kind = {"Applicant Photo": "photo", "Applicant Signature": "signature"}.get(check["field"])
+            if kind:
+                check["form_image_url"] = form_image_urls[kind]
+                check["doc_image_url"] = doc_image_urls[kind]
+
+        # Snapshots keep text only — images stay on disk, referenced by URL.
+        def _strip_images(d):
+            return {k: v for k, v in d.items() if k not in ("photo_image", "signature_image")}
+
         await kyc_db.save_kyc_result(
             kyc_id=kyc_id,
-            form_data=form_data,
-            doc_data=doc_data,
+            form_data={**_strip_images(form_data), **{f"{k}_url": v for k, v in form_image_urls.items()}},
+            doc_data={**_strip_images(doc_data), **{f"{k}_url": v for k, v in doc_image_urls.items()}},
             field_checks=result["field_checks"],
             overall_status=result["overall_status"],
             confidence=result["confidence"],

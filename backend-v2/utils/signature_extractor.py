@@ -507,11 +507,15 @@ def extract_signature_and_photo(
                             logger.info(f"[Document {document_id}] Path 2: Photo successfully extracted from annotated image: ({px1}, {py1})->({px2}, {py2})")
                             break
 
-        if result["has_signature"] or result["has_photo"]:
-            logger.info(f"[Document {document_id}] Path 2 succeeded (signature={result['has_signature']}, photo={result['has_photo']}). Returning result.")
+        if result["has_signature"] and result["has_photo"]:
+            logger.info(f"[Document {document_id}] Path 2 found both signature and photo. Returning result.")
             return result
-        else:
-            logger.info(f"[Document {document_id}] Path 2 found nothing. Falling back...")
+        # ID cards often yield the photo here but not the signature (or vice
+        # versa) — fall back for whatever is missing, keeping what was found.
+        logger.info(
+            f"[Document {document_id}] Path 2 partial (signature={result['has_signature']}, "
+            f"photo={result['has_photo']}). Falling back for the missing region(s)..."
+        )
             
     except Exception as e:
         logger.error(f"[Document {document_id}] Path 2 failed: {e}. Resetting result and falling back...")
@@ -566,8 +570,9 @@ def extract_signature_and_photo(
             logger.warning(f"[Document {document_id}] Failed to parse document_annotation: {e}")
 
     if annotation:
-        result["confidence"] = annotation.confidence
-        result["signer_name"] = annotation.signer_name
+        if not result["has_signature"]:
+            result["confidence"] = annotation.confidence
+        result["signer_name"] = result["signer_name"] or annotation.signer_name
         logger.info(
             f"[Document {document_id}] Annotation: has_signature={annotation.has_signature}, "
             f"confidence={annotation.confidence}, location={annotation.signature_location}"
@@ -600,7 +605,7 @@ def extract_signature_and_photo(
         return result
 
     # ── Crop signature ────────────────────────────────────────────────────
-    if bboxes.signature_found and all(
+    if not result["has_signature"] and bboxes.signature_found and all(
         v is not None for v in (bboxes.sig_x1, bboxes.sig_y1, bboxes.sig_x2, bboxes.sig_y2)
     ):
         result["has_signature"] = True
@@ -617,7 +622,7 @@ def extract_signature_and_photo(
             logger.info(f"[Document {document_id}] Signature crop saved: {sig_path}")
 
     # ── Crop photo ────────────────────────────────────────────────────────
-    if bboxes.photo_found and all(
+    if not result["has_photo"] and bboxes.photo_found and all(
         v is not None for v in (bboxes.photo_x1, bboxes.photo_y1, bboxes.photo_x2, bboxes.photo_y2)
     ):
         result["has_photo"] = True
