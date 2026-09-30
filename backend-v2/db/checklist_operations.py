@@ -148,6 +148,17 @@ async def get_gate_documents(batch_id: str) -> list[Document]:
         return list(result.scalars().all())
 
 
+async def get_open_gate_batch_ids() -> list[str]:
+    """Batches sitting at the human gate — judged incomplete and not yet released."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(BatchChecklist.batch_id)
+            .where(BatchChecklist.gate_opened.is_(True))
+            .where(BatchChecklist.released.is_(False))
+        )
+        return list(result.scalars().all())
+
+
 async def is_released(batch_id: str) -> bool:
     """Has this batch already been let through the gate?"""
     row = await get_checklist(batch_id)

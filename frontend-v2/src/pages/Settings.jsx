@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useApp } from '../store/AppStore';
-import { getNormConfig, saveNormConfig, getClassificationConfig, saveClassificationConfig, getVllmSettings, saveVllmSettings, getSplitSettings, saveSplitSettings } from '../api/client';
+import { getNormConfig, saveNormConfig, getClassificationConfig, saveClassificationConfig, getVllmSettings, saveVllmSettings, getSplitSettings, saveSplitSettings, getChecklistSettings, saveChecklistSettings } from '../api/client';
 import {
   Settings as SettingsIcon, SlidersHorizontal, BarChart3,
   CheckCircle2, Circle, ChevronRight, Zap, Eye, ShieldCheck,
-  Palette, Info, RotateCcw, Save, Tag, Trash2, Plus, Bot, ToggleLeft, ToggleRight, Scissors,
+  Palette, Info, RotateCcw, Save, Tag, Trash2, Plus, Bot, ToggleLeft, ToggleRight, Scissors, ListChecks,
 } from 'lucide-react';
 
 /* ─────────────────────────────────────────────────────────────
@@ -16,6 +16,7 @@ const NAV = [
   { id: 'normalization', label: 'Normalization Format', icon: Palette,      desc: 'Date, number & name rules' },
   { id: 'classification', label: 'Classification Types', icon: Tag,          desc: 'Supported document types' },
   { id: 'splitting',      label: 'Document Splitting',   icon: Scissors,     desc: 'Multi-document packet handling' },
+  { id: 'checklist',      label: 'Document Checklist',   icon: ListChecks,   desc: 'Types that skip the checklist' },
   // { id: 'vllm',           label: 'vLLM Fallback',        icon: Bot,          desc: 'Re-extract low-confidence fields' },
 ];
 
@@ -1140,6 +1141,244 @@ function SplittingSection({ toast }) {
 }
 
 
+/* ─────────────────────────────────────────────────────────────
+   DOCUMENT CHECKLIST SECTION
+───────────────────────────────────────────────────────────── */
+function ChecklistSection({ toast }) {
+  const [skipTypes, setSkipTypes] = useState([]);
+  const [docTypes, setDocTypes] = useState([]);
+  const [newType, setNewType] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const [checklist, classification] = await Promise.all([
+          getChecklistSettings(), getClassificationConfig(),
+        ]);
+        if (active) {
+          setSkipTypes(checklist.skip_types || []);
+          setDocTypes(classification.map((t) => t.trim().toLowerCase().replace(/\s+/g, '_')));
+          setLoading(false);
+        }
+      } catch (err) {
+        if (active) { toast(err.message || 'Failed to load checklist settings', 'error'); setLoading(false); }
+      }
+    })();
+    return () => { active = false; };
+  }, [toast]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const saved = await saveChecklistSettings({ skip_types: skipTypes });
+      setSkipTypes(saved.skip_types || []);
+      const released = saved.released_batches?.length || 0;
+      toast(
+        released
+          ? `Document checklist settings saved ✓ — ${released} held upload(s) released`
+          : 'Document checklist settings saved ✓',
+        'success',
+      );
+    } catch (err) {
+      toast(err.message || 'Failed to save checklist settings', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addType = (raw) => {
+    const key = raw.trim().toLowerCase().replace(/\s+/g, '_');
+    if (!key) return;
+    if (skipTypes.includes(key)) {
+      toast('This document type already skips the checklist', 'warning');
+      return;
+    }
+    setSkipTypes((prev) => [...prev, key]);
+    setNewType('');
+  };
+
+  const removeType = (key) => setSkipTypes((prev) => prev.filter((t) => t !== key));
+
+  const pretty = (key) => key.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 300, color: 'var(--muted)' }}>
+        <div style={{ fontSize: 13, fontWeight: 500 }}>Loading checklist settings...</div>
+      </div>
+    );
+  }
+
+  // Classification types not yet on the skip list, offered as one-click adds.
+  const suggestions = docTypes.filter((t) => t !== 'others' && !skipTypes.includes(t));
+
+  return (
+    <div>
+      <SectionHeader
+        icon={ListChecks}
+        label="Document Checklist"
+        desc="Choose which document types skip the batch checklist"
+        color="#0d9488"
+      />
+
+      <InfoCallout>
+        After classification, every upload batch is checked against the configured
+        classification types and held for review when one is missing. A document type
+        listed here is still classified and processed as usual, but is <strong>never
+        required</strong> — a batch is not held waiting for it, and an upload containing
+        only these types goes straight through.
+      </InfoCallout>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 24, marginTop: 10 }}>
+
+        {/* Add a type */}
+        <div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <input
+              type="text"
+              placeholder="e.g. kyc_form, cover_letter"
+              value={newType}
+              onChange={(e) => setNewType(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') addType(newType); }}
+              style={{
+                flex: 1,
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                borderRadius: 8,
+                padding: '10px 14px',
+                fontSize: 13,
+                color: 'var(--text)',
+                outline: 'none',
+                boxSizing: 'border-box'
+              }}
+            />
+            <button
+              onClick={() => addType(newType)}
+              style={{
+                all: 'unset', cursor: 'pointer',
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '10px 18px', borderRadius: 8,
+                background: 'var(--accent)',
+                fontSize: 12.5, fontWeight: 600, color: 'white',
+                transition: 'all 0.15s ease',
+                boxShadow: '0 2px 6px rgba(79,110,247,0.2)'
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'color-mix(in srgb, var(--accent) 90%, black)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'var(--accent)'}
+            >
+              <Plus size={14} />
+              Add Type
+            </button>
+          </div>
+
+          {suggestions.length > 0 && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+              <span style={{ fontSize: 10, color: 'var(--muted)', alignSelf: 'center', marginRight: 2 }}>Classification types:</span>
+              {suggestions.map((type) => (
+                <button
+                  key={type}
+                  onClick={() => addType(type)}
+                  style={{
+                    all: 'unset', cursor: 'pointer',
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                    fontSize: 10.5, fontWeight: 600, padding: '3px 9px',
+                    borderRadius: 99,
+                    background: 'var(--surface)', border: '1px solid var(--border)',
+                    color: 'var(--text-dim)',
+                    transition: 'all 0.15s ease',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = '#0d9488'; e.currentTarget.style.color = '#0d9488'; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-dim)'; }}
+                >
+                  <Plus size={10} />
+                  {pretty(type)}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Current skip list */}
+        <div>
+          <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', display: 'block', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Types That Skip The Checklist ({skipTypes.length})
+          </label>
+          {skipTypes.length === 0 ? (
+            <div style={{ padding: '24px 18px', border: '1px dashed var(--border)', borderRadius: 10, textAlign: 'center', color: 'var(--muted)', fontSize: 12.5 }}>
+              No document types skip the checklist. Every classification type is required in each upload batch.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {skipTypes.map((type) => (
+                <div
+                  key={type}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '10px 14px', borderRadius: 8,
+                    background: 'var(--card-alt)', border: '1px solid var(--border)',
+                  }}
+                >
+                  <div>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{pretty(type)}</span>
+                    <span style={{ fontSize: 10.5, color: 'var(--muted)', marginLeft: 10, fontFamily: 'monospace', background: 'var(--surface)', padding: '2px 6px', borderRadius: 4 }}>
+                      {type}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => removeType(type)}
+                    style={{
+                      all: 'unset', cursor: 'pointer',
+                      width: 28, height: 28, borderRadius: 6,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      color: 'var(--muted)',
+                      transition: 'all 0.15s ease',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'color-mix(in srgb, var(--danger) 10%, transparent)'; e.currentTarget.style.color = 'var(--danger)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--muted)'; }}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Action Buttons */}
+        <div style={{
+          display: 'flex', justifyContent: 'flex-end',
+          borderTop: '1px solid var(--border)', paddingTop: 20, marginTop: 10
+        }}>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            style={{
+              all: 'unset', cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '8px 18px', borderRadius: 8,
+              background: 'var(--accent)',
+              fontSize: 12.5, fontWeight: 600, color: 'white',
+              opacity: saving ? 0.7 : 1,
+              transition: 'all 0.15s ease',
+              boxShadow: '0 2px 6px rgba(79,110,247,0.2)'
+            }}
+            onMouseEnter={e => { if(!saving) e.currentTarget.style.background = 'color-mix(in srgb, var(--accent) 90%, black)'; }}
+            onMouseLeave={e => { if(!saving) e.currentTarget.style.background = 'var(--accent)'; }}
+          >
+            <Save size={14} />
+            {saving ? 'Saving...' : 'Save Configuration'}
+          </button>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+
 function VllmSection({ toast }) {
   const [config, setConfig] = useState({ enabled: true, confidence_threshold: 75, trigger_on_missing: true, trigger_on_low_confidence: true });
   const [loading, setLoading] = useState(true);
@@ -1395,7 +1634,10 @@ export function Settings() {
   // ENABLE_DOC_SPLITTING is a deploy-level kill switch: with it off the runtime
   // toggles below cannot turn splitting back on, so the whole section is hidden
   // rather than shown as controls that do nothing.
-  const nav = NAV.filter((n) => n.id !== 'splitting' || features.doc_splitting);
+  const nav = NAV.filter((n) => (
+    (n.id !== 'splitting' || features.doc_splitting) &&
+    (n.id !== 'checklist' || features.doc_checklist)
+  ));
 
   // Derived rather than stored: the flags arrive after the first render, so a
   // section can vanish while it is the one being viewed. Falling back here shows
@@ -1549,6 +1791,10 @@ export function Settings() {
           )}
           {activeSection === 'splitting' && (
             <SplittingSection toast={toast} />
+          )}
+
+          {activeSection === 'checklist' && (
+            <ChecklistSection toast={toast} />
           )}
 
           {activeSection === 'classification' && (

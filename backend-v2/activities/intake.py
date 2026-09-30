@@ -1,6 +1,5 @@
 import logging
 import mistralai.workflows as workflows
-import db.operations as db
 
 from tools.intake import check_document_duplicates
 
@@ -25,6 +24,7 @@ async def intake_activity(document_id: str, filename: str) -> dict:
         return result
 
     except Exception as e:
+        # No db.update_error() here: the engine retries this activity, and the
+        # workflow marks the document failed once the retries are exhausted.
         logger.error(f"[Document {document_id}] Intake failed: {str(e)}")
-        await db.update_error(document_id, {"error": str(e), "stage": "intake"})
         raise

@@ -3,7 +3,6 @@ import os
 from pathlib import Path
 import mistralai.workflows as workflows
 from config import settings
-import db.operations as db
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +53,8 @@ async def preprocessor_activity(document_id: str, file_path: str) -> dict:
             f"[Document {document_id}] Preprocessing failed with error: {str(e)}. "
             f"Falling back to original file path to avoid blocking the pipeline."
         )
-        # Record the error but do NOT re-raise — preprocessing failure must never kill the workflow
-        await db.update_error(document_id, {"error": str(e), "stage": "preprocessor"})
+        # Do NOT re-raise — preprocessing failure must never kill the workflow. And no
+        # db.update_error(): the run continues, so the document is not failed.
         return {
             "preprocessed_path": file_path,
             "original_path": file_path,

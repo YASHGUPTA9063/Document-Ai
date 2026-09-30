@@ -20,6 +20,7 @@ from utils.file_handler import save_file, delete_file
 from utils.norm_config import load_normalization_config, save_normalization_config
 from utils.classification_config import load_classification_config, save_classification_config
 from utils.split_config import load_split_config, save_split_config
+from utils.checklist_config import load_checklist_config, save_checklist_config
 from utils.templates import load_templates, save_templates_to_file
 from platform_core.prompts.manager import PromptManager
 from api.deps import get_mistral_client
@@ -74,6 +75,43 @@ async def update_splitting_settings(config: dict):
         return save_split_config(config)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/settings/checklist")
+async def get_checklist_settings():
+    """Document types that skip the Step 3.2 batch checklist."""
+    return load_checklist_config()
+
+
+@router.put("/settings/checklist")
+async def update_checklist_settings(config: dict):
+    """
+    Save the skip list, then re-judge every batch currently held at the gate.
+
+    A batch held only for a type that has just been put on the skip list has
+    nothing outstanding any more, so it is released here rather than left
+    waiting for a reviewer to press Re-check on each one.
+    """
+    try:
+        saved = save_checklist_config(config)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    from activities.checklist import evaluate_batch
+    import db.checklist_operations as checklist_db
+
+    released = []
+    for batch_id in await checklist_db.get_open_gate_batch_ids():
+        try:
+            verdict = await evaluate_batch(batch_id)
+            if verdict.get("action") == "released":
+                released.append(batch_id)
+        except Exception as e:
+            # The settings are saved either way; a batch that could not be
+            # re-judged simply stays at the gate for a manual Re-check.
+            logger.warning(f"[Batch {batch_id}] Re-check after checklist settings change failed: {e}")
+
+    return {**saved, "released_batches": released}
 
 
 @router.get("/settings/features")

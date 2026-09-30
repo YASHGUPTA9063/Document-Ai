@@ -28,6 +28,18 @@ def _gen_kyc_id() -> str:
 
 # ─── KYC APPLICATION CRUD ─────────────────────────────────────────────────────
 
+# Applicant details beyond the identity fields verification compares.
+APPLICANT_DETAIL_FIELDS = (
+    "gender", "nationality", "passport_number",
+    "driving_license_number", "email", "contact_number",
+)
+
+
+def applicant_details(app: KycApplication) -> dict:
+    """The applicant's extra details as {field: value}."""
+    return {k: getattr(app, k) for k in APPLICANT_DETAIL_FIELDS}
+
+
 async def create_kyc_application(
     applicant_name: Optional[str] = None,
     fathers_name: Optional[str] = None,
@@ -35,6 +47,7 @@ async def create_kyc_application(
     address: Optional[str] = None,
     form_source: str = "manual",
     form_document_id: Optional[str] = None,
+    **details: Optional[str],
 ) -> KycApplication:
     """Creates a new KYC application record. Returns the created object."""
     kyc_id = _gen_kyc_id()
@@ -49,6 +62,7 @@ async def create_kyc_application(
             form_source=form_source,
             form_document_id=form_document_id,
             status="form_submitted",
+            **{k: details.get(k) for k in APPLICANT_DETAIL_FIELDS},
         )
         session.add(app)
         await session.commit()
@@ -95,6 +109,7 @@ async def update_kyc_form_data(
     fathers_name: Optional[str] = None,
     date_of_birth: Optional[str] = None,
     address: Optional[str] = None,
+    **details: Optional[str],
 ):
     """Updates the applicant form data (e.g. after OCR extraction or manual edit)."""
     async with AsyncSessionLocal() as session:
@@ -112,6 +127,9 @@ async def update_kyc_form_data(
             app.date_of_birth = date_of_birth
         if address is not None:
             app.address = address
+        for k in APPLICANT_DETAIL_FIELDS:
+            if details.get(k) is not None:
+                setattr(app, k, details[k])
         await session.commit()
         await session.refresh(app)
         return app
@@ -284,6 +302,7 @@ async def get_kyc_doc_status(kyc_id: str) -> dict:
                 "fathers_name": app.fathers_name,
                 "date_of_birth": app.date_of_birth,
                 "address": app.address,
+                **applicant_details(app),
                 "form_source": app.form_source,
             },
         }

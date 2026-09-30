@@ -283,7 +283,6 @@ async def auto_verify_activity(document_id: str, validated_data: dict) -> dict:
 
     except Exception as e:
         logger.error(f"[AutoVerifier] Auto-Verifier Agent failed: {str(e)}")
-        # Record error and return direct execution
-        import db.operations as db
-        await db.update_error(document_id, {"error": str(e), "stage": "auto_verify"})
+        # No db.update_error(): the run continues on the direct path, so the
+        # document is not failed.
         return await execute_direct_fallback()

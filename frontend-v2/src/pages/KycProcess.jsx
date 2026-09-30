@@ -4,8 +4,9 @@ import {
   Shield, Plus, Sparkles, User, FileText, Upload as UploadIcon, UploadCloud,
   CheckCircle, XCircle, AlertTriangle, Loader2, Trash2, Eye,
   ChevronRight, ChevronLeft, Edit3, ArrowRight, X, RefreshCw,
-  Calendar, Camera, PenTool, Users, MapPin,
+  Calendar, Camera, PenTool, Users, MapPin, Check,
 } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import { Modal } from '../components/ui/Modal';
 import {
   createKycApplication, listKycApplications, getKycStatus,
@@ -129,6 +130,17 @@ function idDocStatus(d) {
 }
 
 /* The documents from the most recent upload — the ones the user picks from */
+// Extra applicant details read off the form, shown and editable on the review step.
+const DETAIL_FIELDS = [
+  { key: 'gender', label: 'Gender' },
+  { key: 'nationality', label: 'Nationality' },
+  { key: 'passport_number', label: 'Passport Number' },
+  { key: 'driving_license_number', label: 'Driving License Number' },
+  { key: 'email', label: 'Email' },
+  { key: 'contact_number', label: 'Contact Number' },
+];
+const EMPTY_DETAILS = Object.fromEntries(DETAIL_FIELDS.map(f => [f.key, '']));
+
 const latestBatchDocs = (status) =>
   (status?.doc_statuses || []).filter(d => d.upload_batch === (status.latest_batch ?? null));
 
@@ -168,6 +180,7 @@ export function KycProcess() {
   const [fDob, setFDob] = useState('');
   const [fFather, setFFather] = useState('');
   const [fAddress, setFAddress] = useState('');
+  const [fDetails, setFDetails] = useState(EMPTY_DETAILS);
   const [fFile, setFFile] = useState(null);
   const [fFormDragActive, setFFormDragActive] = useState(false);
   const [fPhoto, setFPhoto] = useState(null);
@@ -189,6 +202,19 @@ export function KycProcess() {
   /* ── Result state (Step 4) ── */
   const [verifying, setVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState(null);
+  const [decision, setDecision] = useState(null); // 'approve' | 'disapprove' pending confirmation
+  const [decisionDone, setDecisionDone] = useState(null); // confirmed decision, shown as a brief tick popup
+
+  // Show the tick popup briefly, then close the wizard
+  useEffect(() => {
+    if (!decisionDone) return;
+    const t = setTimeout(() => {
+      setDecisionDone(null);
+      resetWizard();
+      setWizardOpen(false);
+    }, 1800);
+    return () => clearTimeout(t);
+  }, [decisionDone]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fileInputRef = useRef(null);
   const photoInputRef = useRef(null);
@@ -229,6 +255,7 @@ export function KycProcess() {
     setActiveKycId(null);
     setFormMode('manual');
     setFName(''); setFDob(''); setFFather(''); setFAddress('');
+    setFDetails(EMPTY_DETAILS);
     setFFile(null); setFFormDragActive(false);
     setFPhoto(null); setFPhotoPreview(null);
     setFSignature(null); setFSignaturePreview(null);
@@ -327,6 +354,7 @@ export function KycProcess() {
         date_of_birth: fDob.trim(),
         fathers_name: fFather.trim(),
         address: fAddress.trim(),
+        ...Object.fromEntries(DETAIL_FIELDS.map(({ key }) => [key, fDetails[key].trim()])),
       });
       await Promise.all([loadApps(), loadIdStatus(activeKycId)]);
       setWizardStep(2);
@@ -335,7 +363,7 @@ export function KycProcess() {
     } finally {
       setSubmitting(false);
     }
-  }, [activeKycId, fName, fDob, fFather, fAddress, loadApps, loadIdStatus]);
+  }, [activeKycId, fName, fDob, fFather, fAddress, fDetails, loadApps, loadIdStatus]);
 
   /* ── Step 3: Queue ID documents ── */
   const addIdFiles = useCallback((files) => {
@@ -421,6 +449,7 @@ export function KycProcess() {
             date_of_birth: s.populated.date_of_birth || app.date_of_birth,
             fathers_name: s.populated.fathers_name || app.fathers_name,
             address: s.populated.address || app.address,
+            ...Object.fromEntries(DETAIL_FIELDS.map(({ key }) => [key, s.populated[key] || app[key]])),
             photo_url: s.populated.photo_url || app.photo_url,
             signature_url: s.populated.signature_url || app.signature_url,
           };
@@ -446,6 +475,7 @@ export function KycProcess() {
     setFDob(app.date_of_birth || '');
     setFFather(app.fathers_name || '');
     setFAddress(app.address || '');
+    setFDetails(Object.fromEntries(DETAIL_FIELDS.map(({ key }) => [key, app[key] || ''])));
     setFPhotoPreview(app.photo_url || null);
     setFSignaturePreview(app.signature_url || null);
     setWizardOpen(true);
@@ -904,6 +934,11 @@ export function KycProcess() {
                     { label: 'Full Name', value: fName, set: setFName },
                     { label: 'Date of Birth', value: fDob, set: setFDob },
                     { label: "Father's Name", value: fFather, set: setFFather },
+                    ...DETAIL_FIELDS.map(({ key, label }) => ({
+                      label,
+                      value: fDetails[key],
+                      set: v => setFDetails(d => ({ ...d, [key]: v })),
+                    })),
                     { label: 'Address', value: fAddress, set: setFAddress, wide: true },
                   ].map(({ label, value, set, wide }) => (
                     <div key={label} style={{ padding: '10px 14px', borderRadius: 8, background: 'rgba(0,0,0,0.06)', gridColumn: wide ? '1 / -1' : undefined }}>
@@ -1247,16 +1282,69 @@ export function KycProcess() {
                     </div>
                   )}
 
-                  {/* Done */}
+                  {/* Approve / Disapprove */}
                   <div style={{ display: 'flex', justifyContent: 'center', gap: 12 }}>
                     <button
-                      className="btn btn-primary"
-                      onClick={() => { resetWizard(); setWizardOpen(false); }}
+                      className="btn btn-success"
+                      onClick={() => setDecision('approve')}
                       style={{ padding: '10px 28px', fontSize: 13, fontWeight: 600, gap: 6, display: 'flex', alignItems: 'center' }}
                     >
-                      <CheckCircle size={14} /> Done
+                      <CheckCircle size={14} /> Approve
+                    </button>
+                    <button
+                      className="btn btn-danger"
+                      onClick={() => setDecision('disapprove')}
+                      style={{ padding: '10px 28px', fontSize: 13, fontWeight: 600, gap: 6, display: 'flex', alignItems: 'center' }}
+                    >
+                      <XCircle size={14} /> Disapprove
                     </button>
                   </div>
+
+                  {decision && (
+                    <Modal
+                      title={decision === 'approve' ? 'Approve KYC?' : 'Disapprove KYC?'}
+                      onClose={() => setDecision(null)}
+                      footer={
+                        <>
+                          <button className="btn btn-ghost" onClick={() => setDecision(null)}>Cancel</button>
+                          <button
+                            className={`btn ${decision === 'approve' ? 'btn-success' : 'btn-danger'}`}
+                            onClick={() => { setDecisionDone(decision); setDecision(null); }}
+                          >
+                            {decision === 'approve' ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                            {decision === 'approve' ? 'Yes, Approve' : 'Yes, Disapprove'}
+                          </button>
+                        </>
+                      }
+                    >
+                      <div style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.6 }}>
+                        Are you sure you want to {decision} this KYC application?
+                      </div>
+                    </Modal>
+                  )}
+
+                  {decisionDone && createPortal(
+                    <div className="modal-overlay">
+                      <div style={{
+                        background: 'var(--card)', border: '1px solid var(--border-hi)',
+                        borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow)',
+                        padding: '24px 32px', textAlign: 'center',
+                        animation: 'slide-in 200ms var(--ease)',
+                      }}>
+                        <div style={{
+                          width: 52, height: 52, borderRadius: '50%', margin: '0 auto 12px',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          background: 'var(--success)', color: '#fff',
+                        }}>
+                          <Check size={28} strokeWidth={3} />
+                        </div>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>
+                          KYC {decisionDone === 'approve' ? 'Approved' : 'Disapproved'}
+                        </div>
+                      </div>
+                    </div>,
+                    document.body,
+                  )}
                 </div>
               )}
             </div>

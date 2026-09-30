@@ -44,6 +44,7 @@ async def create_kyc_application(request: CreateKycApplicationRequest):
         address=request.address,
         form_source=request.form_source or "manual",
         form_document_id=request.form_document_id,
+        **{k: getattr(request, k) for k in kyc_db.APPLICANT_DETAIL_FIELDS},
     )
     return {
         "kyc_id": app.kyc_id,
@@ -51,6 +52,7 @@ async def create_kyc_application(request: CreateKycApplicationRequest):
         "fathers_name": app.fathers_name,
         "date_of_birth": app.date_of_birth,
         "address": app.address,
+        **kyc_db.applicant_details(app),
         "form_source": app.form_source,
         "status": app.status,
         "created_at": app.created_at.isoformat() if app.created_at else None,
@@ -69,6 +71,7 @@ async def list_kyc_applications():
             "fathers_name": a.fathers_name,
             "date_of_birth": a.date_of_birth,
             "address": a.address,
+            **kyc_db.applicant_details(a),
             "form_source": a.form_source,
             "form_document_id": a.form_document_id,
             "status": a.status,
@@ -91,6 +94,7 @@ async def get_kyc_application(kyc_id: str):
         "fathers_name": app.fathers_name,
         "date_of_birth": app.date_of_birth,
         "address": app.address,
+        **kyc_db.applicant_details(app),
         "form_source": app.form_source,
         "form_document_id": app.form_document_id,
         "photo_url": f"/api/v1/kyc/{app.kyc_id}/attachment/photo" if app.photo_path else None,
@@ -113,6 +117,7 @@ async def update_kyc_form(kyc_id: str, request: UpdateKycFormRequest):
         fathers_name=request.fathers_name,
         date_of_birth=request.date_of_birth,
         address=request.address,
+        **{k: getattr(request, k) for k in kyc_db.APPLICANT_DETAIL_FIELDS},
     )
     return {
         "kyc_id": updated.kyc_id,
@@ -120,6 +125,7 @@ async def update_kyc_form(kyc_id: str, request: UpdateKycFormRequest):
         "fathers_name": updated.fathers_name,
         "date_of_birth": updated.date_of_birth,
         "address": updated.address,
+        **kyc_db.applicant_details(updated),
         "status": updated.status,
     }
 
@@ -365,6 +371,7 @@ async def get_kyc_form_status(kyc_id: str):
             "fathers_name": kyc_app.fathers_name if kyc_app else None,
             "date_of_birth": kyc_app.date_of_birth if kyc_app else None,
             "address": kyc_app.address if kyc_app else None,
+            **(kyc_db.applicant_details(kyc_app) if kyc_app else {}),
             "photo_url": kyc_db.kyc_form_image_url(kyc_id, "photo") if kyc_app and kyc_app.photo_path else None,
             "signature_url": kyc_db.kyc_form_image_url(kyc_id, "signature") if kyc_app and kyc_app.signature_path else None,
         },

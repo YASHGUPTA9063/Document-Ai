@@ -15,6 +15,7 @@ import hashlib
 import logging
 
 from tools.classifier import get_supported_doc_types
+from utils.checklist_config import load_checklist_config
 
 logger = logging.getLogger(__name__)
 
@@ -22,10 +23,15 @@ logger = logging.getLogger(__name__)
 # to upload, so it never appears on the checklist.
 OTHERS_KEY = "others"
 
-# Types that are classified like any other but never required in a batch. The
-# KYC application form is uploaded on its own, ahead of the identity documents,
-# so requiring it would hold every document batch waiting for it.
-NOT_REQUIRED_KEYS = {OTHERS_KEY, "kyc_form"}
+
+def skipped_types() -> set[str]:
+    """
+    Types that are classified like any other but never required in a batch.
+
+    Configured in Settings → Document Checklist (`utils/checklist_config.py`);
+    the KYC application form is there by default.
+    """
+    return set(load_checklist_config()["skip_types"])
 
 # Statuses that mean a document will never produce a doc_type. Anything else
 # without one is still on its way through the pipeline, and the batch is not
@@ -39,10 +45,11 @@ EXCLUDED_STATUSES = {"deleted", "split"}
 
 def build_required_types() -> list[dict]:
     """The configured classification types, as ordered checklist lines."""
+    not_required = skipped_types() | {OTHERS_KEY}
     return [
         {"doc_type": key, "label": label}
         for key, label in get_supported_doc_types().items()
-        if key not in NOT_REQUIRED_KEYS
+        if key not in not_required
     ]
 
 
@@ -71,6 +78,17 @@ def is_settled(doc) -> bool:
 def pending_documents(documents: list) -> list:
     """Documents still in flight, i.e. ones that could yet supply a missing type."""
     return [d for d in documents if not is_excluded(d) and not is_settled(d)]
+
+
+def only_skipped_types(documents: list) -> bool:
+    """
+    Is the batch made up of nothing but types that skip the checklist?
+
+    Such a batch has no set to reconcile — judging it would report every
+    required type as missing for an upload that was never meant to carry them.
+    """
+    types = {observed_type(d) for d in documents if not is_excluded(d)}
+    return bool(types) and types <= skipped_types()
 
 
 def reconcile(documents: list, required: list[dict] | None = None) -> dict:

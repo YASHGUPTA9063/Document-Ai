@@ -147,7 +147,6 @@ async def fraud_check_activity(document_id: str, file_path: str) -> dict:
             f"[Document {document_id}] Fraud check agent call failed with error: {str(e)}. "
             f"Falling back to local execution to avoid blocking the pipeline."
         )
-        # Record error and return direct execution
-        import db.operations as db
-        await db.update_error(document_id, {"error": str(e), "stage": "fraud_checker"})
+        # No db.update_error(): the run continues on the direct path, so the
+        # document is not failed.
         return await run_identity_proofing(file_path, document_id)

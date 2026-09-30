@@ -39,6 +39,12 @@ async def update_status_and_message_activity(document_id: str, status: str, mess
     return status
 
 @workflows.activity()
+async def record_failure_activity(document_id: str, stage: str, message: str) -> str:
+    import db.operations as db
+    await db.update_error(document_id, {"error": message, "stage": stage})
+    return "failed"
+
+@workflows.activity()
 async def update_doc_type_activity(document_id: str, doc_type: str) -> str:
     import db.operations as db
     await db.update_doc_type(document_id, doc_type)
@@ -69,6 +75,27 @@ async def _update_status_and_message(document_id: str, status: str, message: str
 async def _update_doc_type(document_id: str, doc_type: str) -> str:
     with workflows.run_activities_locally():
         return await update_doc_type_activity(document_id, doc_type)
+
+async def _record_failure(document_id: str, err: BaseException) -> None:
+    """
+    Mark the document failed, once, after a step has exhausted its retries.
+
+    Activities used to do this themselves on every attempt, so a rate limit
+    that the engine's retry then recovered from still flashed the document as
+    `failed` — and the KYC pages treat `failed` as final.
+    """
+    stage = (getattr(err, "activity_type", None) or "workflow").removesuffix("_activity")
+    # The ActivityError itself only says "Activity task failed"; the step's
+    # own exception is at the end of the cause chain.
+    root = err
+    while root.__cause__ is not None:
+        root = root.__cause__
+    message = getattr(root, "message", None) or str(root) or str(err)
+    try:
+        with workflows.run_activities_locally():
+            await record_failure_activity(document_id, stage, message)
+    except Exception as e:
+        logger.error(f"[Document {document_id}] Could not record failure at '{stage}': {e}")
 
 # Every human gate waits this long before giving up on a reviewer.
 GATE_TIMEOUT = timedelta(hours=24)
@@ -117,6 +144,20 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
         all defaulted, so an ordinary single-document upload — and any execution
         already in flight — behaves exactly as it did before splitting existed.
         """
+        try:
+            return await self._run_pipeline(
+                document_id, filename, file_path, auto_split,
+                preclassified_doc_type, preclassified_confidence, preclassified_reasoning,
+            )
+        except workflows.ActivityError as e:
+            # Raised only once the engine has given up retrying the step.
+            await _record_failure(document_id, e)
+            raise
+
+    async def _run_pipeline(self, document_id: str, filename: str, file_path: str,
+                            auto_split: bool, preclassified_doc_type: str,
+                            preclassified_confidence: float,
+                            preclassified_reasoning: str) -> dict:
         logger.info(f"Starting workflow for document {document_id}")
 
         # Step 1 — Intake

@@ -41,6 +41,7 @@ from tools.checklist import (
     build_required_types,
     fallback_summary,
     format_checklist_prompt,
+    only_skipped_types,
     pending_documents,
     reconcile,
 )
@@ -156,6 +157,12 @@ async def evaluate_batch(batch_id: str, gate_document_id: str | None = None) -> 
     if still_pending:
         return {"action": "waiting", "reason": "batch_incomplete", "batch_id": batch_id,
                 "pending": len(still_pending)}
+
+    if only_skipped_types(documents):
+        logger.info(f"[Batch {batch_id}] Only checklist-skipped types uploaded — releasing.")
+        await release_batch(batch_id, True, "Only document types that skip the checklist.", "auto")
+        return {"action": "released", "reason": "skipped_types_only", "batch_id": batch_id,
+                "complete": True}
 
     required = build_required_types()
     if not required:

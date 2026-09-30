@@ -390,6 +390,7 @@ async def extractor_activity(document_id: str, file_path: str, doc_type: str) ->
         }
 
     except Exception as e:
+        # No db.update_error() here: the engine retries this activity, and the
+        # workflow marks the document failed once the retries are exhausted.
         logger.error(f"[Document {document_id}] Extractor failed: {str(e)}")
-        await db.update_error(document_id, {"error": str(e), "stage": "extractor"})
         raise

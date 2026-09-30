@@ -255,6 +255,12 @@ class KycApplication(Base):
     fathers_name = Column(String, nullable=True)
     date_of_birth = Column(String, nullable=True)       # stored as string for display flexibility
     address = Column(Text, nullable=True)
+    gender = Column(String, nullable=True)
+    nationality = Column(String, nullable=True)
+    passport_number = Column(String, nullable=True)
+    driving_license_number = Column(String, nullable=True)
+    email = Column(String, nullable=True)
+    contact_number = Column(String, nullable=True)
     form_source = Column(String, nullable=False, default="manual")  # "manual" | "uploaded"
     form_document_id = Column(String, ForeignKey("documents.id"), nullable=True)  # links to Document if form was uploaded
     photo_path = Column(String, nullable=True)       # file path for applicant photo

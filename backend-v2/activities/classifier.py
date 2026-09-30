@@ -7,7 +7,6 @@ import mistralai.workflows as workflows
 from platform_core.adapters.resilient_mistral import get_mistral_client
 from config import settings
 from tools.classifier import get_supported_doc_types, get_document_text
-import db.operations as db
 
 logger = logging.getLogger(__name__)
 client = get_mistral_client()
@@ -203,6 +202,7 @@ async def classifier_activity(document_id: str, file_path: str) -> dict:
         return result
 
     except Exception as e:
+        # No db.update_error() here: the engine retries this activity, and the
+        # workflow marks the document failed once the retries are exhausted.
         logger.error(f"[Document {document_id}] Classifier failed: {str(e)}")
-        await db.update_error(document_id, {"error": str(e), "stage": "classifier"})
         raise

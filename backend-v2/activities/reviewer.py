@@ -3,7 +3,6 @@ import logging
 import mistralai.workflows as workflows
 from platform_core.adapters.resilient_mistral import get_mistral_client
 from config import settings
-import db.operations as db
 from tools.reviewer import REVIEWER_TOOLS, get_review_context
 
 logger = logging.getLogger(__name__)
@@ -154,6 +153,7 @@ async def reviewer_activity(document_id: str, validated_data: dict, confidence_s
         return parsed
 
     except Exception as e:
+        # No db.update_error() here: the engine retries this activity, and the
+        # workflow marks the document failed once the retries are exhausted.
         logger.error(f"[Document {document_id}] Reviewer failed: {str(e)}")
-        await db.update_error(document_id, {"error": str(e), "stage": "reviewer"})
         raise

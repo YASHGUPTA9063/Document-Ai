@@ -52,8 +52,8 @@ async def output_activity(
         return result
 
     except Exception as e:
+        # No update_error() here: the engine retries this activity, and the
+        # workflow marks the document failed once the retries are exhausted.
         logger.error(f"[Document {document_id}] Output failed: {str(e)}")
-        from db.operations import update_error
-        await update_error(document_id, {"error": str(e), "stage": "output"})
         raise
 

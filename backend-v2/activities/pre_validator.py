@@ -5,7 +5,6 @@ import mistralai.workflows as workflows
 from platform_core.adapters.resilient_mistral import get_mistral_client
 from config import settings
 from utils.file_handler import get_file_as_base64
-import db.operations as db
 
 logger = logging.getLogger(__name__)
 client = get_mistral_client()
@@ -357,6 +356,7 @@ async def pre_validator_activity(document_id: str, file_path: str) -> dict:
         return result
 
     except Exception as e:
+        # No db.update_error() here: the engine retries this activity, and the
+        # workflow marks the document failed once the retries are exhausted.
         logger.error(f"[Document {document_id}] Pre-validation failed: {str(e)}")
-        await db.update_error(document_id, {"error": str(e), "stage": "pre_validator"})
         raise

@@ -2,7 +2,8 @@
 activities/kyc_form.py
 ──────────────────────
 Reads the applicant's identity (name, date of birth, father's name, address)
-off an uploaded KYC application form.
+and contact / ID details (gender, nationality, passport and driving license
+numbers, email, contact number) off an uploaded KYC application form.
 
 The generic pipeline extracts forms against their template, and a template may
 not expose these as flat fields (e.g. `kyc_form` puts them in the
@@ -29,7 +30,11 @@ logger = logging.getLogger(__name__)
 
 PROMPTS = PromptManager()
 
-IDENTITY_FIELDS = ("applicant_name", "date_of_birth", "fathers_name", "address")
+IDENTITY_FIELDS = (
+    "applicant_name", "date_of_birth", "fathers_name", "address",
+    "gender", "nationality", "passport_number", "driving_license_number",
+    "email", "contact_number",
+)
 
 _SCHEMA = {
     "type": "json_schema",

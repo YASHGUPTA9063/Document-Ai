@@ -341,6 +341,25 @@ export async function saveClassificationConfig(docTypes) {
   return data;
 }
 
+/**
+ * Get the document types that skip the batch checklist.
+ * @returns {Promise<{skip_types: string[]}>}
+ */
+export async function getChecklistSettings() {
+  const { data } = await api.get('/settings/checklist');
+  return data;
+}
+
+/**
+ * Save the document types that skip the batch checklist.
+ * @param {{skip_types: string[]}} config
+ * @returns {Promise<{skip_types: string[]}>}
+ */
+export async function saveChecklistSettings(config) {
+  const { data } = await api.put('/settings/checklist', config);
+  return data;
+}
+
 // ─── Batch checklist (Step 3.2) ──────────────────────
 
 /**

@@ -14,6 +14,12 @@ class CreateKycApplicationRequest(BaseModel):
     fathers_name: Optional[str] = None
     date_of_birth: Optional[str] = None
     address: Optional[str] = None
+    gender: Optional[str] = None
+    nationality: Optional[str] = None
+    passport_number: Optional[str] = None
+    driving_license_number: Optional[str] = None
+    email: Optional[str] = None
+    contact_number: Optional[str] = None
     form_source: Optional[str] = "manual"       # "manual" | "uploaded"
     form_document_id: Optional[str] = None       # if form was uploaded via OCR
 
@@ -23,6 +29,12 @@ class UpdateKycFormRequest(BaseModel):
     fathers_name: Optional[str] = None
     date_of_birth: Optional[str] = None
     address: Optional[str] = None
+    gender: Optional[str] = None
+    nationality: Optional[str] = None
+    passport_number: Optional[str] = None
+    driving_license_number: Optional[str] = None
+    email: Optional[str] = None
+    contact_number: Optional[str] = None
 
 
 class KycVerifyRequest(BaseModel):
