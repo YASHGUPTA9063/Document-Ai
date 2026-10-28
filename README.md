@@ -60,6 +60,20 @@ The application is engineered using professional, premium front-end styling prac
    ```
 4. Open the displayed local URL in your browser to access the dashboard.
 
+### 3. Deploy on an Azure VM
+
+On a fresh Ubuntu VM, from the repo root (with the real secrets in `backend-v2/.env`):
+
+```bash
+chmod +x deploy-azure.sh
+./deploy-azure.sh            # installs Docker, builds, starts the whole stack
+./deploy-azure.sh status     # or: logs [service] | restart | stop
+```
+
+The app is served on port 80 (nginx serves the UI and proxies `/api/`), so the
+NSG needs inbound 22 (SSH, your IP only) and 80. The API stays bound to
+`127.0.0.1:8000` unless you pass `--expose-api`.
+
 ---
 
 ## 🛠️ Built With

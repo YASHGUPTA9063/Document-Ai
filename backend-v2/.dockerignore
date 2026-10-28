@@ -5,9 +5,13 @@ __pycache__/
 .venv/
 venv/
 
-# Local env / secrets — pass these in via docker-compose env_file / secrets instead
-
-
+# Local env / secrets — pass these in via docker-compose env_file / secrets instead.
+# Must stay out of the image: config.py loads ./.env with override=True, so a
+# baked-in copy (DATABASE_URL=...@localhost, REDIS_URL=127.0.0.1) would beat the
+# postgres/redis hostnames compose sets and the API would crash-loop on migrate.
+.env
+.env.*
+!.env.example
 
 # Local data — mount as volumes instead of baking into the image
 *.db

@@ -94,8 +94,10 @@ services:
       # duplicate Studio pool and every activity ran twice.
       - --workers
       - "${API_WORKERS:-2}"
+    # API_BIND=127.0.0.1:8000 keeps the API off the public interface; nginx in
+    # the frontend container still reaches it over the compose network.
     ports:
-      - "8000:8000"
+      - "${API_BIND:-8000}:8000"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
       interval: 30s
@@ -109,6 +111,9 @@ services:
       <<: *backend-env
       RUN_MIGRATIONS: "false"
     command: ["arq", "worker.WorkerSettings"]
+    # The image's healthcheck curls :8000, which only the api role serves.
+    healthcheck:
+      disable: true
     depends_on:
       postgres:
         condition: service_healthy
@@ -123,6 +128,8 @@ services:
       <<: *backend-env
       RUN_MIGRATIONS: "false"
     command: ["python", "workflow_worker.py"]
+    healthcheck:
+      disable: true
     depends_on:
       postgres:
         condition: service_healthy
@@ -147,7 +154,7 @@ services:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1}
     image: document-ai-frontend:latest
     ports:
-      - "5173:80"
+      - "${FRONTEND_PORT:-5173}:80"
     depends_on:
       - api
     restart: unless-stopped

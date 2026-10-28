@@ -56,3 +56,6 @@ scratch.*
 backend-v2/venv
 backend-v2/doc_workflow.db-shm
 backend-v2/doc_workflow.db-wal
+# Written by deploy-azure.sh on the VM (compose variable substitution:
+# ports, generated Postgres password). Host-specific — never commit it.
+/.env
