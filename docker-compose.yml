@@ -82,6 +82,11 @@ services:
       # The API owns migrations; the other two roles skip them so three
       # containers starting together don't race for the same Alembic lock.
       RUN_MIGRATIONS: "true"
+      # Trust X-Forwarded-Proto from nginx (another container, so not the
+      # 127.0.0.1 uvicorn trusts by default). Without it, redirects the API
+      # generates point at http:// and an HTTPS page blocks them as mixed
+      # content.
+      FORWARDED_ALLOW_IPS: "*"
     command:
       - uvicorn
       - main:app

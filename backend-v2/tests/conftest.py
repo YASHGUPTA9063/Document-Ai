@@ -36,6 +36,10 @@ os.environ["EXECUTION_MODE"] = "inline"
 os.environ["RUN_WORKFLOW_WORKER_IN_API"] = "false"
 os.environ["DEBUG"] = "true"
 
+# Off so upload tests don't start background pushes to a real Mistral library;
+# tests/test_rag_library.py switches it on where it is the subject.
+os.environ["ENABLE_RAG_CHAT"] = "false"
+
 import pytest  # noqa: E402
 
 

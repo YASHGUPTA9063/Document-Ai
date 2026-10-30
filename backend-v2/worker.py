@@ -19,6 +19,7 @@ import logging
 import urllib.parse
 
 from arq.connections import RedisSettings
+from arq.worker import func
 
 from config import settings
 from logging_config import setup_logging
@@ -106,7 +107,31 @@ async def run_claim_pipeline(ctx, claim_id: str, claimant_id: str, policy_id: st
     return {"claim_id": claim_id, "workflow_run_id": run_id, "status": "dispatched"}
 
 
+async def push_document_to_library(ctx, document_id: str):
+    """
+    Copy an uploaded document into the RAG chat's Mistral library.
+
+    arq only retries a job that raises `Retry`, so a failed push is re-queued
+    explicitly with a growing delay. push_document is idempotent, so a retry
+    after a push that actually landed does not duplicate it in the library.
+    """
+    from arq import Retry
+    from utils.rag_library import push_document
+
+    attempt = ctx.get("job_try", 1)
+    try:
+        return await push_document(document_id)
+    except Exception as e:
+        if attempt >= LIBRARY_PUSH_TRIES:
+            logger.error("[Dispatcher] Library push for %s gave up after %s attempts: %s", document_id, attempt, e)
+            return {"document_id": document_id, "status": "failed", "error": str(e)}
+        logger.warning("[Dispatcher] Library push for %s failed (attempt %s): %s", document_id, attempt, e)
+        raise Retry(defer=attempt * 15)
+
+
 # ─── arq settings ────────────────────────────────────────────────────────────
+
+LIBRARY_PUSH_TRIES = 4
 
 def _redis_settings() -> RedisSettings:
     parsed = urllib.parse.urlparse(settings.REDIS_URL)
@@ -123,7 +148,13 @@ class WorkerSettings:
 
     redis_settings = _redis_settings()
 
-    functions = [run_document_pipeline, run_claim_pipeline]
+    # A library push uploads the whole file, so it gets more room than a
+    # dispatch call.
+    functions = [
+        run_document_pipeline,
+        run_claim_pipeline,
+        func(push_document_to_library, timeout=300, max_tries=LIBRARY_PUSH_TRIES),
+    ]
     on_startup = startup
     on_shutdown = shutdown
 

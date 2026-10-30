@@ -164,7 +164,7 @@ async def upload_kyc_document(
     from db.database import AsyncSessionLocal
     from db.models import Document
     from config import settings
-    from api.queue import submit_document_run
+    from api.queue import submit_document_run, submit_library_push
 
     app = await kyc_db.get_kyc_application(kyc_id)
     if not app:
@@ -191,7 +191,7 @@ async def upload_kyc_document(
     # Create Document record and start OCR
     from db.database import AsyncSessionLocal
     from db.models import Document
-    from api.queue import submit_document_run
+    from api.queue import submit_document_run, submit_library_push
 
     async with AsyncSessionLocal() as session:
         doc = Document(
@@ -212,6 +212,8 @@ async def upload_kyc_document(
         if run_id:
             doc.workflow_run_id = run_id
             await session.commit()
+
+    await submit_library_push(doc.id)
 
     # Link document to KYC application
     await kyc_db.link_document_to_kyc(kyc_id, doc.id, upload_batch=upload_batch)
@@ -248,7 +250,7 @@ async def upload_kyc_form(
     import uuid as _uuid
     from db.database import AsyncSessionLocal
     from db.models import Document, KycApplication
-    from api.queue import submit_document_run
+    from api.queue import submit_document_run, submit_library_push
     from sqlalchemy.future import select
 
     app = await kyc_db.get_kyc_application(kyc_id)
@@ -294,6 +296,8 @@ async def upload_kyc_form(
             kyc_app.form_document_id = doc.id
             kyc_app.form_source = "uploaded"
             await session.commit()
+
+    await submit_library_push(doc.id)
 
     # Crop the applicant's photo + signature from the form in the background.
     # Marked running up front so /form-status keeps the frontend polling until

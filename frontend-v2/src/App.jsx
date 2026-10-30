@@ -15,6 +15,7 @@ import { ClaimProcess }  from './pages/ClaimProcess';
 import { ClaimWorkflow } from './pages/ClaimWorkflow';
 import { KycVerdict }    from './pages/KycVerdict';
 import { KycProcess }    from './pages/KycProcess';
+import { Chat }          from './pages/Chat';
 
 const router = createBrowserRouter([
   {
@@ -35,6 +36,7 @@ const router = createBrowserRouter([
       { path: 'claim-workflow',  element: <ClaimWorkflow /> },
       { path: 'kyc-verdict',     element: <KycVerdict /> },
       { path: 'kyc-process',     element: <KycProcess /> },
+      { path: 'chat',            element: <Chat /> },
     ],
   },
 ]);

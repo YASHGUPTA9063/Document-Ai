@@ -79,6 +79,30 @@ class ExtractedData(Base):
     document = relationship("Document", back_populates="extracted_data")
 
 
+class LibraryDocument(Base):
+    """
+    A document's copy in the Mistral document library the RAG chat searches.
+
+    Kept off the documents table so the push can fail, retry and be re-synced
+    without touching pipeline state. `status` follows the library's own
+    processing: queued -> processing -> indexed, or failed with `error` set.
+    """
+    __tablename__ = "library_documents"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    document_id = Column(String, ForeignKey("documents.id"), nullable=False, unique=True, index=True)
+    library_id = Column(String, nullable=True)
+    mistral_document_id = Column(String, nullable=True, index=True)
+    filename = Column(String, nullable=False)
+
+    # queued | processing | indexed | failed | deleted
+    status = Column(String, nullable=False, default="queued")
+    error = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class BatchChecklist(Base):
     """
     One row per upload batch: which of the configured classification types were

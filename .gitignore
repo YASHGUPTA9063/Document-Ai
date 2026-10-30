@@ -59,3 +59,6 @@ backend-v2/doc_workflow.db-wal
 # Written by deploy-azure.sh on the VM (compose variable substitution:
 # ports, generated Postgres password). Host-specific — never commit it.
 /.env
+
+# TLS keys, the private CA and Let's Encrypt state from setup-https.sh.
+/certs/

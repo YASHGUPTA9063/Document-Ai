@@ -125,6 +125,48 @@ async def submit_document_run(
     return None
 
 
+_library_push_tasks: set = set()
+
+
+async def submit_library_push(document_id: str) -> None:
+    """
+    Copy an uploaded document into the RAG chat's Mistral library.
+
+    Never raises: the library is a secondary copy, and an upload must not fail
+    because it could not be indexed for chat. Under `queue` the dispatcher
+    retries the push; under `inline` it runs as a background task, and a
+    failure is left on the library row for POST /chat/library/sync to retry.
+    """
+    if not settings.ENABLE_RAG_CHAT:
+        return
+
+    try:
+        if settings.EXECUTION_MODE == "inline":
+            import asyncio
+            from utils.rag_library import push_document
+
+            async def _push():
+                try:
+                    await push_document(document_id)
+                except Exception as e:
+                    logger.warning("[Queue] Library push failed for %s: %s", document_id, e)
+
+            # Held in a set so the task is not garbage-collected mid-upload.
+            task = asyncio.create_task(_push())
+            _library_push_tasks.add(task)
+            task.add_done_callback(_library_push_tasks.discard)
+            return
+
+        pool = await get_redis_pool()
+        await pool.enqueue_job(
+            "push_document_to_library",
+            document_id,
+            _job_id=f"lib-{document_id}-{uuid.uuid4().hex[:8]}",
+        )
+    except Exception as e:
+        logger.warning("[Queue] Could not schedule library push for %s: %s", document_id, e)
+
+
 async def submit_claim_run(claim_id: str, claimant_id: str, policy_id: str) -> str | None:
     """Get a claim processing. Same return contract as submit_document_run."""
     if settings.EXECUTION_MODE == "inline":

@@ -131,6 +131,7 @@ async def get_feature_flags():
     return {
         "doc_splitting": bool(settings.ENABLE_DOC_SPLITTING),
         "doc_checklist": bool(settings.ENABLE_DOC_CHECKLIST),
+        "rag_chat": bool(settings.ENABLE_RAG_CHAT),
     }
 
 

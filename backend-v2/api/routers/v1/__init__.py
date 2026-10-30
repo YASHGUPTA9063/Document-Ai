@@ -24,6 +24,7 @@ from .claims import router as claims_router
 from .kyc import router as kyc_router
 from .workflow import router as workflow_router
 from .settings import router as settings_router
+from .chat import router as chat_router
 
 # Order matters: literal paths must be registered before any pattern that
 # could swallow them.
@@ -33,6 +34,7 @@ ROUTERS = [
     kyc_router,
     workflow_router,
     settings_router,
+    chat_router,
 ]
 
 # old flat path  ->  canonical path it now lives at

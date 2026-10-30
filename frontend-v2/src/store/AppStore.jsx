@@ -16,6 +16,7 @@ function lsGet(key, fallback) {
 const DEFAULT_FEATURES = {
   doc_splitting: false,
   doc_checklist: true,
+  rag_chat: true,
 };
 
 const initialState = {

@@ -12,6 +12,7 @@ const PAGE_META = {
   '/validation': { title: 'Validation',  sub: 'Human review queue' },
   '/documents':  { title: 'Documents',   sub: 'All processed files' },
   '/agents':     { title: 'Agents',      sub: 'Multi-agent system overview' },
+  '/chat':       { title: 'Document Chat', sub: 'Ask questions across every uploaded document' },
   '/analytics':  { title: 'Analytics',   sub: 'Processing metrics & trends' },
   '/settings':   { title: 'Settings',    sub: 'Configure system preferences' },
 };

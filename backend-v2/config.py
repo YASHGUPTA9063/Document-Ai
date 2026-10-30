@@ -113,6 +113,16 @@ class Settings(BaseSettings):
     CHECKLIST_AGENT_ID: str = Field(default="", description="Document Checklist Agent ID from Mistral Studio — falls back to a deterministic set-difference when unset")
     CHECKLIST_REQUIRE_REVIEW: bool = Field(default=True, description="Pause the batch for human confirmation when required document types are missing")
 
+    # Document Chat (RAG)
+    # Every uploaded document is also pushed to a Mistral document library, and
+    # the chat endpoint answers questions over that library through the
+    # `document_library` tool. The library is created on first use when
+    # MISTRAL_LIBRARY_ID is empty — set it to pin every process to one library.
+    ENABLE_RAG_CHAT: bool = Field(default=True, description="Push uploads to a Mistral document library and serve the RAG chat endpoint")
+    MISTRAL_LIBRARY_ID: str = Field(default="", description="Mistral document library to push uploads into — found or created by MISTRAL_LIBRARY_NAME when empty")
+    MISTRAL_LIBRARY_NAME: str = Field(default="document-ai", description="Name of the library to find or create when MISTRAL_LIBRARY_ID is unset")
+    RAG_CHAT_MODEL: str = Field(default="mistral-medium-latest", description="Model that answers chat questions over the document library")
+
     # Signature Verification Agent IDs
     SIGNATURE_VISION_AGENT_ID: str = Field(..., description="Signature Vision Agent ID from Mistral Studio")
     SIGNATURE_JUDGE_AGENT_ID: str = Field(..., description="Signature Judge Agent ID from Mistral Studio")

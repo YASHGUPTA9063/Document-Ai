@@ -758,4 +758,47 @@ export async function uploadKycAttachment(kycId, file, attachmentType) {
   return data;
 }
 
+// ─── Document Chat (RAG) ─────────────────────────
+
+/**
+ * Ask the document assistant one question. Omit conversationId to start a new
+ * conversation; pass the id from the previous answer to continue it.
+ * @returns {Promise<{conversation_id, answer, sources: Array<{index, title, document_id, description}>}>}
+ */
+export async function sendChatMessage(message, conversationId = null) {
+  const { data } = await api.post(
+    '/chat',
+    { message, ...(conversationId ? { conversation_id: conversationId } : {}) },
+    { timeout: 120_000 }, // retrieval plus generation can take a while
+  );
+  return data;
+}
+
+/**
+ * Delete a chat session's conversation on Mistral, along with the document
+ * excerpts its history holds.
+ */
+export async function deleteChatConversation(conversationId) {
+  const { data } = await api.delete(`/chat/conversations/${encodeURIComponent(conversationId)}`);
+  return data;
+}
+
+/**
+ * Library status of every uploaded document — only `indexed` ones are searchable.
+ * @returns {Promise<{total, counts, documents: Array<{document_id, filename, status, error}>}>}
+ */
+export async function getChatLibrary() {
+  const { data } = await api.get('/chat/library');
+  return data;
+}
+
+/**
+ * Push every document missing from the library, or whose push failed.
+ * @returns {Promise<{queued: number, document_ids: string[]}>}
+ */
+export async function syncChatLibrary() {
+  const { data } = await api.post('/chat/library/sync');
+  return data;
+}
+
 export default api;

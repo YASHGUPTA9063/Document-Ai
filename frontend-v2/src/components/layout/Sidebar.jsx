@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Upload, Cpu, FileSearch,
   CheckCircle, FileText, Bot, BarChart2,
   ChevronLeft, ChevronRight, Settings, FileCode,
-  ClipboardList, Shield
+  ClipboardList, Shield, MessageSquare
 } from 'lucide-react';
 import { useApp } from '../../store/AppStore';
 
@@ -28,6 +28,7 @@ const navSections = [
   {
     label: 'Intelligence',
     items: [
+      { label: 'Document Chat', icon: MessageSquare, to: '/chat', feature: 'rag_chat' },
       { label: 'Agents', icon: Bot, to: '/agents' },
       { label: 'Analytics', icon: BarChart2, to: '/analytics' },
       { label: 'Templates', icon: FileCode, to: '/templates' },
@@ -54,7 +55,7 @@ const navSections = [
 ];
 
 export function Sidebar({ mobileOpen, onMobileClose }) {
-  const { reviewDocs, pendingDocs } = useApp();
+  const { reviewDocs, pendingDocs, features } = useApp();
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem('sidebar-collapsed') === 'true'; }
     catch { return false; }
@@ -115,7 +116,7 @@ export function Sidebar({ mobileOpen, onMobileClose }) {
           {navSections.map((section) => (
             <div key={section.label} className="nav-section">
               <div className="nav-label">{section.label}</div>
-              {section.items.map(({ label, icon: Icon, to }) => {
+              {section.items.filter((item) => !item.feature || features[item.feature]).map(({ label, icon: Icon, to }) => {
                 const badge =
                   label === 'Validation' && reviewDocs.length > 0
                     ? reviewDocs.length

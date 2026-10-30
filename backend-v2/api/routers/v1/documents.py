@@ -49,7 +49,8 @@ from schemas.documents import (
 import db.claim_operations as claim_db
 import db.checklist_operations as checklist_db
 from api.deps import ALLOWED_TYPES, get_mistral_client
-from api.queue import submit_document_run
+from api.queue import submit_document_run, submit_library_push
+from utils.rag_library import detach_document
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,8 @@ async def upload_document(
         if run_id:
             doc.workflow_run_id = run_id
             await session.commit()
+
+        await submit_library_push(doc.id)
 
         # If this upload is part of a claim, create the link
         if claim_id:
@@ -206,6 +209,8 @@ async def upload_documents_batch(
                 if run_id:
                     doc.workflow_run_id = run_id
                     await session.commit()
+
+                await submit_library_push(doc.id)
 
                 return {
                     "document_id": doc.id,
@@ -870,6 +875,9 @@ async def _teardown_document(session, doc: Document) -> None:
             logger.info(f"Canceled workflow run {doc.workflow_run_id} for deleted document {doc.id}")
         except Exception as e:
             logger.warning(f"Failed to cancel workflow run {doc.workflow_run_id} for deleted document {doc.id}: {e}")
+
+    # A deleted document must stop showing up in chat answers.
+    await detach_document(session, doc.id)
 
     if doc.file_path:
         delete_file(doc.file_path)
