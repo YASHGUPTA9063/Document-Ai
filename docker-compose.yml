@@ -30,6 +30,12 @@ x-backend-env: &backend-env
   STORAGE_DIR: /app/storage
   EXECUTION_MODE: queue
   RUN_WORKFLOW_WORKER_IN_API: "false"
+  # The document chat's Mistral library. backend-v2/.env is shared with local
+  # development and carries the same API key, so without this the deployment
+  # would find and use the library a developer's laptop created — answering
+  # from their test uploads. A distinct name makes this stack create its own on
+  # first use; set MISTRAL_LIBRARY_NAME in the root .env to pick another.
+  MISTRAL_LIBRARY_NAME: ${MISTRAL_LIBRARY_NAME:-document-ai-prod}
 
 x-backend-common: &backend-common
   <<: *backend-image
