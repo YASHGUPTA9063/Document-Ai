@@ -23,15 +23,26 @@ logger = logging.getLogger(__name__)
 # to upload, so it never appears on the checklist.
 OTHERS_KEY = "others"
 
+# The KYC application form never takes part in the checklist — not as a
+# required type, not as a member of a batch, and not in what the Checklist
+# Agent is shown. This is hard-wired rather than left to the Settings skip
+# list, so removing it there cannot pull the form back into the checklist.
+KYC_FORM_TYPE = "kyc_form"
+
+
+def is_kyc_form(doc) -> bool:
+    """Is this document the KYC application form?"""
+    return observed_type(doc) == KYC_FORM_TYPE
+
 
 def skipped_types() -> set[str]:
     """
     Types that are classified like any other but never required in a batch.
 
     Configured in Settings → Document Checklist (`utils/checklist_config.py`);
-    the KYC application form is there by default.
+    the KYC application form is always included regardless of that config.
     """
-    return set(load_checklist_config()["skip_types"])
+    return set(load_checklist_config()["skip_types"]) | {KYC_FORM_TYPE}
 
 # Statuses that mean a document will never produce a doc_type. Anything else
 # without one is still on its way through the pipeline, and the batch is not
@@ -54,8 +65,17 @@ def build_required_types() -> list[dict]:
 
 
 def is_excluded(doc) -> bool:
-    """Split parents and deleted rows are not part of the batch's contents."""
-    return bool(getattr(doc, "is_split_parent", False)) or doc.status in EXCLUDED_STATUSES
+    """Split parents, deleted rows and the KYC form are not part of the batch's contents."""
+    return (
+        bool(getattr(doc, "is_split_parent", False))
+        or doc.status in EXCLUDED_STATUSES
+        or is_kyc_form(doc)
+    )
+
+
+def checklist_documents(documents: list) -> list:
+    """The documents the checklist actually judges."""
+    return [d for d in documents if not is_excluded(d)]
 
 
 def observed_type(doc) -> str:

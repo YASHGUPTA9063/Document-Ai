@@ -30,6 +30,23 @@ router = APIRouter(tags=["KYC"])
 # Pipeline classification of a utility bill — the preferred proof of address.
 UTILITY_BILL_TYPE = "utility_bill"
 
+# Pipeline statuses at which the uploaded application form is as far along as
+# the KYC flow needs: finished, or parked at a gate the KYC flow doesn't use.
+FORM_PIPELINE_SETTLED = (
+    "completed", "awaiting_review", "awaiting_checklist_review",
+    "checklist_hold", "awaiting_split_review",
+)
+# Statuses at which the pipeline will never produce anything for the form.
+FORM_PIPELINE_FAILED = ("failed", "rejected", "expired")
+
+
+def _form_has_data(app) -> bool:
+    """Did the dedicated form pass fill anything on the application?"""
+    return any((
+        app.applicant_name, app.fathers_name, app.date_of_birth, app.address,
+        app.photo_path, app.signature_path, *kyc_db.applicant_details(app).values(),
+    ))
+
 
 @router.post("/kyc")
 async def create_kyc_application(request: CreateKycApplicationRequest):
@@ -339,19 +356,29 @@ async def get_kyc_form_status(kyc_id: str):
         if not doc:
             return {"kyc_id": kyc_id, "status": "not_found", "extracted_fields": None}
 
-        # awaiting_review = the pipeline parked the form for a human reviewer. The
-        # KYC flow has its own review step and its own form extraction, so it
-        # doesn't wait on that gate.
-        if doc.status not in ("completed", "awaiting_review", "failed", "rejected"):
+        # The KYC flow has its own review step and its own form extraction
+        # (extract_form_images), so it never waits on a pipeline gate — a form
+        # parked for a reviewer, the checklist or a split decision is as done
+        # as the KYC flow needs it to be.
+        if doc.status not in FORM_PIPELINE_SETTLED and doc.status not in FORM_PIPELINE_FAILED:
             return {"kyc_id": kyc_id, "status": doc.status, "extracted_fields": None}
 
-        if doc.status in ("failed", "rejected"):
-            return {"kyc_id": kyc_id, "status": "failed", "extracted_fields": None}
-
-        # Text is done — hold the frontend until the photo/signature crops are too,
-        # so the review step shows them.
+        # Hold the frontend until the dedicated form pass has finished — it is
+        # what fills the applicant's details and crops the photo/signature, and
+        # it runs independently of the pipeline, so even a pipeline that failed
+        # or rejected the form must not cut it short.
         if app.form_images_status == "running":
             return {"kyc_id": kyc_id, "status": "extracting_images", "extracted_fields": None}
+
+        # A failed / rejected / expired pipeline only means "failed" when the
+        # dedicated pass found nothing either; otherwise its results stand.
+        if doc.status in FORM_PIPELINE_FAILED and not _form_has_data(app):
+            return {"kyc_id": kyc_id, "status": "failed", "extracted_fields": None}
+        if doc.status in FORM_PIPELINE_FAILED:
+            logger.info(
+                f"[KYC {kyc_id}] Pipeline ended the form at '{doc.status}', but the "
+                f"dedicated form pass extracted its details — using those."
+            )
 
     # The dedicated form pass (extract_form_images) has already filled what it
     # found; the pipeline's template fields cover anything it missed, and its

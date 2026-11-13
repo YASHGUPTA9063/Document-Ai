@@ -7,6 +7,7 @@ with workflows.workflow.unsafe.imports_passed_through():
     from activities.preprocessor import preprocessor_activity
     from activities.classifier import classifier_activity
     from activities.checklist import checklist_activity
+    from tools.checklist import KYC_FORM_TYPE
     from activities.splitter import splitter_activity
     from activities.split_fanout import split_fanout_activity
     from activities.extractor import extractor_activity
@@ -300,8 +301,9 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
         # activities/checklist.py for why the barrier is batch-wide rather than
         # per-document. A document that parks here is resumed by whoever releases
         # the batch, which is either the last document to classify (nothing
-        # missing) or the reviewer (something missing).
-        if settings.ENABLE_DOC_CHECKLIST:
+        # missing) or the reviewer (something missing). The KYC application form
+        # never enters this step — see tools/checklist.py.
+        if settings.ENABLE_DOC_CHECKLIST and (doc_type or "").strip().lower() != KYC_FORM_TYPE:
             await _update_status(document_id, "checklist")
             try:
                 gate = await checklist_activity(document_id)
@@ -341,8 +343,12 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
         fraud_check_result = None
         template_meta = await get_template_metadata_activity(doc_type)
         is_kyc = template_meta.get("is_kyc", False) or doc_type.lower() in ("kyc", "kyc document", "identity document")
-        
-        if is_kyc:
+        # The application form stays `is_kyc` so the extractor still crops its
+        # photo/signature, but the fraud check is for identity documents —
+        # run against a form it rejects a perfectly good application.
+        is_application_form = (doc_type or "").strip().lower() == KYC_FORM_TYPE
+
+        if is_kyc and not is_application_form:
             await _update_status(document_id, "fraud_checking")
             try:
                 fraud_check_result = await fraud_check_activity(document_id, clean_file_path)

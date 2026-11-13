@@ -709,7 +709,9 @@ def _types_of(entries) -> set:
 
 
 def _batch_document_rows(documents) -> list[dict]:
-    """The batch's contents, as the checklist UI needs to list them."""
+    """The batch's contents, as the checklist UI needs to list them (the KYC form is never one)."""
+    from tools.checklist import is_kyc_form
+
     return [
         {
             "document_id": d.id,
@@ -719,6 +721,7 @@ def _batch_document_rows(documents) -> list[dict]:
             "is_split_parent": bool(d.is_split_parent),
         }
         for d in documents
+        if not is_kyc_form(d)
     ]
 
 

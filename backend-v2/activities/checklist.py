@@ -41,6 +41,7 @@ from tools.checklist import (
     build_required_types,
     fallback_summary,
     format_checklist_prompt,
+    is_kyc_form,
     only_skipped_types,
     pending_documents,
     reconcile,
@@ -153,6 +154,12 @@ async def evaluate_batch(batch_id: str, gate_document_id: str | None = None) -> 
     if not documents:
         return {"action": "skipped", "reason": "empty_batch", "batch_id": batch_id}
 
+    if all(is_kyc_form(d) for d in documents):
+        # Nothing but the KYC form: there is no set to reconcile, and the form
+        # never goes to the Checklist Agent.
+        logger.info(f"[Batch {batch_id}] Only the KYC form in this batch — skipping the checklist.")
+        return {"action": "skipped", "reason": "kyc_form_only", "batch_id": batch_id}
+
     still_pending = pending_documents(documents)
     if still_pending:
         return {"action": "waiting", "reason": "batch_incomplete", "batch_id": batch_id,
@@ -224,6 +231,12 @@ async def checklist_activity(document_id: str) -> dict:
         return _go("disabled")
 
     document = await db.get_document(document_id)
+    if document and is_kyc_form(document):
+        # The KYC form never enters the checklist, whichever batch it arrived in:
+        # it is not parked at the gate and not shown to the Checklist Agent.
+        logger.info(f"[Document {document_id}] KYC form — skipping the checklist.")
+        return _go("kyc_form")
+
     batch_id = getattr(document, "batch_id", None) if document else None
     if not batch_id:
         # Documents ingested before batches existed have no set to reconcile.
