@@ -152,7 +152,12 @@ def _prepare_image_and_url(file_path: str):
         data_uri = f"data:image/png;base64,{b64}"
         return img, data_uri
     else:
-        img = Image.open(file_path)
+        from PIL import ImageOps
+        # Phone photos store their rotation in EXIF. Browsers show them upright
+        # — which is how template regions are drawn — so crop the upright image
+        # too, or a template box lands on the wrong part of a rotated photo.
+        # OCR and the vision model get this same upright image below.
+        img = ImageOps.exif_transpose(Image.open(file_path))
         # Ensure image is in a format suitable for saving as PNG
         if img.mode not in ("RGB", "RGBA"):
             img = img.convert("RGB")

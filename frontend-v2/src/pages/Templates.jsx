@@ -50,6 +50,18 @@ export function Templates() {
   const [generatingTemplate, setGeneratingTemplate] = useState(false);
   const [createKycRegions, setCreateKycRegions] = useState({ signature: null, photo: null });
 
+  // Redrawing the photo / signature regions of an existing KYC template.
+  const [regionsModalOpen, setRegionsModalOpen] = useState(false);
+  const [regionsSample, setRegionsSample] = useState(null);
+  const [regionsDraft, setRegionsDraft] = useState({ signature: null, photo: null });
+  const [savingRegions, setSavingRegions] = useState(false);
+
+  const regionsPreviewUrl = useMemo(
+    () => (regionsSample ? URL.createObjectURL(regionsSample) : null),
+    [regionsSample],
+  );
+  useEffect(() => () => { if (regionsPreviewUrl) URL.revokeObjectURL(regionsPreviewUrl); }, [regionsPreviewUrl]);
+
   // Preview URL for the sample file (only for images)
   const samplePreviewUrl = useMemo(() => {
     if (!sampleFile) return null;
@@ -209,6 +221,39 @@ export function Templates() {
   };
 
 
+
+  const handleOpenRegions = () => {
+    const tpl = templates[activeTab];
+    const boxes = (tpl && !Array.isArray(tpl) && tpl.kyc_boxes) || {};
+    setRegionsDraft({ signature: boxes.signature || null, photo: boxes.photo || null });
+    setRegionsSample(null);
+    setRegionsModalOpen(true);
+  };
+
+  const handleSaveRegions = async () => {
+    if (!activeTab) return;
+    const existing = templates[activeTab];
+    const templateMeta = (existing && !Array.isArray(existing)) ? existing : { fields: currentFields };
+    const kycBoxes = {};
+    if (regionsDraft.signature) kycBoxes.signature = regionsDraft.signature;
+    if (regionsDraft.photo) kycBoxes.photo = regionsDraft.photo;
+    const { kyc_boxes: _old, ...rest } = templateMeta; // eslint-disable-line no-unused-vars
+    const updatedTemplates = {
+      ...templates,
+      [activeTab]: Object.keys(kycBoxes).length ? { ...rest, kyc_boxes: kycBoxes } : rest,
+    };
+    setSavingRegions(true);
+    try {
+      await saveTemplates(updatedTemplates);
+      setTemplates(updatedTemplates);
+      setRegionsModalOpen(false);
+      toast('Photo & signature regions saved — new uploads will be cropped exactly there ✓', 'success');
+    } catch (err) {
+      toast(`Failed to save regions: ${err.message}`, 'error');
+    } finally {
+      setSavingRegions(false);
+    }
+  };
 
   const handleGenerateTemplate = async (e) => {
     e.preventDefault();
@@ -492,6 +537,16 @@ export function Templates() {
                   </div>
                   Custom Extraction
                 </label>
+              )}
+              {activeTab && isActiveKyc && (
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={handleOpenRegions}
+                  title="Draw where the photo and signature sit on this document — they are cropped exactly there"
+                  id="templates-kyc-regions-btn"
+                >
+                  <Crop size={12} /> Photo &amp; Signature Regions
+                </button>
               )}
               {activeTab && (
                 <button 
@@ -993,10 +1048,53 @@ export function Templates() {
                 border: '1px solid rgba(245, 158, 11, 0.2)',
                 fontSize: 11, color: 'var(--warn)', lineHeight: 1.5,
               }}>
-                <strong>Note:</strong> Visual region selection is available for image files (PNG, JPG, WEBP). For PDFs, you can set extraction coordinates manually after the template is created.
+                <strong>Note:</strong> Visual region selection is available for image files (PNG, JPG, WEBP). For a PDF, create the template, then use <strong>Photo &amp; Signature Regions</strong> on it with an image (PNG/JPG) of the same form.
               </div>
             )}
           </form>
+        </Modal>
+      )}
+
+      {/* ── Photo & Signature Regions Modal ── */}
+      {regionsModalOpen && (
+        <Modal
+          title="Photo & Signature Regions"
+          subtitle="Uploaded documents of this type are cropped exactly at these regions."
+          onClose={() => !savingRegions && setRegionsModalOpen(false)}
+          wide={!!regionsPreviewUrl}
+          footer={
+            <div style={{ display: 'flex', gap: 8, width: '100%', justifyContent: 'flex-end' }}>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRegionsModalOpen(false)} disabled={savingRegions}>
+                Cancel
+              </button>
+              <button type="button" className="btn btn-primary btn-sm" onClick={handleSaveRegions} disabled={savingRegions}>
+                {savingRegions ? <><span className="spinner" style={{ marginRight: 6 }} />Saving...</> : 'Save Regions'}
+              </button>
+            </div>
+          }
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.5 }}>
+              Select an image (PNG, JPG or WEBP) of this document — the same layout your customers fill in —
+              then draw a box around the <strong>photo</strong> and around the <strong>signature</strong>.
+              Leave a little margin around the signature so long pen strokes are not clipped.
+            </div>
+            <input
+              type="file"
+              accept=".png,.jpg,.jpeg,.webp"
+              disabled={savingRegions}
+              onChange={(e) => e.target.files.length && setRegionsSample(e.target.files[0])}
+            />
+            {regionsPreviewUrl ? (
+              <RegionSelector imageUrl={regionsPreviewUrl} regions={regionsDraft} onChange={setRegionsDraft} />
+            ) : (
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                {regionsDraft.signature || regionsDraft.photo
+                  ? `Saved now: ${[regionsDraft.photo && 'photo', regionsDraft.signature && 'signature'].filter(Boolean).join(' and ')}. Select an image to view or redraw them.`
+                  : 'No regions saved yet — photo and signature are located automatically until you draw them.'}
+              </div>
+            )}
+          </div>
         </Modal>
       )}
     </div>

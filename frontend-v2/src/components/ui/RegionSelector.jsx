@@ -18,10 +18,42 @@ export function RegionSelector({ imageUrl, regions, onChange }) {
   const [startPt, setStartPt] = useState(null);
   const [currentPt, setCurrentPt] = useState(null);
 
+  // Where the picture is actually drawn inside the <img> box, in px. The img is
+  // `object-fit: contain` under a max-height, so a portrait page (a KYC form) is
+  // letterboxed — drawn narrower than its box with empty bands either side.
+  // Coordinates are measured against this drawn area, never the whole box:
+  // measuring against the box skewed every saved x toward the centre, so the
+  // crop on the real image covered only part of the photo / signature.
+  const [contentBox, setContentBox] = useState(null);
+
+  const getContentBox = useCallback(() => {
+    const img = imgRef.current;
+    if (!img || !img.naturalWidth || !img.naturalHeight) return null;
+    const w = img.clientWidth;
+    const h = img.clientHeight;
+    const scale = Math.min(w / img.naturalWidth, h / img.naturalHeight);
+    const cw = img.naturalWidth * scale;
+    const ch = img.naturalHeight * scale;
+    // object-position defaults to centre
+    return { left: (w - cw) / 2, top: (h - ch) / 2, width: cw, height: ch };
+  }, []);
+
+  const measure = useCallback(() => setContentBox(getContentBox()), [getContentBox]);
+
   // Reset loaded state when image changes
   useEffect(() => {
     setImgLoaded(false);
+    setContentBox(null);
   }, [imageUrl]);
+
+  // Keep the overlay on the picture when the modal / window is resized.
+  useEffect(() => {
+    const img = imgRef.current;
+    if (!img || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(measure);
+    ro.observe(img);
+    return () => ro.disconnect();
+  }, [measure, imgLoaded]);
 
   const MODE_CONFIG = {
     signature: {
@@ -42,17 +74,19 @@ export function RegionSelector({ imageUrl, regions, onChange }) {
     },
   };
 
-  // Convert page-relative mouse coords to percentage of natural image dimensions
+  // Convert page-relative mouse coords to a percentage of the image itself
+  // (0-100 across the drawn picture, letterbox bands excluded).
   const toPercent = useCallback((clientX, clientY) => {
     const img = imgRef.current;
-    if (!img) return null;
+    const box = getContentBox();
+    if (!img || !box) return null;
     const rect = img.getBoundingClientRect();
-    const px = clientX - rect.left;
-    const py = clientY - rect.top;
-    const pctX = Math.max(0, Math.min(100, (px / rect.width) * 100));
-    const pctY = Math.max(0, Math.min(100, (py / rect.height) * 100));
+    const px = clientX - rect.left - box.left;
+    const py = clientY - rect.top - box.top;
+    const pctX = Math.max(0, Math.min(100, (px / box.width) * 100));
+    const pctY = Math.max(0, Math.min(100, (py / box.height) * 100));
     return { x: Math.round(pctX * 10) / 10, y: Math.round(pctY * 10) / 10 };
-  }, []);
+  }, [getContentBox]);
 
   const handleMouseDown = useCallback((e) => {
     if (!activeMode) return;
@@ -95,7 +129,8 @@ export function RegionSelector({ imageUrl, regions, onChange }) {
 
     const newRegions = {
       ...regions,
-      [activeMode]: { x1: Math.round(x1), y1: Math.round(y1), x2: Math.round(x2), y2: Math.round(y2) },
+      // One decimal place: whole percents can be ~10px off on a scan-sized page.
+      [activeMode]: { x1, y1, x2, y2 },
     };
     onChange(newRegions);
     setDrawing(false);
@@ -270,7 +305,7 @@ export function RegionSelector({ imageUrl, regions, onChange }) {
           ref={imgRef}
           src={imageUrl}
           alt="Sample document"
-          onLoad={() => setImgLoaded(true)}
+          onLoad={() => { setImgLoaded(true); measure(); }}
           draggable={false}
           style={{
             display: 'block',
@@ -283,9 +318,13 @@ export function RegionSelector({ imageUrl, regions, onChange }) {
         />
 
         {/* Overlay for drawn regions */}
-        {imgLoaded && (
+        {imgLoaded && contentBox && (
           <div style={{
-            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+            // Exactly over the drawn picture, so a region's percentages are
+            // percentages of the image — the same numbers the backend crops by.
+            position: 'absolute',
+            left: contentBox.left, top: contentBox.top,
+            width: contentBox.width, height: contentBox.height,
             pointerEvents: 'none',
           }}>
             {regions.signature && renderRegion('signature', regions.signature)}

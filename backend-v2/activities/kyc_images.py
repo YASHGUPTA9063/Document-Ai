@@ -13,6 +13,7 @@ of how the document was classified. Once the pipeline has finished, any crop
 it produced that ours missed is adopted (see adopt_pipeline_images).
 """
 import asyncio
+import re
 import base64
 import logging
 import os
@@ -35,6 +36,38 @@ def _kyc_dir(kyc_id: str, *parts: str) -> str:
     return os.path.join(settings.STORAGE_DIR, "kyc_attachments", kyc_id, *parts)
 
 
+def _form_template_boxes(document_id: str) -> dict | None:
+    """
+    The photo / signature regions drawn on the KYC application form's template.
+
+    The template is found by name — `kyc_form`, also matching spellings such as
+    "KYC Form", "KYC-Form" or "kyc_form " — and the regions are used exactly as
+    drawn. Logs what was used, so a form cropped automatically because the
+    template has no regions is visible in the logs.
+    """
+    from utils.templates import load_templates
+    templates = load_templates() or {}
+
+    def norm(name: str) -> str:
+        return re.sub(r"[^a-z0-9]", "", (name or "").lower())
+
+    name = KYC_FORM_TYPE if KYC_FORM_TYPE in templates else next(
+        (n for n in templates if norm(n) == norm(KYC_FORM_TYPE)), None
+    )
+    tpl = templates.get(name) if name else None
+    boxes = tpl.get("kyc_boxes") if isinstance(tpl, dict) else None
+    boxes = {k: v for k, v in (boxes or {}).items() if k in ("photo", "signature") and v} or None
+    if boxes:
+        logger.info(f"[Document {document_id}] KYC form: cropping at template '{name}' regions {boxes}")
+    else:
+        logger.info(
+            f"[Document {document_id}] KYC form: "
+            + (f"template '{name}' has no photo/signature regions" if name else "no kyc_form template")
+            + " — locating them from the form layout."
+        )
+    return boxes
+
+
 async def _crop(file_path: str, document_id: str, output_dir: str, doc_type: str = None,
                 prefer_layout: bool = False) -> dict:
     """
@@ -44,7 +77,10 @@ async def _crop(file_path: str, document_id: str, output_dir: str, doc_type: str
     """
     from utils.kyc_signature_extractor import extract_signature_and_photo
     from tools.extractor import get_template_metadata
-    kyc_boxes = get_template_metadata(doc_type).get("kyc_boxes") if doc_type else None
+    if doc_type == KYC_FORM_TYPE:
+        kyc_boxes = _form_template_boxes(document_id)
+    else:
+        kyc_boxes = get_template_metadata(doc_type).get("kyc_boxes") if doc_type else None
     return await asyncio.to_thread(
         extract_signature_and_photo,
         file_path=file_path,

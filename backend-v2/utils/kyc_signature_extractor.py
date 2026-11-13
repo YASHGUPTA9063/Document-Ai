@@ -17,6 +17,7 @@ Unchanged helpers and schemas are imported from the shared module.
 
 import json
 import logging
+import math
 import os
 import re
 from typing import Optional
@@ -191,6 +192,21 @@ def _locate_from_layout(page, img_w: int, img_h: int) -> dict:
             if len(shaped) == 1:
                 found["photo"] = shaped[0]
     return found
+
+
+def _pct_box_to_px(pct: dict, width: int, height: int) -> tuple:
+    """
+    A template box in percent of the image (0-100, as drawn in the Templates
+    page) → pixel box on this image. Rounded outward so the drawn area is never
+    trimmed; _crop_region clamps to the image.
+    """
+    x1, y1, x2, y2 = (float(pct[k]) for k in ("x1", "y1", "x2", "y2"))
+    x1, x2 = sorted((x1, x2))
+    y1, y2 = sorted((y1, y2))
+    return (
+        math.floor(x1 / 100.0 * width), math.floor(y1 / 100.0 * height),
+        math.ceil(x2 / 100.0 * width), math.ceil(y2 / 100.0 * height),
+    )
 
 
 def _store_crop(result: dict, kind: str, img, box: tuple, output_dir: str, document_id: str, how: str) -> bool:
@@ -378,56 +394,49 @@ def extract_signature_and_photo(
     # template, always honour them first — no API calls needed.
     # ══════════════════════════════════════════════════════════════════════
     if kyc_boxes:
-        logger.info(f"[Document {document_id}] Using MANUAL template coordinates for extraction (no API calls)")
-
-        # --- Crop signature from percentage coordinates ---
-        sig_box = kyc_boxes.get("signature")
-        if sig_box:
-            sx1 = int(sig_box["x1"] / 100.0 * width)
-            sy1 = int(sig_box["y1"] / 100.0 * height)
-            sx2 = int(sig_box["x2"] / 100.0 * width)
-            sy2 = int(sig_box["y2"] / 100.0 * height)
-            logger.info(f"[Document {document_id}] Signature manual bbox: ({sx1},{sy1})->({sx2},{sy2}) from pct ({sig_box})")
-
-            cropped = _crop_region(img, sx1, sy1, sx2, sy2)
-            if cropped:
-                result["has_signature"] = True
-                result["signature_bbox"] = {"x1": sx1, "y1": sy1, "x2": sx2, "y2": sy2}
-                sig_path = os.path.join(output_dir, "signature.png")
-                cropped.save(sig_path)
-                result["signature_crop_path"] = os.path.abspath(sig_path)
-                result["signature_base64"] = _image_to_base64(cropped)
+        logger.info(
+            f"[Document {document_id}] Using MANUAL template coordinates on the "
+            f"{width}x{height} image: {kyc_boxes}"
+        )
+        for kind in ("signature", "photo"):
+            pct = kyc_boxes.get(kind)
+            if not pct:
+                continue
+            try:
+                box = _pct_box_to_px(pct, width, height)
+            except (KeyError, TypeError, ValueError) as e:
+                logger.warning(f"[Document {document_id}] Ignoring malformed template {kind} box {pct}: {e}")
+                continue
+            # Exactly what was drawn — no blank check: an unsigned form must give
+            # an empty signature crop, not a guess somewhere else on the page.
+            cropped = _crop_region(img, *box)
+            if not cropped:
+                logger.warning(f"[Document {document_id}] Template {kind} box {pct} -> {box} is outside the image")
+                continue
+            path = os.path.join(output_dir, f"{kind}.png")
+            cropped.save(path)
+            x1, y1, x2, y2 = box
+            result[f"has_{kind}"] = True
+            result[f"{kind}_bbox"] = {"x1": x1, "y1": y1, "x2": x2, "y2": y2}
+            result[f"{kind}_crop_path"] = os.path.abspath(path)
+            result[f"{kind}_base64"] = _image_to_base64(cropped)
+            if kind == "signature":
                 result["confidence"] = "high"
-                logger.info(f"[Document {document_id}] Signature crop saved (manual): {sig_path}")
-            else:
-                logger.warning(f"[Document {document_id}] Signature crop returned empty region")
+            logger.info(f"[Document {document_id}] {kind.capitalize()} cropped at template box {box} (from {pct}%)")
 
-        # --- Crop photo from percentage coordinates ---
-        photo_box = kyc_boxes.get("photo")
-        if photo_box:
-            px1 = int(photo_box["x1"] / 100.0 * width)
-            py1 = int(photo_box["y1"] / 100.0 * height)
-            px2 = int(photo_box["x2"] / 100.0 * width)
-            py2 = int(photo_box["y2"] / 100.0 * height)
-            logger.info(f"[Document {document_id}] Photo manual bbox: ({px1},{py1})->({px2},{py2}) from pct ({photo_box})")
-
-            cropped = _crop_region(img, px1, py1, px2, py2)
-            if cropped:
-                result["has_photo"] = True
-                result["photo_bbox"] = {"x1": px1, "y1": py1, "x2": px2, "y2": py2}
-                photo_path = os.path.join(output_dir, "photo.png")
-                cropped.save(photo_path)
-                result["photo_crop_path"] = os.path.abspath(photo_path)
-                result["photo_base64"] = _image_to_base64(cropped)
-                logger.info(f"[Document {document_id}] Photo crop saved (manual): {photo_path}")
-            else:
-                logger.warning(f"[Document {document_id}] Photo crop returned empty region")
-
-        return result
+        # Both drawn → done, no API calls. A form with only one region drawn
+        # goes on to locate the other; the drawn one is never overridden.
+        if (result["has_signature"] and result["has_photo"]) or not prefer_layout:
+            return result
+        logger.info(
+            f"[Document {document_id}] Template has no box for "
+            f"{[k for k in ('signature', 'photo') if not result['has_' + k]]} — locating it from the layout."
+        )
 
     # ══════════════════════════════════════════════════════════════════════
     # PATH 2: Mistral OCR 4 Block & Image Annotation Extraction
-    # (Only reached when no manual kyc_boxes are defined on the template)
+    # (Reached when no manual kyc_boxes are defined on the template, or — for a
+    # form — to find the one region the template does not cover)
     # ══════════════════════════════════════════════════════════════════════
     logger.info(f"[Document {document_id}] KYC Path 2: Running Mistral OCR 4 Block Extraction...")
     try:
@@ -559,19 +568,24 @@ def extract_signature_and_photo(
         )
             
     except Exception as e:
-        logger.error(f"[Document {document_id}] Path 2 failed: {e}. Resetting result and falling back...")
-        result.update({
-            "has_signature": False,
-            "signature_crop_path": None,
-            "signature_base64": None,
-            "signature_bbox": None,
-            "has_photo": False,
-            "photo_crop_path": None,
-            "photo_base64": None,
-            "photo_bbox": None,
-            "confidence": "low",
-            "signer_name": None,
-        })
+        if prefer_layout:
+            # A form keeps what is already exact — template boxes or the
+            # layout — and falls back only for what is still missing.
+            logger.error(f"[Document {document_id}] Path 2 failed: {e}. Falling back for what is missing...")
+        else:
+            logger.error(f"[Document {document_id}] Path 2 failed: {e}. Resetting result and falling back...")
+            result.update({
+                "has_signature": False,
+                "signature_crop_path": None,
+                "signature_base64": None,
+                "signature_bbox": None,
+                "has_photo": False,
+                "photo_crop_path": None,
+                "photo_base64": None,
+                "photo_bbox": None,
+                "confidence": "low",
+                "signer_name": None,
+            })
 
     # ══════════════════════════════════════════════════════════════════════
     # FALLBACK PATH: Two-pass Pixtral approach (when no manual coords)
