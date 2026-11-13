@@ -18,6 +18,7 @@ Unchanged helpers and schemas are imported from the shared module.
 import json
 import logging
 import os
+import re
 from typing import Optional
 
 from mistralai.client import Mistral  # retained for type annotations only
@@ -48,6 +49,167 @@ def _is_blank(img, min_stddev: float = 4.0) -> bool:
     """True when a crop is (near-)uniform — i.e. the bbox missed the content."""
     from PIL import ImageStat
     return max(ImageStat.Stat(img.convert("L")).stddev) < min_stddev
+
+
+# ─── Layout-based location (application forms) ─────────────────────────────
+# OCR returns exact boxes for every text block and embedded image. On a form the
+# photo and signature sit next to printed labels ("Applicant Photo", "Signature
+# of Applicant"), so the region beside the label is the answer — no coordinate
+# guessing. The vision model's pixel boxes vary from run to run and often cover
+# only half the signature or photo, so they are kept as the last resort only.
+
+_SIG_LABEL = re.compile(r"\bsign(?:ature|ed)?\b|हस्ताक्षर", re.IGNORECASE)
+_PHOTO_LABEL = re.compile(r"\b(?:photo(?:graph)?|picture)\b", re.IGNORECASE)
+_DATE_VALUE = re.compile(r"\d{1,4}[/.\-]\d{1,2}[/.\-]\d{1,4}")
+_NON_CONTENT_BLOCKS = {"title", "header", "footer", "page_number"}
+_MAX_LABEL_LEN = 60  # a label is a short caption, not a paragraph mentioning "signature"
+
+
+def _coords(obj) -> Optional[tuple]:
+    box = tuple(getattr(obj, a, None) for a in ("top_left_x", "top_left_y", "bottom_right_x", "bottom_right_y"))
+    return None if None in box else box
+
+
+def _annotation_type(img_obj) -> Optional[str]:
+    """The BboxAnnotation block_type OCR attached to an embedded image, if any."""
+    ann = getattr(img_obj, "image_annotation", None)
+    if isinstance(ann, str):
+        try:
+            ann = json.loads(ann)
+        except Exception:
+            return None
+    return ann.get("block_type") if isinstance(ann, dict) else None
+
+
+def _nearest_to_label(label: tuple, candidates: list, page_h: float) -> Optional[tuple]:
+    """
+    The candidate box sitting right below, right of, or just above `label`.
+
+    Below / right are preferred (the usual "Signature: ____" and
+    "Signature\\n____" layouts); above covers a caption printed under the line.
+    """
+    lx1, ly1, lx2, ly2 = label
+    lh = max(1, ly2 - ly1)
+    tol = lh * 0.5
+    reach_x2 = lx2 + (lx2 - lx1)  # the field can run past the end of its label
+    best, best_score = None, None
+    for box in candidates:
+        cx1, cy1, cx2, cy2 = box
+        x_overlap = min(reach_x2, cx2) - max(lx1, cx1) > 0
+        y_overlap = min(ly2, cy2) - max(ly1, cy1) > 0
+        if cy1 >= ly2 - tol and x_overlap:
+            score = cy1 - ly2
+        elif cx1 >= lx2 - tol and y_overlap:
+            score = cx1 - lx2
+        elif cy2 <= ly1 + tol and x_overlap:
+            score = (ly1 - cy2) * 1.5
+        else:
+            continue
+        if score > page_h * 0.25:
+            continue
+        if best_score is None or score < best_score:
+            best, best_score = box, score
+    return best
+
+
+def _locate_from_layout(page, img_w: int, img_h: int) -> dict:
+    """
+    Find the photo and signature on one OCR page from its layout.
+    Returns {"photo": box | None, "signature": box | None} in image pixels.
+    """
+    dims = getattr(page, "dimensions", None)
+    sx = img_w / dims.width if dims and getattr(dims, "width", None) else 1.0
+    sy = img_h / dims.height if dims and getattr(dims, "height", None) else 1.0
+
+    def scaled(box):
+        x1, y1, x2, y2 = box
+        return (round(x1 * sx), round(y1 * sy), round(x2 * sx), round(y2 * sy))
+
+    blocks = [b for b in (getattr(page, "blocks", None) or []) if _coords(b)]
+    images = [(scaled(_coords(i)), i) for i in (getattr(page, "images", None) or []) if _coords(i)]
+
+    def is_label(block, pattern):
+        text = (getattr(block, "content", "") or "").strip()
+        return bool(text) and len(text) <= _MAX_LABEL_LEN and bool(pattern.search(text)) \
+            and getattr(block, "type", "text") == "text"
+
+    found = {"photo": None, "signature": None}
+
+    # Signature: OCR's own signature block, else whatever sits at the label.
+    native = [scaled(_coords(b)) for b in blocks if getattr(b, "type", None) == "signature"]
+    sig_labels = [b for b in blocks if is_label(b, _SIG_LABEL)]
+    if native:
+        found["signature"] = native[0]
+    elif sig_labels:
+        candidates = []
+        for b in blocks:
+            text = (getattr(b, "content", "") or "").strip()
+            if (b in sig_labels or getattr(b, "type", None) in _NON_CONTENT_BLOCKS
+                    or text.endswith(":") or _DATE_VALUE.search(text) or _PHOTO_LABEL.search(text)):
+                continue
+            box = scaled(_coords(b))
+            # An embedded image is listed both as a block and in page.images;
+            # the images list decides below which of them is the photo.
+            candidates.append(box)
+        for label in sig_labels:
+            lbox = scaled(_coords(label))
+            box = _nearest_to_label(lbox, candidates, img_h)
+            if box:
+                # Handwriting strays outside the OCR box — pad it, but never
+                # into the label it was found from.
+                x1, y1, x2, y2 = box
+                px, py = round((x2 - x1) * 0.04), round((y2 - y1) * 0.15)
+                x1, y1, x2, y2 = x1 - px, y1 - py, x2 + px, y2 + py
+                if box[1] >= lbox[3] - 1:      # found below the label
+                    y1 = max(y1, lbox[3])
+                elif box[0] >= lbox[2] - 1:    # found right of the label
+                    x1 = max(x1, lbox[2])
+                elif box[3] <= lbox[1] + 1:    # found above the label
+                    y2 = min(y2, lbox[1])
+                found["signature"] = (x1, y1, x2, y2)
+                break
+
+    # Photo: an embedded image — the one OCR tagged as a photo, else the one at
+    # a "photo" label, else the only portrait-shaped image of a sensible size.
+    sig = found["signature"]
+    photos = [(box, i) for box, i in images if not (sig and box == sig)]
+    tagged = [box for box, i in photos if _annotation_type(i) == "photo"]
+    if tagged:
+        found["photo"] = tagged[0]
+    elif photos:
+        photo_labels = [scaled(_coords(b)) for b in blocks if is_label(b, _PHOTO_LABEL)]
+        for lbox in photo_labels:
+            box = _nearest_to_label(lbox, [b for b, _ in photos], img_h)
+            if box:
+                found["photo"] = box
+                break
+        if not found["photo"]:
+            def portrait(b):
+                w, h = b[2] - b[0], b[3] - b[1]
+                return w > 0 and 0.8 <= h / w <= 2.0 and w * h >= 0.005 * img_w * img_h
+            shaped = [b for b, _ in photos if portrait(b)]
+            if len(shaped) == 1:
+                found["photo"] = shaped[0]
+    return found
+
+
+def _store_crop(result: dict, kind: str, img, box: tuple, output_dir: str, document_id: str, how: str) -> bool:
+    """Crop `box` from `img` into result[...] for kind = "photo" | "signature"."""
+    cropped = _crop_region(img, *box)
+    if not cropped or _is_blank(cropped):
+        logger.warning(f"[Document {document_id}] {how} {kind} box {box} is empty/blank; discarding.")
+        return False
+    path = os.path.join(output_dir, f"{kind}.png")
+    cropped.save(path)
+    x1, y1, x2, y2 = box
+    result[f"has_{kind}"] = True
+    result[f"{kind}_bbox"] = {"x1": x1, "y1": y1, "x2": x2, "y2": y2}
+    result[f"{kind}_crop_path"] = os.path.abspath(path)
+    result[f"{kind}_base64"] = _image_to_base64(cropped)
+    if kind == "signature":
+        result["confidence"] = "high"
+    logger.info(f"[Document {document_id}] {kind.capitalize()} located from {how}: {box}")
+    return True
 
 
 def _locate_kyc_bboxes(
@@ -147,9 +309,14 @@ def extract_signature_and_photo(
     document_id: str,
     output_dir: str = None,
     kyc_boxes: dict = None,
+    prefer_layout: bool = False,
 ) -> dict:
     """
     KYC image extraction with optional template-level manual coordinates.
+
+    `prefer_layout` (application forms): locate the photo and signature from the
+    OCR layout — the embedded image and the block at the "Signature" label —
+    before trying annotations or the vision model. ID documents leave it off.
 
     If `kyc_boxes` is provided (e.g. {"signature": {"x1":40,"y1":80,"x2":95,"y2":95}, ...}),
     coordinates are treated as percentages (0-100) of the image dimensions. The image is
@@ -276,11 +443,21 @@ def extract_signature_and_photo(
         )
         
         for page in getattr(ocr_response, "pages", []) or []:
+            if prefer_layout:
+                layout = _locate_from_layout(page, width, height)
+                for kind in ("photo", "signature"):
+                    if layout[kind] and not result[f"has_{kind}"]:
+                        _store_crop(result, kind, img, layout[kind], output_dir, document_id, "OCR layout")
+            # Whatever the layout pass found is final for a form — the passes
+            # below only fill what it could not.
+            skip_sig = prefer_layout and result["has_signature"]
+            skip_photo = prefer_layout and result["has_photo"]
+
             # Native signature blocks first: OCR tags signatures it recognises
             # as block.type == "signature" even when they aren't raster images
             # (e.g. vector / script-font signatures on generated PDFs), which
             # the image search below can never find.
-            for block in getattr(page, "blocks", []) or []:
+            for block in ([] if skip_sig else (getattr(page, "blocks", []) or [])):
                 if getattr(block, "type", None) != "signature":
                     continue
                 coords = tuple(getattr(block, a, None) for a in ("top_left_x", "top_left_y", "bottom_right_x", "bottom_right_y"))
@@ -338,7 +515,7 @@ def extract_signature_and_photo(
                             break
             
             # Search images for photo
-            images = getattr(page, "images", []) or []
+            images = [] if skip_photo else (getattr(page, "images", []) or [])
             for img_obj in images:
                 annotation = getattr(img_obj, "image_annotation", None)
                 is_photo = False

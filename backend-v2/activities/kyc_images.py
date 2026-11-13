@@ -35,7 +35,8 @@ def _kyc_dir(kyc_id: str, *parts: str) -> str:
     return os.path.join(settings.STORAGE_DIR, "kyc_attachments", kyc_id, *parts)
 
 
-async def _crop(file_path: str, document_id: str, output_dir: str, doc_type: str = None) -> dict:
+async def _crop(file_path: str, document_id: str, output_dir: str, doc_type: str = None,
+                prefer_layout: bool = False) -> dict:
     """
     Runs the (blocking, Mistral-backed) extractor off the event loop. When the
     doc type has a template with manual kyc_boxes (passport / driving_license),
@@ -50,6 +51,7 @@ async def _crop(file_path: str, document_id: str, output_dir: str, doc_type: str
         document_id=document_id,
         output_dir=output_dir,
         kyc_boxes=kyc_boxes,
+        prefer_layout=prefer_layout,
     )
 
 
@@ -77,7 +79,11 @@ async def extract_form_images(kyc_id: str, file_path: str, document_id: str) -> 
         res, _ = await asyncio.gather(
             # A kyc_form template with drawn photo/signature regions gives an
             # exact crop; without one this falls back to OCR + vision detection.
-            _crop(file_path, document_id, _kyc_dir(kyc_id, "form"), doc_type=KYC_FORM_TYPE),
+            # Locate the photo / signature from the form's OCR layout (the image
+            # and the block at the "Signature" label) rather than vision-model
+            # pixel guesses, which often covered only half of each.
+            _crop(file_path, document_id, _kyc_dir(kyc_id, "form"),
+                  doc_type=KYC_FORM_TYPE, prefer_layout=True),
             _extract_form_identity(kyc_id, file_path),
         )
         await kyc_db.set_form_images(
