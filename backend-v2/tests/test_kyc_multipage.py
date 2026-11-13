@@ -74,8 +74,15 @@ def _vision_reply(signature=None, photo=None):
     return MagicMock(choices=[MagicMock(message=MagicMock(content=content))])
 
 
-def _annotation(has_signature):
-    return SimpleNamespace(pages=[SimpleNamespace(blocks=[], images=[])], document_annotation=json.dumps({
+def _chunked(reply):
+    """The same reply as a reasoning model sends it: [ThinkChunk, TextChunk]."""
+    text = reply.choices[0].message.content
+    content = [SimpleNamespace(type="thinking", thinking=[]), SimpleNamespace(type="text", text=text)]
+    return MagicMock(choices=[MagicMock(message=MagicMock(content=content))])
+
+
+def _annotation(has_signature, images=()):
+    return SimpleNamespace(pages=[SimpleNamespace(blocks=[], images=list(images))], document_annotation=json.dumps({
         "has_signature": has_signature, "confidence": "medium", "signer_name": None,
         "signed_date": None, "signature_location": None, "additional_notes": None,
     }))
@@ -210,6 +217,38 @@ def test_kyc_single_page_vision_signature_still_accepted(tmp_path):
         result = kyc.extract_signature_and_photo("id.jpg", "doc-4", output_dir=str(tmp_path))
 
     assert result["has_signature"] is True
+
+
+def test_kyc_vision_reply_as_chunks_is_parsed(tmp_path):
+    """mistral-large-latest replies with [ThinkChunk, TextChunk], not a string."""
+    sig = (100, 220, 180, 280)
+    client = _client(
+        block_pass={"data:page1": _ocr_page()},
+        vision={"data:page1": _chunked(_vision_reply(signature=sig))},
+    )
+    with patch.object(kyc, "_prepare_pages", return_value=_two_pages()[:1]), \
+         patch.object(kyc, "get_mistral_client", return_value=client):
+        result = kyc.extract_signature_and_photo("id.jpg", "doc-8", output_dir=str(tmp_path))
+
+    assert result["has_signature"] is True
+    assert result["signature_bbox"] == {"x1": 100, "y1": 220, "x2": 180, "y2": 280}
+
+
+def test_kyc_vision_photo_needs_an_ocr_image_on_multi_page(tmp_path):
+    """A form page with no image region can't hold the applicant's photo."""
+    hallucinated, real = (100, 220, 150, 250), (105, 222, 170, 278)
+    ocr_img = _annotated_image("other", real)
+    client = _client(
+        block_pass={"data:page1": _ocr_page(), "data:page2": _ocr_page()},
+        annotation_pass={"data:page1": _annotation(False), "data:page2": _annotation(False, images=[ocr_img])},
+        vision={"data:page1": _vision_reply(photo=hallucinated), "data:page2": _vision_reply(photo=real)},
+    )
+    with patch.object(kyc, "_prepare_pages", return_value=_two_pages()), \
+         patch.object(kyc, "get_mistral_client", return_value=client):
+        result = kyc.extract_signature_and_photo("form.pdf", "doc-9", output_dir=str(tmp_path))
+
+    assert result["has_photo"] is True
+    assert result["photo_bbox"] == {"x1": 105, "y1": 222, "x2": 170, "y2": 278}
 
 
 def test_kyc_block_pass_error_on_one_page_does_not_lose_others(tmp_path):

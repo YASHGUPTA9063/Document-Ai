@@ -50,6 +50,24 @@ BBOX_VISION_MODEL = "mistral-large-latest"
 MAX_PARALLEL_PAGES = 4
 
 
+def _message_text(content) -> str:
+    """
+    Text of a chat reply. Reasoning models (mistral-large-latest included)
+    return a list of chunks — a ThinkChunk then the TextChunk with the JSON —
+    rather than a plain string.
+    """
+    if isinstance(content, str):
+        return content
+    parts = []
+    for chunk in content or []:
+        if isinstance(chunk, dict):
+            if chunk.get("type") == "text":
+                parts.append(chunk.get("text") or "")
+        elif getattr(chunk, "type", None) == "text":
+            parts.append(getattr(chunk, "text", None) or "")
+    return "".join(parts)
+
+
 def _is_blank(img, min_stddev: float = 4.0) -> bool:
     """True when a crop is (near-)uniform — i.e. the bbox missed the content."""
     from PIL import ImageStat
@@ -130,7 +148,7 @@ def _locate_kyc_bboxes(
             max_tokens=settings.LLM_MAX_TOKENS,
         )
         raw = response.choices[0].message.content
-        d = json.loads(raw) if isinstance(raw, str) else dict(raw)
+        d = dict(raw) if isinstance(raw, dict) else json.loads(_message_text(raw))
         bboxes = KycImageBboxes(**d)
 
         logger.info(
@@ -296,8 +314,11 @@ def _vision_fallback(
 
     # Collect OCR-detected image region bboxes as landmarks
     ocr_bboxes = []
+    ocr_image_count = 0
     for page in getattr(ocr_response, "pages", []) or []:
-        ocr_bboxes.extend(getattr(page, "images", []) or [])
+        page_images = getattr(page, "images", []) or []
+        ocr_image_count += len(page_images)
+        ocr_bboxes.extend(page_images)
         # Labelled text blocks give the vision model far better coordinate
         # anchors than image regions alone (e.g. "SIGNATURE OF ACCOUNT HOLDER").
         ocr_bboxes.extend(
@@ -350,12 +371,17 @@ def _vision_fallback(
         "signature": bboxes.signature_found and (bboxes.sig_x1, bboxes.sig_y1, bboxes.sig_x2, bboxes.sig_y2),
         "photo": bboxes.photo_found and (bboxes.photo_x1, bboxes.photo_y1, bboxes.photo_x2, bboxes.photo_y2),
     }
-    # On a multi-page form, other pages are full of filled-in fields that can
-    # look handwritten (script fonts, ink). Take a vision signature only from
-    # a page OCR didn't explicitly rule out, so it isn't picked off the wrong page.
+    # On a multi-page form, most pages are filled-in fields: script fonts and
+    # ink look handwritten, and the vision model will "find" a photo in a page
+    # that has none. Take a vision result only from a page OCR backs up — it
+    # didn't rule out a signature there, and it saw an image where a photo
+    # would be (a printed photo is always an image region to OCR).
     if multi_page and candidates["signature"] and annotation and not annotation.has_signature:
         logger.info(f"[Document {document_id}] Ignoring vision signature on page {page_no}: OCR found no signature there.")
         candidates["signature"] = None
+    if multi_page and candidates["photo"] and not ocr_image_count:
+        logger.info(f"[Document {document_id}] Ignoring vision photo on page {page_no}: OCR found no image there.")
+        candidates["photo"] = None
 
     for kind, bbox in candidates.items():
         if result[f"has_{kind}"] or not bbox or None in bbox:
