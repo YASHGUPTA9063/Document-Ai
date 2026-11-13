@@ -4,6 +4,7 @@ import logging
 import base64
 import fitz  # PyMuPDF
 from platform_core.adapters.resilient_mistral import get_mistral_client
+from platform_core.agent_loop import _parse_json_response
 from platform_core.prompts.manager import PromptManager
 from config import settings
 from utils.ocr import extract_with_ocr
@@ -303,7 +304,8 @@ def _chat_extract_fields(raw_markdown: str, fields_list: list, doc_type: str) ->
                 temperature=settings.LLM_TEMPERATURE,
                 max_tokens=settings.LLM_MAX_TOKENS
             )
-            return json.loads(resp.choices[0].message.content)
+            # Reasoning models return content as [ThinkChunk, TextChunk], not a str.
+            return _parse_json_response(resp.choices[0].message.content)
         except Exception as e:
             logger.warning(f"_chat_extract_fields attempt {attempt + 1} failed: {e}")
             if attempt == 2:

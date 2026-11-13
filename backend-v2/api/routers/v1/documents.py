@@ -1601,7 +1601,9 @@ Rules:
             temperature=0.1,
             max_tokens=500,
         )
-        llm_response = json.loads(response.choices[0].message.content)
+        # Reasoning models return content as [ThinkChunk, TextChunk], not a str.
+        from platform_core.agent_loop import _parse_json_response
+        llm_response = _parse_json_response(response.choices[0].message.content)
     except Exception as e:
         logger.error(f"KYC verdict LLM call failed: {e}")
         # Fallback: compute verdict without LLM

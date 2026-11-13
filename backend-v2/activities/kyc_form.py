@@ -15,13 +15,13 @@ It runs its own OCR call rather than utils.ocr.extract_with_ocr: that one asks
 for markdown tables but leaves only "[tbl-0.md](tbl-0.md)" links in the text,
 and forms keep the applicant's details in tables.
 """
-import json
 import logging
 import mimetypes
 import os
 
 from config import settings
 from platform_core.adapters.resilient_mistral import get_mistral_client
+from platform_core.agent_loop import _parse_json_response
 from platform_core.prompts.manager import PromptManager
 from utils.file_handler import get_file_as_base64
 from utils.ocr import extract_with_ocr
@@ -93,5 +93,9 @@ def extract_form_identity(file_path: str) -> dict:
         temperature=settings.LLM_TEMPERATURE,
         max_tokens=settings.LLM_MAX_TOKENS,
     )
-    data = json.loads(resp.choices[0].message.content)
+    # Reasoning models return content as [ThinkChunk, TextChunk], not a str —
+    # the parser keeps only the answer text.
+    data = _parse_json_response(resp.choices[0].message.content)
+    if not isinstance(data, dict):
+        raise ValueError(f"Expected a JSON object of identity fields, got {type(data).__name__}")
     return {k: (str(data[k]).strip() or None) if data.get(k) else None for k in IDENTITY_FIELDS}

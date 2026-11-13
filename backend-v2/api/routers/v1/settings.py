@@ -23,6 +23,7 @@ from utils.split_config import load_split_config, save_split_config
 from utils.checklist_config import load_checklist_config, save_checklist_config
 from utils.templates import load_templates, save_templates_to_file
 from platform_core.prompts.manager import PromptManager
+from platform_core.agent_loop import _extract_text, _parse_json_response
 from api.deps import get_mistral_client
 
 logger = logging.getLogger(__name__)
@@ -211,11 +212,14 @@ async def generate_template_from_sample(
             max_tokens=settings.LLM_MAX_TOKENS
         )
 
-        content = response.choices[0].message.content
+        # Reasoning models return content as a list of chunks (a ThinkChunk with
+        # the model's reasoning, then a TextChunk with the answer), not a str.
+        # Keep only the answer text and tolerate code fences / a bare JSON list.
+        content = _extract_text(response.choices[0].message.content)
         logger.info(f"Generated schema for template '{template_name}': {content}")
 
         # Parse generated fields
-        parsed = json.loads(content)
+        parsed = _parse_json_response(content)
         if isinstance(parsed, dict) and "fields" in parsed:
             fields = parsed["fields"]
         elif isinstance(parsed, dict):
