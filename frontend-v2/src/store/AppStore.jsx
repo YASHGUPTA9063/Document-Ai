@@ -41,13 +41,32 @@ const initialState = {
 };
 
 // ─── Reducer ─────────────────────────────────────
+
+// True when `incoming` is an older copy of a document than `current`. The list
+// refresh and the per-document pollers run side by side, so a response can land
+// after a newer one — applying it would step the document's status backwards
+// (e.g. Extraction → Held For Batch). Both carry the row's `updated_at` (ISO,
+// same format, so string order is time order); without it nothing is dropped.
+function isStale(incoming, current) {
+  return Boolean(
+    incoming?.updated_at && current?.updated_at && incoming.updated_at < current.updated_at
+  );
+}
+
 function reducer(state, action) {
   switch (action.type) {
     case 'SET_FEATURES':
       return { ...state, features: { ...DEFAULT_FEATURES, ...action.payload } };
 
-    case 'SET_DOCUMENTS':
-      return { ...state, documents: action.payload };
+    case 'SET_DOCUMENTS': {
+      const current = new Map(state.documents.map((d) => [d.id, d]));
+      const documents = action.payload.map((d) => {
+        const have = current.get(d.id);
+        // Keep the newer copy's fields; the list still supplies anything it lacks.
+        return have && isStale(d, have) ? { ...d, ...have } : d;
+      });
+      return { ...state, documents };
+    }
 
     case 'ADD_DOCUMENT':
       return {
@@ -56,6 +75,8 @@ function reducer(state, action) {
       };
 
     case 'UPDATE_DOCUMENT': {
+      const existing = state.documents.find((d) => d.id === action.payload.id);
+      if (existing && isStale(action.payload, existing)) return state;
       const docs = state.documents.map((d) =>
         d.id === action.payload.id ? { ...d, ...action.payload } : d
       );

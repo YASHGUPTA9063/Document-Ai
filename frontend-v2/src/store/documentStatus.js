@@ -23,6 +23,7 @@ export const ACTIVE_STATUSES = [
   'fraud_checking',
   'extracting',
   'validating',
+  'auto_verifying',  // KYC documents: automatic reference check after validation
 ];
 
 // Human review of extracted data. Deliberately excludes `awaiting_split_review`
@@ -72,6 +73,7 @@ export const STATUS_PHASE = {
   fraud_checking: 6,      // runs after classification, alongside the checklist
   extracting: 7,
   validating: 8,
+  auto_verifying: 8,               // KYC reference check, between validation and review
   awaiting_review: 9,
   completed: TERMINAL_PHASE,
   rejected: -1,

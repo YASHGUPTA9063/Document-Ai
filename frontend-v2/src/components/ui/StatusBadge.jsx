@@ -19,6 +19,7 @@ const STATUS_MAP = {
   extracting:       { label: 'Extraction',       cls: 'badge-blue',   icon: FileSearch },
 
   validating:       { label: 'Validation',       cls: 'badge-blue',   icon: CheckCircle },
+  auto_verifying:   { label: 'Auto Verification', cls: 'badge-blue',  icon: Shield },
   awaiting_review:  { label: 'Human Review',     cls: 'badge-yellow', icon: AlertTriangle },
   duplicate:        { label: 'Duplicate',        cls: 'badge-yellow', icon: AlertTriangle },
   completed:        { label: 'Completed',        cls: 'badge-green',  icon: Check },

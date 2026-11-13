@@ -337,7 +337,11 @@ class DocumentProcessingWorkflow(workflows.InteractiveWorkflow):
                     await _update_status_and_message(document_id, "rejected", reason)
                     return {"status": "rejected", "reason": reason, "checklist": gate}
 
-                await _update_status_and_message(document_id, "processing", "")
+                # Released: stay on the checklist step until the next step sets
+                # its own status. "processing" here would put a document that is
+                # already classified back at Ingestion — the UI read it as the
+                # held batch restarting whenever the missing documents arrived.
+                await _update_status_and_message(document_id, "checklist", "")
 
         # Step 3.5 — Fraud Check (if KYC Document)
         fraud_check_result = None

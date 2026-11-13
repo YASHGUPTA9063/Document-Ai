@@ -290,6 +290,7 @@ async def get_status(document_id: str):
             page_range=doc.page_range,
             child_count=child_count,
             batch_id=doc.batch_id,
+            updated_at=doc.updated_at.isoformat() if doc.updated_at else None,
         )
 
 
@@ -337,6 +338,7 @@ async def list_documents(
                 "page_range": d.page_range,
                 "child_count": child_counts.get(d.id, 0),
                 "batch_id": d.batch_id,
+                "updated_at": d.updated_at.isoformat() if d.updated_at else None,
             }
             for d in docs
         ]
@@ -832,6 +834,14 @@ async def retry_document(document_id: str):
         raise HTTPException(
             status_code=409,
             detail=f"Document is not in a retryable state (status: {doc.status}).",
+        )
+    if doc.status in ("checklist_hold", "awaiting_checklist_review"):
+        # Parked at the batch checklist on purpose, not stalled. A retry would
+        # send it back to the start and out of step with its batch; it moves on
+        # when the batch is released (or becomes `expired`, which is retryable).
+        raise HTTPException(
+            status_code=409,
+            detail="Document is held at the batch checklist — add the missing documents or decide on the checklist instead.",
         )
 
     async with AsyncSessionLocal() as session:

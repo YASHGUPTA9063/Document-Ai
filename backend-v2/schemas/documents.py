@@ -27,6 +27,9 @@ class WorkflowStatusResponse(BaseModel):
     # Upload batch the document belongs to — the scope the Step 3.2 checklist
     # is evaluated over. Null for documents uploaded before batches existed.
     batch_id: Optional[str] = None
+    # When the row last changed. Lets the UI keep the newest of two responses
+    # that cross in flight, so a status never appears to step backwards.
+    updated_at: Optional[str] = None
 
 class DuplicateDecisionRequest(BaseModel):
     override: bool
