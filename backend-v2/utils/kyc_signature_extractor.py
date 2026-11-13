@@ -4,7 +4,7 @@ kyc_signature_extractor.py
 Photo + signature cropping for the KYC Process flow (activities/kyc_images.py).
 
 A KYC-only variant of utils/signature_extractor.py, which the main extraction
-pipeline uses and which is left untouched. Differences:
+pipeline uses. Differences:
   - Uses OCR's native `signature` blocks, so non-raster signatures (e.g.
     script-font text on generated PDFs) are found; the shared version only
     looks at raster images.
@@ -12,12 +12,16 @@ pipeline uses and which is left untouched. Differences:
     pixtral-large-latest (which now returns "Invalid model").
   - The fallback gets labelled OCR text blocks as coordinate landmarks, and
     discards crops that come out blank.
+  - Every page of a PDF is searched. Application forms put the applicant's
+    signature on the declaration page — usually the last one — so a
+    first-page-only search never finds it.
 Unchanged helpers and schemas are imported from the shared module.
 """
 
 import json
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 from mistralai.client import Mistral  # retained for type annotations only
@@ -30,7 +34,8 @@ from utils.signature_extractor import (
     KycImageBboxes,
     _crop_region,
     _image_to_base64,
-    _prepare_image_and_url,
+    _page_for_box,
+    _prepare_pages,
     _resolve_raw_file_path,
     _schema,
 )
@@ -40,6 +45,9 @@ logger = logging.getLogger(__name__)
 # Vision model for the pixel-bbox pass. The shared extractor still uses
 # pixtral-large-latest, which the Mistral API has retired.
 BBOX_VISION_MODEL = "mistral-large-latest"
+
+# Concurrent per-page OCR calls in the block pass.
+MAX_PARALLEL_PAGES = 4
 
 
 def _is_blank(img, min_stddev: float = 4.0) -> bool:
@@ -140,48 +148,10 @@ def _locate_kyc_bboxes(
         return None
 
 
-def extract_signature_and_photo(
-    file_path: str,
-    document_id: str,
-    output_dir: str = None,
-    kyc_boxes: dict = None,
-) -> dict:
-    """
-    KYC image extraction with optional template-level manual coordinates.
+# ─── Small helpers ──────────────────────────────────────────────────────────
 
-    If `kyc_boxes` is provided (e.g. {"signature": {"x1":40,"y1":80,"x2":95,"y2":95}, ...}),
-    coordinates are treated as percentages (0-100) of the image dimensions. The image is
-    cropped directly — no Mistral API calls needed. This gives 100% reliable extraction.
-
-    If `kyc_boxes` is None, falls back to the two-pass approach:
-      Pass 1: mistral-ocr-latest with document_annotation → detect signature + get OCR landmarks
-      Pass 2: BBOX_VISION_MODEL → pixel-precise bboxes for signature AND photo
-    Then crop using Pillow, save to disk, and return base64.
-
-    Returns:
-    {
-        "has_signature": bool,
-        "signature_crop_path": str | None,
-        "signature_base64": str | None,
-        "signature_bbox": dict | None,
-        "has_photo": bool,
-        "photo_crop_path": str | None,
-        "photo_base64": str | None,
-        "photo_bbox": dict | None,
-        "confidence": str,
-        "signer_name": str | None,
-    }
-    """
-    from PIL import Image
-
-    client = get_mistral_client()
-
-    # Default output dir
-    if output_dir is None:
-        output_dir = os.path.join(settings.STORAGE_DIR, "crops", document_id)
-    os.makedirs(output_dir, exist_ok=True)
-
-    result = {
+def _empty_result() -> dict:
+    return {
         "has_signature": False,
         "signature_crop_path": None,
         "signature_base64": None,
@@ -194,227 +164,135 @@ def extract_signature_and_photo(
         "signer_name": None,
     }
 
-    # ── Prepare Image ────────────────────────────────────────────────────
-    try:
-        target_file_path = _resolve_raw_file_path(file_path)
-        img, resolved_url = _prepare_image_and_url(target_file_path)
+
+def _found_all(result: dict) -> bool:
+    return result["has_signature"] and result["has_photo"]
+
+
+def _coords(obj) -> Optional[tuple]:
+    c = tuple(getattr(obj, a, None) for a in ("top_left_x", "top_left_y", "bottom_right_x", "bottom_right_y"))
+    return None if None in c else c
+
+
+def _annotated_type(img_obj) -> Optional[str]:
+    """block_type from an OCR image's BboxAnnotation (JSON string or dict)."""
+    annotation = getattr(img_obj, "image_annotation", None)
+    if isinstance(annotation, str):
+        try:
+            annotation = json.loads(annotation)
+        except Exception:
+            return None
+    return annotation.get("block_type") if isinstance(annotation, dict) else None
+
+
+def _save_crop(result: dict, kind: str, cropped, bbox: tuple, output_dir: str) -> str:
+    """Record a signature/photo crop on `result` and write it to disk."""
+    x1, y1, x2, y2 = bbox
+    path = os.path.join(output_dir, f"{kind}.png")
+    cropped.save(path)
+    result[f"has_{kind}"] = True
+    result[f"{kind}_bbox"] = {"x1": x1, "y1": y1, "x2": x2, "y2": y2}
+    result[f"{kind}_crop_path"] = os.path.abspath(path)
+    result[f"{kind}_base64"] = _image_to_base64(cropped)
+    return path
+
+
+# ─── PATH 1: template-level manual coordinates ──────────────────────────────
+
+def _crop_manual_boxes(pages: list, kyc_boxes: dict, result: dict, output_dir: str, document_id: str) -> None:
+    """
+    Coordinates are percentages (0-100) of the page image — page 1 unless the
+    box carries a 1-based `page`. No API calls.
+    """
+    for kind in ("signature", "photo"):
+        box = kyc_boxes.get(kind)
+        if not box:
+            continue
+        img = _page_for_box(pages, box)
         width, height = img.size
-    except Exception as e:
-        logger.error(f"[Document {document_id}] Failed to prepare image: {e}")
-        return result
-
-    # ══════════════════════════════════════════════════════════════════════
-    # PATH 1: Template-level manual coordinates (HIGHEST PRIORITY)
-    # When the user explicitly defines signature/photo boundaries on the
-    # template, always honour them first — no API calls needed.
-    # ══════════════════════════════════════════════════════════════════════
-    if kyc_boxes:
-        logger.info(f"[Document {document_id}] Using MANUAL template coordinates for extraction (no API calls)")
-
-        # --- Crop signature from percentage coordinates ---
-        sig_box = kyc_boxes.get("signature")
-        if sig_box:
-            sx1 = int(sig_box["x1"] / 100.0 * width)
-            sy1 = int(sig_box["y1"] / 100.0 * height)
-            sx2 = int(sig_box["x2"] / 100.0 * width)
-            sy2 = int(sig_box["y2"] / 100.0 * height)
-            logger.info(f"[Document {document_id}] Signature manual bbox: ({sx1},{sy1})->({sx2},{sy2}) from pct ({sig_box})")
-
-            cropped = _crop_region(img, sx1, sy1, sx2, sy2)
-            if cropped:
-                result["has_signature"] = True
-                result["signature_bbox"] = {"x1": sx1, "y1": sy1, "x2": sx2, "y2": sy2}
-                sig_path = os.path.join(output_dir, "signature.png")
-                cropped.save(sig_path)
-                result["signature_crop_path"] = os.path.abspath(sig_path)
-                result["signature_base64"] = _image_to_base64(cropped)
-                result["confidence"] = "high"
-                logger.info(f"[Document {document_id}] Signature crop saved (manual): {sig_path}")
-            else:
-                logger.warning(f"[Document {document_id}] Signature crop returned empty region")
-
-        # --- Crop photo from percentage coordinates ---
-        photo_box = kyc_boxes.get("photo")
-        if photo_box:
-            px1 = int(photo_box["x1"] / 100.0 * width)
-            py1 = int(photo_box["y1"] / 100.0 * height)
-            px2 = int(photo_box["x2"] / 100.0 * width)
-            py2 = int(photo_box["y2"] / 100.0 * height)
-            logger.info(f"[Document {document_id}] Photo manual bbox: ({px1},{py1})->({px2},{py2}) from pct ({photo_box})")
-
-            cropped = _crop_region(img, px1, py1, px2, py2)
-            if cropped:
-                result["has_photo"] = True
-                result["photo_bbox"] = {"x1": px1, "y1": py1, "x2": px2, "y2": py2}
-                photo_path = os.path.join(output_dir, "photo.png")
-                cropped.save(photo_path)
-                result["photo_crop_path"] = os.path.abspath(photo_path)
-                result["photo_base64"] = _image_to_base64(cropped)
-                logger.info(f"[Document {document_id}] Photo crop saved (manual): {photo_path}")
-            else:
-                logger.warning(f"[Document {document_id}] Photo crop returned empty region")
-
-        return result
-
-    # ══════════════════════════════════════════════════════════════════════
-    # PATH 2: Mistral OCR 4 Block & Image Annotation Extraction
-    # (Only reached when no manual kyc_boxes are defined on the template)
-    # ══════════════════════════════════════════════════════════════════════
-    logger.info(f"[Document {document_id}] KYC Path 2: Running Mistral OCR 4 Block Extraction...")
-    try:
-        ocr_response = client.ocr.process(
-            model="mistral-ocr-latest",
-            document={
-                "type": "document_url",
-                "document_url": resolved_url
-            },
-            include_blocks=True,
-            include_image_base64=True,
-            bbox_annotation_format=_schema(BboxAnnotation)
+        bbox = (
+            int(box["x1"] / 100.0 * width),
+            int(box["y1"] / 100.0 * height),
+            int(box["x2"] / 100.0 * width),
+            int(box["y2"] / 100.0 * height),
         )
-        
-        for page in getattr(ocr_response, "pages", []) or []:
-            # Native signature blocks first: OCR tags signatures it recognises
-            # as block.type == "signature" even when they aren't raster images
-            # (e.g. vector / script-font signatures on generated PDFs), which
-            # the image search below can never find.
+        logger.info(f"[Document {document_id}] {kind.capitalize()} manual bbox: {bbox} from pct ({box})")
+        cropped = _crop_region(img, *bbox)
+        if not cropped:
+            logger.warning(f"[Document {document_id}] {kind.capitalize()} crop returned empty region")
+            continue
+        path = _save_crop(result, kind, cropped, bbox, output_dir)
+        if kind == "signature":
+            result["confidence"] = "high"
+        logger.info(f"[Document {document_id}] {kind.capitalize()} crop saved (manual): {path}")
+
+
+# ─── PATH 2: Mistral OCR block & image annotations ──────────────────────────
+
+def _ocr_blocks(client: Mistral, resolved_url: str):
+    return client.ocr.process(
+        model="mistral-ocr-latest",
+        document={"type": "document_url", "document_url": resolved_url},
+        include_blocks=True,
+        include_image_base64=True,
+        bbox_annotation_format=_schema(BboxAnnotation),
+    )
+
+
+def _take_from_ocr_blocks(ocr_response, img, result: dict, output_dir: str, document_id: str, page_no: int) -> None:
+    """Crop whatever `result` still lacks from one page's OCR blocks/images."""
+    for page in getattr(ocr_response, "pages", []) or []:
+        # Native signature blocks first: OCR tags signatures it recognises
+        # as block.type == "signature" even when they aren't raster images
+        # (e.g. vector / script-font signatures on generated PDFs), which
+        # the image search below can never find.
+        if not result["has_signature"]:
             for block in getattr(page, "blocks", []) or []:
-                if getattr(block, "type", None) != "signature":
+                if getattr(block, "type", None) != "signature" or not _coords(block):
                     continue
-                coords = tuple(getattr(block, a, None) for a in ("top_left_x", "top_left_y", "bottom_right_x", "bottom_right_y"))
-                if None in coords:
-                    continue
-                cropped_sig = _crop_region(img, *coords)
-                if cropped_sig:
-                    sx1, sy1, sx2, sy2 = coords
-                    result["has_signature"] = True
-                    result["signature_bbox"] = {"x1": sx1, "y1": sy1, "x2": sx2, "y2": sy2}
-                    sig_path = os.path.join(output_dir, "signature.png")
-                    cropped_sig.save(sig_path)
-                    result["signature_crop_path"] = os.path.abspath(sig_path)
-                    result["signature_base64"] = _image_to_base64(cropped_sig)
+                cropped = _crop_region(img, *_coords(block))
+                if cropped:
+                    _save_crop(result, "signature", cropped, _coords(block), output_dir)
                     result["confidence"] = "high"
-                    logger.info(f"[Document {document_id}] Path 2: Signature extracted from OCR signature block: ({sx1}, {sy1})->({sx2}, {sy2})")
+                    logger.info(f"[Document {document_id}] Path 2: Signature extracted from OCR signature block on page {page_no}: {_coords(block)}")
                     break
 
-            # Search images for signature (via image_annotation.block_type)
-            # NOTE: Mistral OCR stores the custom BboxAnnotation in
-            # image_annotation, NOT as the native block `.type` attribute.
-            # This mirrors the same pattern used for photo detection below.
-            images_for_sig = [] if result["has_signature"] else (getattr(page, "images", []) or [])
-            for img_obj in images_for_sig:
-                annotation = getattr(img_obj, "image_annotation", None)
-                is_signature = False
-                if annotation:
-                    if isinstance(annotation, str):
-                        try:
-                            ann_data = json.loads(annotation)
-                            if ann_data.get("block_type") == "signature":
-                                is_signature = True
-                        except Exception:
-                            pass
-                    elif isinstance(annotation, dict):
-                        if annotation.get("block_type") == "signature":
-                            is_signature = True
+        # Then images annotated by BboxAnnotation. NOTE: Mistral OCR stores
+        # the custom annotation in image_annotation, NOT the block `.type`.
+        for img_obj in getattr(page, "images", []) or []:
+            kind = _annotated_type(img_obj)
+            if kind not in ("signature", "photo") or result[f"has_{kind}"] or not _coords(img_obj):
+                continue
+            cropped = _crop_region(img, *_coords(img_obj))
+            if cropped:
+                _save_crop(result, kind, cropped, _coords(img_obj), output_dir)
+                if kind == "signature":
+                    result["confidence"] = "high"
+                logger.info(f"[Document {document_id}] Path 2: {kind.capitalize()} extracted from annotated image on page {page_no}: {_coords(img_obj)}")
 
-                if is_signature:
-                    sx1 = getattr(img_obj, "top_left_x", None)
-                    sy1 = getattr(img_obj, "top_left_y", None)
-                    sx2 = getattr(img_obj, "bottom_right_x", None)
-                    sy2 = getattr(img_obj, "bottom_right_y", None)
-                    if None not in (sx1, sy1, sx2, sy2):
-                        cropped_sig = _crop_region(img, sx1, sy1, sx2, sy2)
-                        if cropped_sig:
-                            result["has_signature"] = True
-                            result["signature_bbox"] = {"x1": sx1, "y1": sy1, "x2": sx2, "y2": sy2}
-                            sig_path = os.path.join(output_dir, "signature.png")
-                            cropped_sig.save(sig_path)
-                            result["signature_crop_path"] = os.path.abspath(sig_path)
-                            result["signature_base64"] = _image_to_base64(cropped_sig)
-                            result["confidence"] = "high"
-                            logger.info(f"[Document {document_id}] Path 2: Signature extracted from annotated image: ({sx1}, {sy1})->({sx2}, {sy2})")
-                            break
-            
-            # Search images for photo
-            images = getattr(page, "images", []) or []
-            for img_obj in images:
-                annotation = getattr(img_obj, "image_annotation", None)
-                is_photo = False
-                if annotation:
-                    if isinstance(annotation, str):
-                        try:
-                            ann_data = json.loads(annotation)
-                            if ann_data.get("block_type") == "photo":
-                                is_photo = True
-                        except Exception:
-                            pass
-                    elif isinstance(annotation, dict):
-                        if annotation.get("block_type") == "photo":
-                            is_photo = True
-                
-                if is_photo:
-                    px1 = getattr(img_obj, "top_left_x", None)
-                    py1 = getattr(img_obj, "top_left_y", None)
-                    px2 = getattr(img_obj, "bottom_right_x", None)
-                    py2 = getattr(img_obj, "bottom_right_y", None)
-                    if None not in (px1, py1, px2, py2):
-                        cropped_photo = _crop_region(img, px1, py1, px2, py2)
-                        if cropped_photo:
-                            result["has_photo"] = True
-                            result["photo_bbox"] = {"x1": px1, "y1": py1, "x2": px2, "y2": py2}
-                            photo_path = os.path.join(output_dir, "photo.png")
-                            cropped_photo.save(photo_path)
-                            result["photo_crop_path"] = os.path.abspath(photo_path)
-                            result["photo_base64"] = _image_to_base64(cropped_photo)
-                            logger.info(f"[Document {document_id}] Path 2: Photo successfully extracted from annotated image: ({px1}, {py1})->({px2}, {py2})")
-                            break
 
-        if result["has_signature"] and result["has_photo"]:
-            logger.info(f"[Document {document_id}] Path 2 found both signature and photo. Returning result.")
-            return result
-        # ID cards often yield the photo here but not the signature (or vice
-        # versa) — fall back for whatever is missing, keeping what was found.
-        logger.info(
-            f"[Document {document_id}] Path 2 partial (signature={result['has_signature']}, "
-            f"photo={result['has_photo']}). Falling back for the missing region(s)..."
-        )
-            
-    except Exception as e:
-        logger.error(f"[Document {document_id}] Path 2 failed: {e}. Resetting result and falling back...")
-        result.update({
-            "has_signature": False,
-            "signature_crop_path": None,
-            "signature_base64": None,
-            "signature_bbox": None,
-            "has_photo": False,
-            "photo_crop_path": None,
-            "photo_base64": None,
-            "photo_bbox": None,
-            "confidence": "low",
-            "signer_name": None,
-        })
+# ─── FALLBACK: OCR document annotation + vision bboxes ──────────────────────
 
-    # ══════════════════════════════════════════════════════════════════════
-    # FALLBACK PATH: Two-pass Pixtral approach (when no manual coords)
-    # ══════════════════════════════════════════════════════════════════════
+def _vision_fallback(
+    client: Mistral, img, resolved_url: str, result: dict, output_dir: str,
+    document_id: str, page_no: int, multi_page: bool,
+) -> None:
+    """Pass 1 (OCR document_annotation + landmarks) and Pass 2 (vision bboxes) on one page."""
+    width, height = img.size
 
     # ── Pass 1: Document annotation via Mistral OCR ──────────────────────
-    logger.info(f"[Document {document_id}] KYC Pass 1: Running document_annotation...")
-
+    logger.info(f"[Document {document_id}] KYC Pass 1: Running document_annotation on page {page_no}...")
     try:
         ocr_response = client.ocr.process(
             model="mistral-ocr-latest",
-            document={
-                "type": "document_url",
-                "document_url": resolved_url
-            },
+            document={"type": "document_url", "document_url": resolved_url},
             include_image_base64=False,
             include_blocks=True,
             document_annotation_format=_schema(DocumentSignatureAnnotation),
         )
     except Exception as e:
-        logger.error(f"[Document {document_id}] OCR document_annotation failed: {e}")
-        return result
+        logger.error(f"[Document {document_id}] OCR document_annotation failed on page {page_no}: {e}")
+        return
 
     # Collect OCR-detected image region bboxes as landmarks
     ocr_bboxes = []
@@ -426,7 +304,7 @@ def extract_signature_and_photo(
             b for b in (getattr(page, "blocks", []) or [])
             if (getattr(b, "content", "") or "").strip()
         )
-    logger.info(f"[Document {document_id}] OCR detected {len(ocr_bboxes)} image region(s).")
+    logger.info(f"[Document {document_id}] OCR detected {len(ocr_bboxes)} region(s) on page {page_no}.")
 
     # Parse document_annotation
     raw_annotation = getattr(ocr_response, "document_annotation", None)
@@ -443,78 +321,148 @@ def extract_signature_and_photo(
             result["confidence"] = annotation.confidence
         result["signer_name"] = result["signer_name"] or annotation.signer_name
         logger.info(
-            f"[Document {document_id}] Annotation: has_signature={annotation.has_signature}, "
+            f"[Document {document_id}] Annotation (page {page_no}): has_signature={annotation.has_signature}, "
             f"confidence={annotation.confidence}, location={annotation.signature_location}"
         )
 
-    # ── Pass 2: Pixtral-Large for pixel-precise bboxes ───────────────────
-    logger.info(f"[Document {document_id}] KYC Pass 2: Calling {BBOX_VISION_MODEL}...")
+    # ── Pass 2: vision model for pixel-precise bboxes ────────────────────
+    logger.info(f"[Document {document_id}] KYC Pass 2: Calling {BBOX_VISION_MODEL} on page {page_no}...")
 
-    # Build landmark strings from OCR bboxes
     landmarks = []
     for idx, item in enumerate(ocr_bboxes):
-        x1 = getattr(item, "top_left_x", None)
-        y1 = getattr(item, "top_left_y", None)
-        x2 = getattr(item, "bottom_right_x", None)
-        y2 = getattr(item, "bottom_right_y", None)
+        c = _coords(item)
         bid = getattr(item, "id", "")
         text = " ".join((getattr(item, "content", "") or "").split())[:60]
         label = f'text "{text}"' if text else (bid or f"Region {idx+1}")
-        if None not in (x1, y1, x2, y2):
-            landmarks.append(f"- {label}: ({x1}, {y1}) to ({x2}, {y2})")
-
-    location_hint = annotation.signature_location if annotation else None
+        if c:
+            landmarks.append(f"- {label}: ({c[0]}, {c[1]}) to ({c[2]}, {c[3]})")
 
     bboxes = _locate_kyc_bboxes(
         client, resolved_url, width, height,
-        location_hint=location_hint,
+        location_hint=annotation.signature_location if annotation else None,
         landmarks=landmarks,
     )
-
     if not bboxes:
-        logger.warning(f"[Document {document_id}] Vision bbox call returned no results.")
+        logger.warning(f"[Document {document_id}] Vision bbox call returned no results for page {page_no}.")
+        return
+
+    candidates = {
+        "signature": bboxes.signature_found and (bboxes.sig_x1, bboxes.sig_y1, bboxes.sig_x2, bboxes.sig_y2),
+        "photo": bboxes.photo_found and (bboxes.photo_x1, bboxes.photo_y1, bboxes.photo_x2, bboxes.photo_y2),
+    }
+    # On a multi-page form, other pages are full of filled-in fields that can
+    # look handwritten (script fonts, ink). Take a vision signature only from
+    # a page OCR didn't explicitly rule out, so it isn't picked off the wrong page.
+    if multi_page and candidates["signature"] and annotation and not annotation.has_signature:
+        logger.info(f"[Document {document_id}] Ignoring vision signature on page {page_no}: OCR found no signature there.")
+        candidates["signature"] = None
+
+    for kind, bbox in candidates.items():
+        if result[f"has_{kind}"] or not bbox or None in bbox:
+            continue
+        cropped = _crop_region(img, *bbox)
+        if cropped and _is_blank(cropped):
+            # Vision-model pixel boxes can land on empty space — a blank crop
+            # would be compared as if it were the real image, so drop it.
+            logger.warning(f"[Document {document_id}] Vision {kind} bbox on page {page_no} is blank; discarding.")
+        elif cropped:
+            path = _save_crop(result, kind, cropped, bbox, output_dir)
+            logger.info(f"[Document {document_id}] {kind.capitalize()} crop saved from page {page_no}: {path}")
+
+
+# ─── Entry point ────────────────────────────────────────────────────────────
+
+def extract_signature_and_photo(
+    file_path: str,
+    document_id: str,
+    output_dir: str = None,
+    kyc_boxes: dict = None,
+) -> dict:
+    """
+    KYC image extraction with optional template-level manual coordinates.
+
+    If `kyc_boxes` is provided (e.g. {"signature": {"x1":40,"y1":80,"x2":95,"y2":95}, ...}),
+    coordinates are treated as percentages (0-100) of the image dimensions. The image is
+    cropped directly — no Mistral API calls needed. This gives 100% reliable extraction.
+
+    Otherwise every page (up to MAX_KYC_PAGES) is searched:
+      Path 2:   mistral-ocr-latest blocks/annotations on all pages (in parallel)
+      Fallback: for whatever is still missing, page by page —
+                OCR document_annotation + landmarks, then BBOX_VISION_MODEL bboxes
+    Then crop using Pillow, save to disk, and return base64.
+
+    Returns:
+    {
+        "has_signature": bool,
+        "signature_crop_path": str | None,
+        "signature_base64": str | None,
+        "signature_bbox": dict | None,
+        "has_photo": bool,
+        "photo_crop_path": str | None,
+        "photo_base64": str | None,
+        "photo_bbox": dict | None,
+        "confidence": str,
+        "signer_name": str | None,
+    }
+    """
+    client = get_mistral_client()
+
+    if output_dir is None:
+        output_dir = os.path.join(settings.STORAGE_DIR, "crops", document_id)
+    os.makedirs(output_dir, exist_ok=True)
+
+    result = _empty_result()
+
+    # ── Prepare page images ──────────────────────────────────────────────
+    try:
+        pages = _prepare_pages(_resolve_raw_file_path(file_path))
+    except Exception as e:
+        logger.error(f"[Document {document_id}] Failed to prepare image: {e}")
+        return result
+    if not pages:
+        logger.error(f"[Document {document_id}] Document has no pages.")
+        return result
+    multi_page = len(pages) > 1
+
+    # ══ PATH 1: Template-level manual coordinates (HIGHEST PRIORITY) ══════
+    if kyc_boxes:
+        logger.info(f"[Document {document_id}] Using MANUAL template coordinates for extraction (no API calls)")
+        _crop_manual_boxes(pages, kyc_boxes, result, output_dir, document_id)
         return result
 
-    # ── Crop signature ────────────────────────────────────────────────────
-    if not result["has_signature"] and bboxes.signature_found and all(
-        v is not None for v in (bboxes.sig_x1, bboxes.sig_y1, bboxes.sig_x2, bboxes.sig_y2)
-    ):
-        cropped = _crop_region(img, bboxes.sig_x1, bboxes.sig_y1, bboxes.sig_x2, bboxes.sig_y2)
-        if cropped and _is_blank(cropped):
-            # Vision-model pixel boxes can land on empty space — a blank crop
-            # would be compared as if it were the real signature, so drop it.
-            logger.warning(f"[Document {document_id}] Vision signature bbox is blank; discarding.")
-        elif cropped:
-            result["has_signature"] = True
-            result["signature_bbox"] = {
-                "x1": bboxes.sig_x1, "y1": bboxes.sig_y1,
-                "x2": bboxes.sig_x2, "y2": bboxes.sig_y2,
-            }
-            sig_path = os.path.join(output_dir, "signature.png")
-            cropped.save(sig_path)
-            result["signature_crop_path"] = os.path.abspath(sig_path)
-            result["signature_base64"] = _image_to_base64(cropped)
-            logger.info(f"[Document {document_id}] Signature crop saved: {sig_path}")
+    # ══ PATH 2: OCR block & image annotations, every page ═════════════════
+    logger.info(f"[Document {document_id}] KYC Path 2: Running Mistral OCR block extraction on {len(pages)} page(s)...")
 
-    # ── Crop photo ────────────────────────────────────────────────────────
-    if not result["has_photo"] and bboxes.photo_found and all(
-        v is not None for v in (bboxes.photo_x1, bboxes.photo_y1, bboxes.photo_x2, bboxes.photo_y2)
-    ):
-        cropped = _crop_region(img, bboxes.photo_x1, bboxes.photo_y1, bboxes.photo_x2, bboxes.photo_y2)
-        if cropped and _is_blank(cropped):
-            # Vision-model pixel boxes can land on empty space — a blank crop
-            # would be compared as if it were the real photo, so drop it.
-            logger.warning(f"[Document {document_id}] Vision photo bbox is blank; discarding.")
-        elif cropped:
-            result["has_photo"] = True
-            result["photo_bbox"] = {
-                "x1": bboxes.photo_x1, "y1": bboxes.photo_y1,
-                "x2": bboxes.photo_x2, "y2": bboxes.photo_y2,
-            }
-            photo_path = os.path.join(output_dir, "photo.png")
-            cropped.save(photo_path)
-            result["photo_crop_path"] = os.path.abspath(photo_path)
-            result["photo_base64"] = _image_to_base64(cropped)
-            logger.info(f"[Document {document_id}] Photo crop saved: {photo_path}")
+    def _ocr_page(page):
+        try:
+            return _ocr_blocks(client, page[1]), None
+        except Exception as e:
+            return None, e
+
+    with ThreadPoolExecutor(max_workers=min(MAX_PARALLEL_PAGES, len(pages))) as pool:
+        ocr_results = list(pool.map(_ocr_page, pages))
+
+    # Pages are read in order, so the earliest page with a match wins.
+    for page_no, ((img, _), (ocr_response, err)) in enumerate(zip(pages, ocr_results), 1):
+        if err is not None:
+            logger.error(f"[Document {document_id}] Path 2 failed on page {page_no}: {err}")
+            continue
+        _take_from_ocr_blocks(ocr_response, img, result, output_dir, document_id, page_no)
+
+    if _found_all(result):
+        logger.info(f"[Document {document_id}] Path 2 found both signature and photo. Returning result.")
+        return result
+    # ID cards often yield the photo here but not the signature (or vice
+    # versa) — fall back for whatever is missing, keeping what was found.
+    logger.info(
+        f"[Document {document_id}] Path 2 partial (signature={result['has_signature']}, "
+        f"photo={result['has_photo']}). Falling back for the missing region(s)..."
+    )
+
+    # ══ FALLBACK: OCR annotation + vision bboxes, page by page ════════════
+    for page_no, (img, resolved_url) in enumerate(pages, 1):
+        if _found_all(result):
+            break
+        _vision_fallback(client, img, resolved_url, result, output_dir, document_id, page_no, multi_page)
 
     return result

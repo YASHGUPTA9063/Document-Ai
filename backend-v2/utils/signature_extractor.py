@@ -125,24 +125,27 @@ def _open_image(source: str):
         return Image.open(io.BytesIO(base64.b64decode(b64)))
     return Image.open(source)
 
-def _prepare_image_and_url(file_path: str):
+def _is_pdf(file_path: str) -> bool:
+    mime, _ = mimetypes.guess_type(str(file_path))
+    return mime == "application/pdf" or str(file_path).lower().endswith(".pdf")
+
+
+def _prepare_image_and_url(file_path: str, page_index: int = 0):
     """
-    Returns a Pillow Image and a data URI string. 
-    If the file is a PDF, it rasterizes the first page to ensure consistent 
-    coordinate systems for both Mistral OCR and Pixtral Vision.
+    Returns a Pillow Image and a data URI string.
+    If the file is a PDF, it rasterizes page `page_index` (default: the first)
+    to ensure consistent coordinate systems for both Mistral OCR and Vision.
     """
     from PIL import Image
     path = Path(file_path)
     if not path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
-    
-    mime, _ = mimetypes.guess_type(str(path))
-    if mime == 'application/pdf' or file_path.lower().endswith('.pdf'):
+
+    if _is_pdf(file_path):
         import fitz
-        doc = fitz.open(str(path))
-        page = doc[0]
-        # Rasterize at 150 DPI for good OCR/Vision balance
-        pix = page.get_pixmap(dpi=150)
+        with fitz.open(str(path)) as doc:
+            # Rasterize at 150 DPI for good OCR/Vision balance
+            pix = doc[page_index].get_pixmap(dpi=150)
         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
         
         # Encode to base64
@@ -163,6 +166,40 @@ def _prepare_image_and_url(file_path: str):
         b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
         data_uri = f"data:image/png;base64,{b64}"
         return img, data_uri
+
+
+# Upper bound on the PDF pages searched for a signature/photo. KYC forms and
+# IDs are a few pages; this keeps a long upload from costing dozens of
+# OCR/vision calls.
+MAX_KYC_PAGES = 10
+
+
+def _prepare_pages(file_path: str) -> list:
+    """
+    [(image, data_uri), ...] for every page of the document — one entry for an
+    image file, one per page (up to MAX_KYC_PAGES) for a PDF. The signature on
+    an application form is usually on its last page, not its first.
+    """
+    if not _is_pdf(file_path):
+        return [_prepare_image_and_url(file_path)]
+    import fitz
+    with fitz.open(str(file_path)) as doc:
+        count = doc.page_count
+    if count > MAX_KYC_PAGES:
+        logger.warning(f"{file_path} has {count} pages; searching only the first {MAX_KYC_PAGES} for signature/photo.")
+    return [_prepare_image_and_url(file_path, i) for i in range(min(count, MAX_KYC_PAGES))]
+
+
+def _page_for_box(pages: list, box: dict):
+    """
+    Template boxes are percentages of page 1 unless the box names a page
+    (1-based `page` key). Returns that page's image.
+    """
+    try:
+        idx = int(box.get("page") or 1) - 1
+    except (TypeError, ValueError):
+        idx = 0
+    return pages[min(max(idx, 0), len(pages) - 1)][0]
 
 
 def _crop_region(img, x1, y1, x2, y2):
@@ -333,8 +370,6 @@ def extract_signature_and_photo(
         "signer_name": str | None,
     }
     """
-    from PIL import Image
-
     client = get_mistral_client()
 
     # Default output dir
@@ -342,24 +377,12 @@ def extract_signature_and_photo(
         output_dir = os.path.join(settings.STORAGE_DIR, "crops", document_id)
     os.makedirs(output_dir, exist_ok=True)
 
-    result = {
-        "has_signature": False,
-        "signature_crop_path": None,
-        "signature_base64": None,
-        "signature_bbox": None,
-        "has_photo": False,
-        "photo_crop_path": None,
-        "photo_base64": None,
-        "photo_bbox": None,
-        "confidence": "low",
-        "signer_name": None,
-    }
+    result = _empty_result()
 
-    # ── Prepare Image ────────────────────────────────────────────────────
+    # ── Prepare page images (every page of a PDF) ────────────────────────
     try:
         target_file_path = _resolve_raw_file_path(file_path)
-        img, resolved_url = _prepare_image_and_url(target_file_path)
-        width, height = img.size
+        pages = _prepare_pages(target_file_path)
     except Exception as e:
         logger.error(f"[Document {document_id}] Failed to prepare image: {e}")
         return result
@@ -375,6 +398,8 @@ def extract_signature_and_photo(
         # --- Crop signature from percentage coordinates ---
         sig_box = kyc_boxes.get("signature")
         if sig_box:
+            img = _page_for_box(pages, sig_box)
+            width, height = img.size
             sx1 = int(sig_box["x1"] / 100.0 * width)
             sy1 = int(sig_box["y1"] / 100.0 * height)
             sx2 = int(sig_box["x2"] / 100.0 * width)
@@ -397,6 +422,8 @@ def extract_signature_and_photo(
         # --- Crop photo from percentage coordinates ---
         photo_box = kyc_boxes.get("photo")
         if photo_box:
+            img = _page_for_box(pages, photo_box)
+            width, height = img.size
             px1 = int(photo_box["x1"] / 100.0 * width)
             py1 = int(photo_box["y1"] / 100.0 * height)
             px2 = int(photo_box["x2"] / 100.0 * width)
@@ -416,6 +443,58 @@ def extract_signature_and_photo(
                 logger.warning(f"[Document {document_id}] Photo crop returned empty region")
 
         return result
+
+    # ── Search page by page until both are found ─────────────────────────
+    # Page 1 keeps the original output dir and result, so single-page
+    # documents behave exactly as before; later pages only fill what is still
+    # missing (each crops into its own subfolder so nothing is overwritten).
+    for page_no, (img, resolved_url) in enumerate(pages, 1):
+        page_dir = output_dir if page_no == 1 else os.path.join(output_dir, f"page_{page_no}")
+        if len(pages) > 1:
+            logger.info(f"[Document {document_id}] Searching page {page_no}/{len(pages)} for signature/photo")
+        page_result = _extract_from_page(client, img, resolved_url, document_id, page_dir)
+        if page_no == 1:
+            result = page_result
+        else:
+            _merge_page_result(result, page_result, page_no, document_id)
+        if result["has_signature"] and result["has_photo"]:
+            break
+    return result
+
+
+def _empty_result() -> dict:
+    return {
+        "has_signature": False,
+        "signature_crop_path": None,
+        "signature_base64": None,
+        "signature_bbox": None,
+        "has_photo": False,
+        "photo_crop_path": None,
+        "photo_base64": None,
+        "photo_bbox": None,
+        "confidence": "low",
+        "signer_name": None,
+    }
+
+
+def _merge_page_result(result: dict, page_result: dict, page_no: int, document_id: str) -> None:
+    """Fill whatever `result` still lacks from a later page's result."""
+    for kind in ("signature", "photo"):
+        if result[f"has_{kind}"] or not page_result[f"has_{kind}"]:
+            continue
+        for key in (f"has_{kind}", f"{kind}_crop_path", f"{kind}_base64", f"{kind}_bbox"):
+            result[key] = page_result[key]
+        if kind == "signature":
+            result["confidence"] = page_result["confidence"]
+        logger.info(f"[Document {document_id}] {kind.capitalize()} found on page {page_no}")
+    result["signer_name"] = result["signer_name"] or page_result["signer_name"]
+
+
+def _extract_from_page(client, img, resolved_url: str, document_id: str, output_dir: str) -> dict:
+    """Path 2 (OCR block annotations) then the vision fallback, on one page image."""
+    os.makedirs(output_dir, exist_ok=True)
+    width, height = img.size
+    result = _empty_result()
 
     # ══════════════════════════════════════════════════════════════════════
     # PATH 2: Mistral OCR 4 Block & Image Annotation Extraction
