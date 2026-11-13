@@ -22,6 +22,7 @@ from typing import Optional
 
 from mistralai.client import Mistral  # retained for type annotations only
 from platform_core.adapters.resilient_mistral import get_mistral_client
+from platform_core.agent_loop import _parse_json_response
 
 from config import settings
 from utils.signature_extractor import (
@@ -37,9 +38,10 @@ from utils.signature_extractor import (
 
 logger = logging.getLogger(__name__)
 
-# Vision model for the pixel-bbox pass. The shared extractor still uses
-# pixtral-large-latest, which the Mistral API has retired.
-BBOX_VISION_MODEL = "mistral-large-latest"
+# Vision model for the pixel-bbox pass (LLM_VISION_MODEL, mistral-large-latest
+# by default). The shared extractor still uses pixtral-large-latest, which the
+# Mistral API has retired.
+BBOX_VISION_MODEL = settings.LLM_VISION_MODEL
 
 
 def _is_blank(img, min_stddev: float = 4.0) -> bool:
@@ -121,8 +123,8 @@ def _locate_kyc_bboxes(
             temperature=settings.LLM_TEMPERATURE,
             max_tokens=settings.LLM_MAX_TOKENS,
         )
-        raw = response.choices[0].message.content
-        d = json.loads(raw) if isinstance(raw, str) else dict(raw)
+        # Reasoning models return content as [ThinkChunk, TextChunk], not a str.
+        d = _parse_json_response(response.choices[0].message.content)
         bboxes = KycImageBboxes(**d)
 
         logger.info(

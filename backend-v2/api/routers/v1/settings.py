@@ -205,7 +205,7 @@ async def generate_template_from_sample(
         )
 
         response = get_mistral_client().chat.complete(
-            model="mistral-large-latest",
+            model=settings.LLM_TEXT_MODEL,
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
             temperature=settings.LLM_TEMPERATURE,

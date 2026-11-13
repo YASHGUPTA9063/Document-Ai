@@ -27,6 +27,9 @@ logger = logging.getLogger(__name__)
 IMAGE_WAIT_TIMEOUT_S = 120
 IMAGE_WAIT_POLL_S = 2
 
+# Template whose kyc_boxes, when drawn, locate the form's photo / signature.
+KYC_FORM_TYPE = "kyc_form"
+
 
 def _kyc_dir(kyc_id: str, *parts: str) -> str:
     return os.path.join(settings.STORAGE_DIR, "kyc_attachments", kyc_id, *parts)
@@ -72,7 +75,9 @@ async def extract_form_images(kyc_id: str, file_path: str, document_id: str) -> 
     try:
         logger.info(f"[KYC {kyc_id}] Extracting photo/signature/details from application form {document_id}")
         res, _ = await asyncio.gather(
-            _crop(file_path, document_id, _kyc_dir(kyc_id, "form")),
+            # A kyc_form template with drawn photo/signature regions gives an
+            # exact crop; without one this falls back to OCR + vision detection.
+            _crop(file_path, document_id, _kyc_dir(kyc_id, "form"), doc_type=KYC_FORM_TYPE),
             _extract_form_identity(kyc_id, file_path),
         )
         await kyc_db.set_form_images(

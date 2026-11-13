@@ -84,7 +84,7 @@ def extract_form_identity(file_path: str) -> dict:
         return {k: None for k in IDENTITY_FIELDS}
 
     resp = get_mistral_client().chat.complete(
-        model="mistral-large-latest",
+        model=settings.LLM_TEXT_MODEL,
         messages=[
             {"role": "system", "content": PROMPTS.get("kyc_form_identity")},
             {"role": "user", "content": f"--- DOCUMENT TEXT ---\n{raw_text}\n--- END ---"},

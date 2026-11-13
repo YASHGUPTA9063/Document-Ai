@@ -5,6 +5,7 @@ import { useApp } from '../store/AppStore';
 import {
   ACTIVE_STATUSES, REVIEW_STATUSES, SPLIT_REVIEW_STATUS,
   CHECKLIST_REVIEW_STATUS, CHECKLIST_HOLD_STATUS, CHECKLIST_GATE_STATUSES,
+  statusPhase,
 } from '../store/documentStatus';
 import { useDocumentList } from '../hooks/useDocumentList';
 import { useDocumentPoller } from '../hooks/useDocumentPoller';
@@ -216,13 +217,23 @@ export function Processing() {
 
   useEffect(() => () => clearTimeout(settleTimer.current), []);
 
-  // Most recently active doc for the live pipeline display. A packet waiting on
-  // a split decision is the one thing worth looking at, so it wins the slot.
+  // The document the live pipeline follows. A decision the user has to make
+  // (split, then checklist) wins the slot; otherwise it is the document that is
+  // furthest along. Picking the newest instead made the pipeline jump back to
+  // Ingestion whenever a missing document was added to a batch held at the
+  // checklist, as if the held documents had restarted — they had not, and the
+  // display now stays on them. In a KYC hand-off only that application's
+  // documents are considered (falling back to everything once they are done).
+  const kycPending = kyc ? pendingDocs.filter((d) => kycDocIds.includes(d.id)) : [];
+  const candidates = kycPending.length ? kycPending : pendingDocs;
   const featured =
-    (kyc && pendingDocs.find((d) => kycDocIds.includes(d.id))) ||
-    pendingDocs.find((d) => d.status === SPLIT_REVIEW_STATUS) ||
-    pendingDocs.find((d) => d.status === CHECKLIST_REVIEW_STATUS) ||
-    pendingDocs[0];
+    candidates.find((d) => d.status === SPLIT_REVIEW_STATUS) ||
+    candidates.find((d) => d.status === CHECKLIST_REVIEW_STATUS) ||
+    // pendingDocs is newest-first, so `>=` settles ties on the older document.
+    candidates.reduce(
+      (best, d) => (!best || statusPhase(d.status) >= statusPhase(best.status) ? d : best),
+      null,
+    );
 
   return (
     <div className="page">

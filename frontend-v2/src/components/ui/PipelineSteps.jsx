@@ -1,5 +1,6 @@
 import { Check, Cpu, Tag, FileSearch, CheckCircle, UserCheck, Package, Shield, Wand2, Scissors, ListChecks } from 'lucide-react';
 import { useApp } from '../../store/AppStore';
+import { STATUS_PHASE, TERMINAL_PHASE } from '../../store/documentStatus';
 
 // Every step carries a `phase` — its position in the backend pipeline, fixed
 // regardless of which steps are on screen. Optional steps name the feature flag
@@ -17,33 +18,6 @@ const ALL_STEPS = [
   { key: 'review',     phase: 9,  label: 'Human Review',   icon: UserCheck },
   { key: 'output',     phase: 10, label: 'Output',         icon: Cpu },
 ];
-
-// Anything at or past this phase means the pipeline is finished — every visible
-// step reads as done.
-const TERMINAL_PHASE = 11;
-
-// Backend status -> pipeline phase. Statuses belonging to a switched-off step
-// simply never arrive, so they cost nothing by staying in the table.
-const STATUS_PHASE = {
-  pending: 0,
-  processing: 1,               // intake
-  splitting: 2,                // packet split detection
-  awaiting_split_review: 2,
-  split: TERMINAL_PHASE,       // packet done — its children carry on separately
-  pre_validating: 3,
-  preprocessing: 4,
-  classifying: 5,
-  checklist: 6,                    // batch checklist (Step 3.2)
-  checklist_hold: 6,               // parked behind the batch barrier
-  awaiting_checklist_review: 6,    // parked at the checklist gate
-  fraud_checking: 6,      // runs after classification, alongside the checklist
-  extracting: 7,
-  validating: 8,
-  awaiting_review: 9,
-  completed: TERMINAL_PHASE,
-  rejected: -1,
-  error: -1,
-};
 
 /**
  * The live pipeline for one document. Optional stages the deployment has

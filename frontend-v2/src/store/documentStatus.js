@@ -49,3 +49,34 @@ export const TERMINAL_STATUSES = ['completed', 'rejected', 'failed', 'error', 'e
 // States the retry endpoint accepts. `completed` and in-flight documents are
 // refused by the backend, so they are absent here too.
 export const RETRYABLE_STATUSES = ['failed', 'error', 'expired'];
+
+// ─── Pipeline position ──────────────────────────────────────────────
+// Anything at or past this phase means the pipeline is finished — every visible
+// step reads as done.
+export const TERMINAL_PHASE = 11;
+
+// Backend status -> pipeline phase. Statuses belonging to a switched-off step
+// simply never arrive, so they cost nothing by staying in the table.
+export const STATUS_PHASE = {
+  pending: 0,
+  processing: 1,               // intake
+  splitting: 2,                // packet split detection
+  awaiting_split_review: 2,
+  split: TERMINAL_PHASE,       // packet done — its children carry on separately
+  pre_validating: 3,
+  preprocessing: 4,
+  classifying: 5,
+  checklist: 6,                    // batch checklist (Step 3.2)
+  checklist_hold: 6,               // parked behind the batch barrier
+  awaiting_checklist_review: 6,    // parked at the checklist gate
+  fraud_checking: 6,      // runs after classification, alongside the checklist
+  extracting: 7,
+  validating: 8,
+  awaiting_review: 9,
+  completed: TERMINAL_PHASE,
+  rejected: -1,
+  error: -1,
+};
+
+/** How far through the pipeline a status is (higher = further along). */
+export const statusPhase = (status) => STATUS_PHASE[status] ?? 0;

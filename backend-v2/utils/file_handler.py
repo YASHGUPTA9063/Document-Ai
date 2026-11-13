@@ -4,11 +4,22 @@ import aiofiles
 from fastapi import UploadFile
 
 import hashlib
+import uuid
 
 async def save_file(file: UploadFile, storage_dir: str) -> tuple[str, str]:
-    """Saves an uploaded file to the storage directory and returns (absolute_path, sha256_hash)."""
+    """
+    Saves an uploaded file to the storage directory and returns (absolute_path, sha256_hash).
+
+    Each upload gets its own file. Storing under the bare original name let a
+    later upload with the same name overwrite a document still in the pipeline
+    (e.g. one parked at the checklist gate, which would then resume and extract
+    the newer file), and let the template-generation cleanup delete it outright.
+    The original name is kept as the suffix, and is what the UI shows from
+    Document.filename.
+    """
     os.makedirs(storage_dir, exist_ok=True)
-    file_path = os.path.join(storage_dir, file.filename)
+    safe_name = os.path.basename(file.filename or "upload") or "upload"
+    file_path = os.path.join(storage_dir, f"{uuid.uuid4().hex[:12]}_{safe_name}")
     
     async with aiofiles.open(file_path, 'wb') as out_file:
         content = await file.read()

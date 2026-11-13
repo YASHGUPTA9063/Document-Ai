@@ -209,17 +209,20 @@ def vllm_reextract_required_fields(
     try:
         client = get_mistral_client()
         logger.info(
-            f"[Document {document_id}] Calling Mistral VLM (mistral-large-latest) "
+            f"[Document {document_id}] Calling Mistral VLM ({settings.LLM_VISION_MODEL}) "
             f"for vLLM fallback on {len(fallback_fields)} fields"
         )
         response = client.chat.complete(
-            model="mistral-large-latest",
+            model=settings.LLM_VISION_MODEL,
             messages=[{"role": "user", "content": content}],
             response_format={"type": "json_object"},
             temperature=settings.LLM_TEMPERATURE,
             max_tokens=settings.LLM_MAX_TOKENS
         )
-        response_text = response.choices[0].message.content
+        # Reasoning models return content as [ThinkChunk, TextChunk], not a str —
+        # keep only the answer text before parsing.
+        from platform_core.agent_loop import _extract_text
+        response_text = _extract_text(response.choices[0].message.content)
 
         # Parse the response
         try:

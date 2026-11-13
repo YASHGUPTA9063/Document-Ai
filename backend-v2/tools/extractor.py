@@ -171,17 +171,16 @@ def _vlm_verify_fields(file_path: str, vlm_fields: list, ocr_raw_text: str) -> d
 
     try:
         client = get_mistral_client()
-        logger.info(f"Calling Mistral VLM (mistral-large-latest) for {len(vlm_fields)} visual fields")
+        logger.info(f"Calling Mistral VLM ({settings.LLM_VISION_MODEL}) for {len(vlm_fields)} visual fields")
         response = client.chat.complete(
-            model="mistral-large-latest",
+            model=settings.LLM_VISION_MODEL,
             messages=[{"role": "user", "content": content}],
             response_format={"type": "json_object"},
             temperature=settings.LLM_TEMPERATURE,
             max_tokens=settings.LLM_MAX_TOKENS
         )
-        response_text = response.choices[0].message.content
-        result_json = json.loads(response_text)
-        return result_json
+        # Reasoning models return content as [ThinkChunk, TextChunk], not a str.
+        return _parse_json_response(response.choices[0].message.content)
     except Exception as e:
         logger.error(f"VLM verification failed: {e}")
         return {}
@@ -277,7 +276,7 @@ def build_ocr_prompt_from_fields(fields_list: list) -> str:
 def _chat_extract_fields(raw_markdown: str, fields_list: list, doc_type: str) -> dict:
     """
     Step 2 of the two-step extraction pipeline.
-    Uses mistral-large-latest with json_schema structured output to extract
+    Uses LLM_TEXT_MODEL with json_schema structured output to extract
     fields from the raw OCR Markdown.
     Full control: temperature from LLM_TEMPERATURE (.env), retries, no 8-page limit.
     """
@@ -295,7 +294,7 @@ def _chat_extract_fields(raw_markdown: str, fields_list: list, doc_type: str) ->
     for attempt in range(3):
         try:
             resp = chat_client.chat.complete(
-                model="mistral-large-latest",
+                model=settings.LLM_TEXT_MODEL,
                 messages=[
                     {"role": "system", "content": system},
                     {"role": "user",   "content": user_msg}
@@ -348,7 +347,7 @@ def extract_text_from_document(file_path: str, doc_type: str, document_id: str =
         _save_ocr_blocks(document_id, blocks)
 
     # Step 2: Structured extraction at the configured LLM_TEMPERATURE
-    # Uses mistral-large-latest with json_schema response_format — full control over output
+    # Uses LLM_TEXT_MODEL with json_schema response_format — full control over output
     doc_annotation = {}
     if raw_text:
         try:
